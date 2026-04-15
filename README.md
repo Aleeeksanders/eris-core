@@ -15,7 +15,23 @@ Dentro del macro-proyecto AXS, la carga computacional está separada por diseño
 ## Stack Técnico Base
 - **Runtime:** `Bun` (para velocidad nativa en Backend y WebSockets).
 - **Lenguaje:** `TypeScript` puro.
-- **Pila Móvil:** (Pendiente en `eris-mobile`) App Nativo React Native que actúa como I/O Dashboard remoto interconectado directo a este Cerebro Local.
+- **Pila Móvil:** (En el repo `eris-mobile`) App Nativo React Native que actúa como I/O Dashboard remoto interconectado directo a este Cerebro Local.
+
+## Cómo Iniciar el Servicio (Eris Core)
+Para levantar el servidor WebSocket de Eris y la inferencia (Olla + Qwen) en tu máquina local:
+
+```bash
+bun install
+bun run gui
+```
+Esto abrirá el motor en `http://localhost:3000` y quedará escuchando peticiones de la Web, de tu Terminal y de la futura App Móvil.
+
+### Generación de Fine-Tuning
+Para poblar el cerebro de aprendizaje (Lander):
+```bash
+bun run dataset:seed       # Genera diálogos semilla
+bun run dataset:export     # Exporta a formato ChatML (Unsloth)
+```
 
 ---
 *"La IA personal de Alex. Diseñada para traer orden al caos, generando su propio caos en el proceso."*

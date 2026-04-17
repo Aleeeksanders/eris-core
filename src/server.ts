@@ -33,6 +33,16 @@ async function startServer() {
   const promptPath = join((import.meta as any).dir, "..", "data", "system-prompt.md");
   const systemPrompt = await loadSystemPrompt(promptPath);
   const toolRegistry = new ToolRegistry();
+
+  // Inyectar herramientas que requieren el proveedor LLM
+  const { LogManagementTool } = await import("./tools/LogManagementTool.js");
+  const { VaultAuditTool } = await import("./tools/VaultAuditTool.js");
+  const { VaultHealerTool } = await import("./tools/VaultHealerTool.js");
+  
+  toolRegistry.register(new LogManagementTool(provider));
+  toolRegistry.register(new VaultAuditTool());
+  toolRegistry.register(new VaultHealerTool());
+
   const queryEngine = new QueryEngine(provider, toolRegistry, systemPrompt);
   const compressor = new ContextCompressor(provider);
 

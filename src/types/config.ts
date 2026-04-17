@@ -56,8 +56,8 @@ export const DEFAULT_CONFIG: ErisConfig = {
   llm: {
     provider: "ollama",
     baseUrl: "http://localhost:11434",
-    model: "qwen2.5:3b",
-    temperature: 0.7,
+    model: "qwen2.5:7b",
+    temperature: 0.9,
     maxTokens: 4096,
     contextLength: 8192,
   },

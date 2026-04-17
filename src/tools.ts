@@ -10,6 +10,7 @@ import { SystemInfoTool } from "./tools/SystemInfoTool.js";
 import { FileReadTool } from "./tools/FileReadTool.js";
 import { FileWriteTool } from "./tools/FileWriteTool.js";
 import { OpenTool } from "./tools/OpenTool.js";
+import { KnowledgeTool } from "./tools/KnowledgeTool.js";
 
 /**
  * Registro centralizado de todas las herramientas de Eris.
@@ -30,6 +31,7 @@ export class ToolRegistry {
       new FileReadTool(),
       new FileWriteTool(),
       new OpenTool(),
+      new KnowledgeTool(),
     ];
 
     for (const tool of defaultTools) {

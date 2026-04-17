@@ -57,6 +57,13 @@ export class QueryEngine {
 
     llmMessages.push(
       ...this.convertHistory(conversationHistory),
+      { 
+        role: "system", 
+        content: `EJECUCIÓN AXS: 
+1. Si el pedido implica conceptos técnicos o históricos, usa 'knowledge_search'.
+2. Ejecuta herramientas para dar una solución definitiva (x500).
+3. Sé extremadamente eficiente y concisa.` 
+      },
       { role: "user", content: userMessage }
     );
 

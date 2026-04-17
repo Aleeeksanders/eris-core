@@ -56,6 +56,7 @@ export class OllamaProvider implements LLMProvider {
       options: {
         temperature: options?.temperature ?? 0.7,
         num_predict: options?.maxTokens ?? 2048,
+        num_ctx: 4096, // Optimizado para RTX 3050 y prompt extenso
       },
     };
 
@@ -64,7 +65,7 @@ export class OllamaProvider implements LLMProvider {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(120000),
+        signal: AbortSignal.timeout(300000),
       });
 
       if (!res.ok) {

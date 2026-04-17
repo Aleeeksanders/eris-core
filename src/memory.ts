@@ -49,7 +49,8 @@ export class Memory {
   async save(): Promise<void> {
     try {
       await mkdir(MEMORY_DIR, { recursive: true });
-      await writeFile(
+      const writeFileAtomic = (await import("write-file-atomic")).default;
+      await writeFileAtomic(
         CONVERSATIONS_FILE,
         JSON.stringify(this.store, null, 2),
         "utf-8"

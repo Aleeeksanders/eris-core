@@ -12,12 +12,21 @@ import type {
 } from "./LLMProvider.js";
 import type { ToolDefinition } from "../../types/message.js";
 
+class ThinkingLoopError extends Error {
+  constructor() { super("thinking_loop_detected"); }
+}
+
+// Patrones que indican bucle de razonamiento (aparecen repetidos)
+const LOOP_PATTERNS = [/\*\*Decisión\*\*/g, /\*\*Refinamiento\*\*/g, /\*\*Plan de respuesta\*\*/g, /\*\*Análisis\*\*/g];
+const LOOP_THRESHOLD = 4; // si algún patrón aparece ≥4 veces, es bucle
+const LOOP_MAX_CHARS  = 4000; // cortar si el thinking supera 4000 chars sin cerrar
+
 export class OllamaProvider implements LLMProvider {
   readonly name = "ollama";
   private baseUrl: string;
   private model: string;
 
-  constructor(baseUrl = "http://localhost:11434", model = "qwen2.5:3b") {
+  constructor(baseUrl = "http://localhost:11434", model = "qwen3.5:4b") {
     this.baseUrl = baseUrl;
     this.model = model;
   }
@@ -39,25 +48,32 @@ export class OllamaProvider implements LLMProvider {
     options?: {
       temperature?: number;
       maxTokens?: number;
+      contextLength?: number;
+      modelOverride?: string;
+      enableThinking?: boolean;
       onToken?: StreamCallback;
       onThinking?: StreamCallback;
     }
   ): Promise<LLMResponse> {
-    const processedMessages = this.injectToolInstructions(messages, tools);
+    const processedMessages = this.injectToolInstructions(messages, tools, options?.enableThinking);
     const isStreaming = !!options?.onToken;
+    const activeModel = options?.modelOverride || this.model;
 
     const body = {
-      model: this.model,
+      model: activeModel,
       messages: processedMessages.map((m) => ({
         role: m.role === "tool" ? "user" : m.role,
         content: m.content,
       })),
       stream: isStreaming,
+      // Parámetro nativo Ollama/Qwen3: false = sin <think>, directo al grano
+      think: options?.enableThinking ?? true,
       options: {
         temperature: options?.temperature ?? 0.7,
         num_predict: options?.maxTokens ?? 2048,
-        num_ctx: 4096, // Optimizado para RTX 3050 y prompt extenso
+        num_ctx: options?.contextLength ?? 4096,
       },
+      keep_alive: "5m",
     };
 
     try {
@@ -79,6 +95,19 @@ export class OllamaProvider implements LLMProvider {
         return await this.handleNonStream(res);
       }
     } catch (err) {
+      // Bucle detectado en thinking → reintentar sin thinking para sacar respuesta directa
+      if (err instanceof ThinkingLoopError) {
+        if (options?.onThinking) {
+          options.onThinking("\n\n⚠️ [Razonamiento en bucle — respondiendo directamente...]");
+        }
+        return this.generate(messages, tools, {
+          ...options,
+          enableThinking: false,
+          modelOverride: options?.modelOverride,
+          // Quitar onThinking para que el retry no emita más thinking
+          onThinking: undefined,
+        });
+      }
       if (err instanceof DOMException && err.name === "TimeoutError") {
         throw new Error("Timeout: el modelo tardó demasiado (>2min)");
       }
@@ -103,6 +132,7 @@ export class OllamaProvider implements LLMProvider {
 
     const decoder = new TextDecoder();
     let fullContent = "";
+    let nativeThinking = "";
     let promptTokens = 0;
     let completionTokens = 0;
 
@@ -121,50 +151,80 @@ export class OllamaProvider implements LLMProvider {
         try {
           const data = JSON.parse(line);
 
+          if (data.message?.thinking) {
+            nativeThinking += data.message.thinking;
+            if (onThinking) onThinking(data.message.thinking);
+          }
+
           if (data.message?.content) {
-            fullContent += data.message.content;
+            const chunkContent = data.message.content;
+            fullContent += chunkContent;
 
-            // Extraer thinking y respuesta del contenido acumulado
-            const thinkMatch = fullContent.match(/<think>([\s\S]*?)(<\/think>|$)/);
+            // ── Detección de bucle de razonamiento ──────────────────────
+            // Si algún patrón de thinking aparece ≥ LOOP_THRESHOLD veces,
+            // o el thinking acumulado supera LOOP_MAX_CHARS sin cerrar,
+            // cancelamos el stream y reintentamos sin thinking.
+            const thinkOpenIdx = fullContent.indexOf("<think>");
+            const thinkCloseIdx = fullContent.indexOf("</think>");
+            const insideThinking = thinkOpenIdx !== -1 && thinkCloseIdx === -1;
+            const nativeThinkingOnly = nativeThinking.length > 0;
 
-            if (thinkMatch) {
-              const thinkText = thinkMatch[1];
-              const thinkClosed = thinkMatch[2] === "</think>";
-
-              // Emitir thinking nuevo — pero retener posible </think> parcial
-              if (onThinking && !thinkClosed) {
-                // Retener chars que podrían ser inicio de </think>
-                const safeThink = this.getSafeThinkToEmit(thinkText);
-                if (safeThink.length > lastThinkEmitted) {
-                  const newThink = safeThink.slice(lastThinkEmitted);
-                  onThinking(newThink);
-                  lastThinkEmitted = safeThink.length;
-                }
-              } else if (onThinking && thinkClosed && thinkText.length > lastThinkEmitted) {
-                // Think cerrado — emitir lo que falta sin retener
-                const newThink = thinkText.slice(lastThinkEmitted);
-                onThinking(newThink);
-                lastThinkEmitted = thinkText.length;
+            if (insideThinking || nativeThinkingOnly) {
+              const thinkContent = nativeThinkingOnly ? nativeThinking : fullContent.slice(thinkOpenIdx + 7);
+              const isLoop = LOOP_PATTERNS.some(p => (thinkContent.match(p) ?? []).length >= LOOP_THRESHOLD);
+              const isTooLong = thinkContent.length > LOOP_MAX_CHARS;
+              if (isLoop || isTooLong) {
+                await reader.cancel().catch(() => {});
+                throw new ThinkingLoopError();
               }
+            }
 
-              // Si el think cerró, emitir respuesta
-              if (thinkClosed) {
-                const thinkEnd = fullContent.indexOf("</think>") + "</think>".length;
-                const responseText = fullContent.slice(thinkEnd);
-                if (responseText.length > lastResponseEmitted) {
-                  const newResponse = responseText.slice(lastResponseEmitted);
-                  onToken(newResponse);
-                  lastResponseEmitted = responseText.length;
-                }
-              }
+            // Si Ollama está enviando thinking nativo, el content ya viene limpio
+            if (nativeThinking.length > 0) {
+              if (onToken) onToken(chunkContent);
             } else {
-              // No hay think — todo es respuesta directa
-              if (fullContent.length > lastResponseEmitted) {
-                // Pero no emitir si podría ser inicio de <think>
-                const safe = this.getSafeToEmit(fullContent, lastResponseEmitted);
-                if (safe.length > 0) {
-                  onToken(safe);
-                  lastResponseEmitted += safe.length;
+              // Fallback para modelos/versiones que mezclan <think> en el content
+              const thinkMatch = fullContent.match(/<think>([\s\S]*?)(<\/think>|$)/);
+
+              if (thinkMatch) {
+                const thinkText = thinkMatch[1];
+                const thinkClosed = thinkMatch[2] === "</think>";
+
+                // Emitir thinking nuevo — pero retener posible </think> parcial
+                if (onThinking && !thinkClosed) {
+                  // Retener chars que podrían ser inicio de </think>
+                  const safeThink = this.getSafeThinkToEmit(thinkText);
+                  if (safeThink.length > lastThinkEmitted) {
+                    const newThink = safeThink.slice(lastThinkEmitted);
+                    onThinking(newThink);
+                    lastThinkEmitted = safeThink.length;
+                  }
+                } else if (onThinking && thinkClosed && thinkText.length > lastThinkEmitted) {
+                  // Think cerrado — emitir lo que falta sin retener
+                  const newThink = thinkText.slice(lastThinkEmitted);
+                  onThinking(newThink);
+                  lastThinkEmitted = thinkText.length;
+                }
+
+                // Si el think cerró, emitir respuesta
+                if (thinkClosed) {
+                  const thinkEnd = fullContent.indexOf("</think>") + "</think>".length;
+                  const responseText = fullContent.slice(thinkEnd);
+                  if (responseText.length > lastResponseEmitted) {
+                    const newResponse = responseText.slice(lastResponseEmitted);
+                    onToken(newResponse);
+                    lastResponseEmitted = responseText.length;
+                  }
+                }
+              } else {
+                // No hay think — todo es respuesta directa
+                if (fullContent.length > lastResponseEmitted) {
+                  // Pero no emitir si podría ser inicio de <think>
+                  const safe = this.getSafeToEmit(fullContent, lastResponseEmitted);
+                  if (safe.length > 0) {
+                    onToken(safe);
+                    lastResponseEmitted += safe.length;
+                  }
                 }
               }
             }
@@ -185,16 +245,22 @@ export class OllamaProvider implements LLMProvider {
       .replace(/<think>[\s\S]*?<\/think>/g, "")
       .trim();
 
-    const toolCalls = this.parseToolCalls(cleanContent);
+    const rawThinking = nativeThinking || fullContent.match(/<think>([\s\S]*?)<\/think>/)?.[1]?.trim();
+    
+    // Si el contenido limpio está vacío pero hay "thinking", usar el thinking como respuesta
+    // Esto ocurre con modelos que no cierran bien el tag o ponen todo dentro.
+    const finalDisplayContent = cleanContent || rawThinking || "";
+
+    const toolCalls = this.parseToolCalls(finalDisplayContent);
     const finalContent =
       toolCalls.length > 0
-        ? this.removeToolCallsFromContent(cleanContent)
-        : cleanContent;
+        ? this.removeToolCallsFromContent(finalDisplayContent)
+        : finalDisplayContent;
 
     return {
       content: finalContent,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      thinking: fullContent.match(/<think>([\s\S]*?)<\/think>/)?.[1]?.trim(),
+      thinking: rawThinking,
       tokensUsed: {
         prompt: promptTokens,
         completion: completionTokens,
@@ -261,9 +327,12 @@ export class OllamaProvider implements LLMProvider {
    */
   private injectToolInstructions(
     messages: LLMMessage[],
-    tools?: ToolDefinition[]
+    tools?: ToolDefinition[],
+    enableThinking?: boolean
   ): LLMMessage[] {
-    if (!tools || tools.length === 0) return messages;
+    let systemAppend = "";
+
+    if (tools && tools.length > 0) {
 
     const toolDescriptions = tools
       .map((t) => {
@@ -279,7 +348,7 @@ export class OllamaProvider implements LLMProvider {
       })
       .join("\n\n");
 
-    const toolInstructions = `
+    systemAppend += `
 
 ## Herramientas disponibles
 Para usar una herramienta, escribe un bloque JSON así:
@@ -298,15 +367,20 @@ REGLAS DE USO:
 4. Los argumentos deben ser JSON válido
 5. Si necesitas información del sistema, USA las herramientas, no inventes datos`;
 
-    const result = [...messages];
-    if (result.length > 0 && result[0].role === "system") {
-      result[0] = {
-        ...result[0],
-        content: result[0].content + toolInstructions,
-      };
     }
 
-    return result;
+    if (systemAppend) {
+      const result = [...messages];
+      if (result.length > 0 && result[0].role === "system") {
+        result[0] = {
+          ...result[0],
+          content: result[0].content + systemAppend,
+        };
+      }
+      return result;
+    }
+
+    return messages;
   }
 
   /**

@@ -90,7 +90,19 @@ async function detectDocumentsPath(): Promise<string> {
  * Genera el contexto del sistema para incluir en el system prompt.
  * Le da a Eris conocimiento sobre su entorno.
  */
-export async function getSystemContext(): Promise<string> {
+export async function getSystemContext(role?: string): Promise<string> {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("es-ES", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  const timeStr = now.toLocaleTimeString("es-ES");
+
+  if (role !== 'ikaros') {
+    return `## Contexto Temporal\n- Fecha: ${dateStr}, ${timeStr}`;
+  }
   const platform = os.platform();
   const arch = os.arch();
   const hostname = os.hostname();
@@ -100,15 +112,6 @@ export async function getSystemContext(): Promise<string> {
   const freeMem = (os.freemem() / 1024 / 1024 / 1024).toFixed(1);
   const cpuModel = os.cpus()[0]?.model || "Desconocido";
   const cpuCores = os.cpus().length;
-
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("es-ES", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-  const timeStr = now.toLocaleTimeString("es-ES");
 
   const homeDir = os.homedir();
   const desktopPath = await detectDesktopPath();
@@ -136,9 +139,13 @@ REGLAS IMPORTANTES:
 
 /**
  * Carga el system prompt desde archivo y le agrega contexto del sistema.
+ * @param promptPath Ruta al archivo de system prompt
+ * @param userProfile Contexto personalizado del usuario (nombre, objetivos, rol, etc.)
  */
 export async function loadSystemPrompt(
-  promptPath?: string
+  promptPath?: string,
+  userProfile?: string,
+  role?: string
 ): Promise<string> {
   const defaultPath = join(
     (import.meta as any).dir || process.cwd(),
@@ -150,12 +157,37 @@ export async function loadSystemPrompt(
   const path = promptPath || defaultPath;
 
   try {
-    const prompt = await readFile(path, "utf-8");
+    let prompt = await readFile(path, "utf-8");
+    const context = await getSystemContext(role);
+
+    // Cargar archivos de memoria dinámica y configuración global SÓLO para Hestia
+    let erisConfig = "";
+    let memoryLayer1 = "";
+
+    if (role === 'ikaros') {
+      try {
+        erisConfig = await readFile("c:/Proyectos/eris/ERIS.md", "utf-8");
+      } catch { }
+
+      try {
+        memoryLayer1 = await readFile("c:/Proyectos/AXS/MEMORY.md", "utf-8");
+      } catch { }
+    }
+
+    const profileBlock = userProfile
+      ? `### Perfil del Usuario\n${userProfile}`
+      : `### Perfil del Usuario\n*No configurado.*`;
+
+    // Ensamblar el prompt modular
+    const dynamicBoundary = `\n\n--- DYNAMIC SESSION CONTEXT ---\n\n`;
+    
+    // Si la etiqueta antigua sigue ahí, la limpiamos
+    prompt = prompt.replace('{{USER_PROFILE_CONTEXT}}', '');
+
+    return `${prompt}\n\n${erisConfig}\n\n${dynamicBoundary}${memoryLayer1}\n\n${profileBlock}\n\n${context}`;
+  } catch (e) {
+    console.error("Error loading prompt:", e);
     const context = await getSystemContext();
-    return `${prompt}\n\n${context}`;
-  } catch {
-    // Si no se puede leer el archivo, usar prompt básico
-    const context = await getSystemContext();
-    return `Eres Eris, una asistente de IA personal. Responde en español.\n\n${context}`;
+    return `Eres Eris, un sistema de inteligencia operativa personal. Responde en el idioma del usuario.\n\n${context}`;
   }
 }

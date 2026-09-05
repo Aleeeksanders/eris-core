@@ -1,6 +1,7 @@
 // ============================================================
 // Eris — QueryEngine
 // Motor de consultas y loop agéntico con streaming
+// Soporta modos de pensamiento (Flash / Deep / Auto)
 // ============================================================
 
 import type {
@@ -9,10 +10,18 @@ import type {
   StreamCallback,
 } from "./services/llm/LLMProvider.js";
 import type { Message, ToolCall, ToolResult } from "./types/message.js";
+import type { ThinkingMode, ThinkingModeConfig } from "./types/config.js";
 import { ToolRegistry } from "./tools.js";
 import { createMessage } from "./types/message.js";
+import { resolveMode } from "./types/config.js";
 
 const MAX_TOOL_ITERATIONS = 10;
+
+export interface QueryResult {
+  message: Message;
+  modeUsed: "flash" | "deep";
+  modelUsed: string;
+}
 
 export class QueryEngine {
   private provider: LLMProvider;
@@ -30,7 +39,7 @@ export class QueryEngine {
   }
 
   /**
-   * Ejecuta una consulta con loop agéntico y streaming.
+   * Ejecuta una consulta con loop agéntico, streaming y modo de pensamiento.
    */
   async query(
     userMessage: string,
@@ -40,9 +49,17 @@ export class QueryEngine {
       onToolCall?: (toolCall: ToolCall) => void;
       onToolResult?: (result: ToolResult) => void;
       onToken?: StreamCallback;
+      onModeResolved?: (mode: "flash" | "deep", model: string) => void;
     },
-    contextSummary?: string | null
-  ): Promise<Message> {
+    contextSummary?: string | null,
+    mode: ThinkingMode = "auto",
+    toolContext?: any
+  ): Promise<QueryResult> {
+    // ─── Resolver modo ──────────────────────────────────────
+    const { resolved: modeConfig, actualMode } = resolveMode(mode, userMessage);
+    callbacks?.onModeResolved?.(actualMode, modeConfig.model);
+
+    // ─── Construir mensajes ─────────────────────────────────
     const llmMessages: LLMMessage[] = [
       { role: "system", content: this.systemPrompt },
     ];
@@ -55,35 +72,52 @@ export class QueryEngine {
       });
     }
 
+    // Instrucciones según modo
+    const modeInstruction = actualMode === "flash"
+      ? `MODO FLASH ACTIVO.
+Reglas absolutas:
+- Responde en 1-3 oraciones máximas salvo que la pregunta requiera más.
+- Primera oración = la respuesta. Sin preámbulos.
+- Sin listas, sin headers, sin estructura. Solo texto directo.
+- Sin razonamiento visible. No pienses en voz alta.
+- Si no tienes datos suficientes, pide solo lo que necesitas en una sola pregunta.`
+      : `MODO DEEP ACTIVO.
+Reglas:
+- Analiza el problema desde primeros principios antes de responder.
+- Usa tus herramientas disponibles para obtener contexto real antes de asumir.
+- Sé exhaustivo pero no verboso — cada oración debe aportar información nueva.
+- Estructura la respuesta con headers si tiene más de 3 secciones distintas.
+- Señala explícitamente incertidumbres y riesgos cuando los hay.
+- Concluye siempre con una recomendación accionable concreta.`;
+
     llmMessages.push(
       ...this.convertHistory(conversationHistory),
-      { 
-        role: "system", 
-        content: `EJECUCIÓN AXS: 
-1. Si el pedido implica conceptos técnicos o históricos, usa 'knowledge_search'.
-2. Ejecuta herramientas para dar una solución definitiva (x500).
-3. Sé extremadamente eficiente y concisa.` 
-      },
+      { role: "system", content: modeInstruction },
       { role: "user", content: userMessage }
     );
 
-    const toolDefinitions = this.toolRegistry.getDefinitions();
+    // ─── Definir herramientas según modo ────────────────────
+    // Flash: sin herramientas para máxima velocidad (a menos que el query lo requiera)
+    const toolDefinitions = actualMode === "flash"
+      ? [] 
+      : this.toolRegistry.getDefinitions();
+
     let iterations = 0;
 
     while (iterations < MAX_TOOL_ITERATIONS) {
       iterations++;
 
-      // Solo streaming en la última iteración (sin tools pendientes)
-      // En iteraciones intermedias (con tools), no hacemos streaming
-      // porque necesitamos parsear tool calls completas
       const isFirstOrToolIteration = iterations > 1;
 
       const response = await this.provider.generate(
         llmMessages,
-        toolDefinitions,
+        toolDefinitions.length > 0 ? toolDefinitions : undefined,
         {
-          temperature: 0.7,
-          maxTokens: 2048,
+          temperature: modeConfig.temperature,
+          maxTokens: modeConfig.maxTokens,
+          contextLength: modeConfig.contextLength,
+          modelOverride: modeConfig.model,
+          enableThinking: modeConfig.enableThinking,
           onToken: isFirstOrToolIteration ? undefined : callbacks?.onToken,
           onThinking: isFirstOrToolIteration ? undefined : callbacks?.onThinking,
         }
@@ -91,13 +125,16 @@ export class QueryEngine {
 
       // Si no hay tool calls, respuesta final
       if (!response.toolCalls || response.toolCalls.length === 0) {
-        return createMessage("assistant", response.content, {
-          thinking: response.thinking,
-        });
+        return {
+          message: createMessage("assistant", response.content, {
+            thinking: response.thinking,
+          }),
+          modeUsed: actualMode,
+          modelUsed: modeConfig.model,
+        };
       }
 
       // Hay tool calls — ejecutarlas (sin streaming)
-      // Si hubo streaming parcial, notificar que paramos para tools
       const toolCalls: ToolCall[] = response.toolCalls.map((tc) => ({
         id: tc.id,
         name: tc.name,
@@ -121,7 +158,7 @@ export class QueryEngine {
             toolCallId: tc.id,
             name: tc.name,
             output: "",
-            error: `Herramienta "${tc.name}" no encontrada. Disponibles: ${this.toolRegistry.listNames().join(", ")}`,
+            error: `Herramienta "${tc.name}" no encontrada.`,
           };
           toolResults.push(result);
           callbacks?.onToolResult?.(result);
@@ -129,7 +166,7 @@ export class QueryEngine {
         }
 
         const startTime = Date.now();
-        const execResult = await tool.run(tc.input);
+        const execResult = await tool.run(tc.input, toolContext);
         const duration = Date.now() - startTime;
 
         const result: ToolResult = {
@@ -156,14 +193,16 @@ export class QueryEngine {
           toolCallId: result.toolCallId,
         });
       }
-
-      // La siguiente iteración usará streaming para la respuesta final
     }
 
-    return createMessage(
-      "assistant",
-      "He alcanzado el límite de iteraciones de herramientas."
-    );
+    return {
+      message: createMessage(
+        "assistant",
+        "He alcanzado el límite de iteraciones de herramientas."
+      ),
+      modeUsed: actualMode,
+      modelUsed: modeConfig.model,
+    };
   }
 
   private convertHistory(messages: Message[]): LLMMessage[] {

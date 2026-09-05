@@ -112,10 +112,10 @@ export async function startReadlineUI(
         // Limpiar línea de estado y mostrar respuesta
         process.stdout.write("                                              \r");
         console.log(
-          `${chalk.magenta.bold("Eris ❯")} ${response.content}\n`
+          `${chalk.magenta.bold("Eris ❯")} ${response.message.content}\n`
         );
 
-        conversationHistory.push(response);
+        conversationHistory.push(response.message);
       } catch (err) {
         process.stdout.write("                                              \r");
         console.log(

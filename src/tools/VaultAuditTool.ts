@@ -7,6 +7,7 @@ import { z } from "zod";
 import { Tool, type ToolExecutionResult } from "../Tool.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { VaultService } from "../services/vault/VaultService.js";
 
 const VaultAuditInputSchema = z.object({
   action: z.enum(["full_audit", "link_check"]).default("full_audit").describe("Tipo de auditoría a realizar"),
@@ -21,15 +22,21 @@ export class VaultAuditTool extends Tool<VaultAuditInput> {
     "Detecta enlaces rotos, archivos huérfanos y falta de metadatos corporativos.";
   readonly inputSchema = VaultAuditInputSchema;
 
-  private readonly VAULT_ROOT = "c:\\Proyectos\\AXS";
+  private vaultService: VaultService;
+
+  constructor() {
+    super();
+    this.vaultService = new VaultService();
+  }
 
   async execute(input: VaultAuditInput): Promise<ToolExecutionResult> {
     const { action } = input;
 
     try {
-      const allFiles = await this.getAllFiles(this.VAULT_ROOT);
+      const vaultRoot = this.vaultService.getVaultPath();
+      const allFiles = await this.vaultService.getAllFiles();
       const mdFiles = allFiles.filter(f => f.endsWith(".md"));
-      const fileMap = new Set(allFiles.map(f => path.relative(this.VAULT_ROOT, f).replace(/\\/g, "/")));
+      const fileMap = new Set(allFiles.map(f => path.relative(vaultRoot, f).replace(/\\/g, "/")));
       const baseMap = new Set(allFiles.map(f => path.basename(f, ".md")));
 
       let report = `# 🔬 Reporte de Salud AXS — ${new Date().toLocaleDateString()}\n\n`;
@@ -38,8 +45,8 @@ export class VaultAuditTool extends Tool<VaultAuditInput> {
       let missingMetadata: string[] = [];
 
       for (const filePath of mdFiles) {
-        const content = await fs.readFile(filePath, "utf-8");
-        const relPath = path.relative(this.VAULT_ROOT, filePath).replace(/\\/g, "/");
+        const content = await this.vaultService.readVaultFile(filePath);
+        const relPath = path.relative(vaultRoot, filePath).replace(/\\/g, "/");
 
         // 1. Check Links
         const links = content.match(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g) || [];
@@ -61,7 +68,7 @@ export class VaultAuditTool extends Tool<VaultAuditInput> {
       report += `## 🏷️ Metadatos Faltantes (${missingMetadata.length})\n${missingMetadata.slice(0, 10).join("\n") || "_Todo estandarizado._"}\n\n`;
       
       const status = brokenLinks.length === 0 && missingMetadata.length === 0 ? "EXCELENTE" : "REQUIERE ATENCIÓN";
-      report += `\n**Estado General: ${status}**\n\n_Eris Potts — Jefa de Gabinete_`;
+      report += `\n**Estado General: ${status}**\n\n_Eris — Jefa de Gabinete_`;
 
       return {
         output: report,
@@ -73,21 +80,5 @@ export class VaultAuditTool extends Tool<VaultAuditInput> {
         error: `Error en auditoría: ${err instanceof Error ? err.message : String(err)}`
       };
     }
-  }
-
-  private async getAllFiles(dir: string): Promise<string[]> {
-    let results: string[] = [];
-    const list = await fs.readdir(dir);
-    for (const file of list) {
-        if (file === ".obsidian" || file === ".git") continue;
-        const fullPath = path.join(dir, file);
-        const stat = await fs.stat(fullPath);
-        if (stat && stat.isDirectory()) {
-            results = results.concat(await this.getAllFiles(fullPath));
-        } else {
-            results.push(fullPath);
-        }
-    }
-    return results;
   }
 }

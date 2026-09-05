@@ -1,6 +1,8 @@
 // ============================================================
 // Eris — Exportador de Dataset
 // Combina seed + conversaciones reales → JSONL para Unsloth
+// Uso: bun run scripts/export-dataset.ts [--all]
+//   --all: exporta todas las conversaciones (sin filtro de aprobación)
 // ============================================================
 
 import { readFile, writeFile, mkdir } from "fs/promises";
@@ -10,6 +12,8 @@ import * as os from "os";
 const SEED_FILE = join(import.meta.dir, "..", "data", "training", "seed-dataset.jsonl");
 const REAL_FILE = join(os.homedir(), ".eris", "training", "conversations.jsonl");
 const OUTPUT_FILE = join(import.meta.dir, "..", "data", "training", "eris-training.jsonl");
+
+const EXPORT_ALL = process.argv.includes("--all");
 
 interface TrainingEntry {
   id: string;
@@ -22,6 +26,7 @@ async function exportDataset() {
 
   let seedEntries: TrainingEntry[] = [];
   let realEntries: TrainingEntry[] = [];
+  let totalReal = 0;
 
   // Cargar dataset semilla
   try {
@@ -43,19 +48,30 @@ async function exportDataset() {
       .filter((l) => l.trim())
       .map((l) => JSON.parse(l));
 
-    // Solo las aprobadas manualmente (approved: true)
-    realEntries = allReal.filter((e: TrainingEntry) => e.approved === true);
-    console.log(`  💬 Real: ${realEntries.length} aprobadas de ${allReal.length} totales`);
+    totalReal = allReal.length;
+
+    if (EXPORT_ALL) {
+      // Exportar todas sin filtro de aprobación
+      realEntries = allReal.filter((e: TrainingEntry) =>
+        e.messages && e.messages.length >= 2
+      );
+      console.log(`  💬 Real: ${realEntries.length} conversaciones (modo --all)`);
+    } else {
+      // Solo las aprobadas manualmente
+      realEntries = allReal.filter((e: TrainingEntry) => e.approved === true);
+      console.log(`  💬 Real: ${realEntries.length} aprobadas de ${totalReal} totales`);
+    }
   } catch {
     console.log("  ℹ️ No hay conversaciones reales capturadas aún");
   }
 
-  // Combinar
-  const combined = [...seedEntries, ...realEntries];
+  // Combinar y filtrar conversaciones con al menos 2 mensajes
+  const combined = [...seedEntries, ...realEntries].filter(
+    (e) => e.messages && e.messages.length >= 2
+  );
 
   // Convertir a formato ChatML plano para Unsloth
   const chatmlLines = combined.map((entry) => {
-    // Formato esperado por Unsloth: {"messages": [{"role": "...", "content": "..."}]}
     return JSON.stringify({
       messages: entry.messages.map((m) => ({
         role: m.role,
@@ -67,30 +83,30 @@ async function exportDataset() {
   await writeFile(OUTPUT_FILE, chatmlLines.join("\n") + "\n", "utf-8");
 
   // Estadísticas
-  const totalTokensEstimate = combined.reduce(
-    (sum, e) => sum + e.messages.reduce((s, m) => s + m.content.length / 4, 0),
+  const totalMessages = combined.reduce((sum, e) => sum + e.messages.length, 0);
+  const totalChars = combined.reduce(
+    (sum, e) => sum + e.messages.reduce((s, m) => s + m.content.length, 0),
     0
   );
 
   console.log(`
-  ✅ Dataset exportado exitosamente
+  ✅ Dataset exportado
   📁 ${OUTPUT_FILE}
   📊 Estadísticas:
-     - Total conversaciones: ${combined.length}
-     - Desde seed: ${seedEntries.length}
-     - Desde real (aprobadas): ${realEntries.length}
-     - Tokens estimados: ~${Math.round(totalTokensEstimate)}
-     - Tamaño: ${Math.round(chatmlLines.join("\n").length / 1024)}KB
+     - Conversaciones: ${combined.length} (seed: ${seedEntries.length}, real: ${realEntries.length})
+     - Mensajes totales: ${totalMessages}
+     - Tokens estimados: ~${Math.round(totalChars / 4).toLocaleString()}
+     - Tamaño: ${Math.round(chatmlLines.join("\\n").length / 1024)} KB
 
-  📋 Para aprobar conversaciones reales:
-     Edita: ${REAL_FILE}
-     Cambia "approved": false → "approved": true
+  💡 Consejo: con ${combined.length} conversaciones ya puedes hacer un dry-run en Colab.
+     Meta recomendada para fine-tune real: 100+ conversaciones.
 
-  🚀 Para entrenar con Unsloth:
-     1. Sube eris-training.jsonl a Google Drive o Colab
-     2. Usa el notebook de Unsloth para Qwen 2.5
-     3. Configura: model = "unsloth/Qwen2.5-3B-Instruct"
-     4. Dataset format: "chatml"
+  🚀 Próximos pasos:
+     1. Sube eris-training.jsonl a Google Colab
+     2. Usa Unsloth con: model = "unsloth/Qwen3-8B-Instruct"
+     3. Descarga el .gguf resultante (~4.5 GB)
+     4. Colócalo en data/ y actualiza Modelfile
+     5. ollama create eris-sovereign -f data/Modelfile
   `);
 }
 

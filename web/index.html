@@ -3,104 +3,124 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Eris — La Diosa del Caos</title>
-  <meta name="description" content="Eris - Asistente de IA personal de Alex">
+  <title>Eris — Sovereign Feed</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div id="app">
+  <!-- Ambient Background -->
+  <div class="ambient-background">
+    <div class="ambient-blob blob-1"></div>
+    <div class="ambient-blob blob-2"></div>
+  </div>
+
+  <!-- Modal de Login — Solo visible en localhost (Hestia) -->
+  <div id="login-modal" class="login-modal">
+    <div class="login-box">
+      <h1 class="w-title" style="margin-bottom: 5px; font-size: 2.5rem;">HESTIA</h1>
+      <p class="w-subtitle" style="margin-bottom: 30px; font-size: 11px;">🛡️ Acceso Soberano — Solo Localhost</p>
+
+      <div class="login-form">
+        <!-- profileId se gestiona automáticamente por JS (siempre 'hestia') -->
+        <input type="text" id="login-profile" placeholder="ID de Perfil" class="login-input" style="display:none;" />
+        <input type="password" id="login-pin" placeholder="PIN Soberano" class="login-input" autofocus />
+        <button id="btn-login" class="btn-primary" style="width: 100%; margin-top: 10px; justify-content: center;">DESBLOQUEAR BÓVEDA SOBERANA</button>
+        <div id="login-error" class="login-error hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="app" class="hidden">
+    <!-- Botón hamburguesa (solo móvil) -->
+    <button id="btn-menu" onclick="window.eris.toggleSidebar()" aria-label="Menú">☰</button>
+    <div id="sidebar-overlay" onclick="window.eris.closeSidebar()"></div>
+
     <!-- Sidebar -->
     <aside id="sidebar">
-      <div class="sidebar-header">
-        <div class="logo">
-          <span class="logo-icon">⚡</span>
-          <span class="logo-text">ERIS</span>
-        </div>
-        <button id="btn-new-chat" class="btn-new-chat" title="Nuevo chat">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-        </button>
+      <div class="logo-area">
+        <span class="logo-icon">⚡</span>
+        <span class="logo-text">ERIS</span>
       </div>
 
-      <!-- Conversations List -->
-      <div class="sidebar-conversations">
+      <div class="theme-switcher" onclick="window.eris.toggleTheme()">
+        <span id="theme-cyber" class="opt active">CYBER</span>
+        <span id="theme-lux" class="opt">LUX</span>
+      </div>
+
+      <div class="nav-section">
+        <h3 class="nav-title">HISTORIAL</h3>
         <div id="conversations-list" class="conversations-list"></div>
       </div>
 
-      <!-- Status -->
-      <div class="sidebar-status" id="status-panel">
-        <div class="status-item">
-          <span class="status-dot" id="ollama-dot"></span>
-          <span class="status-label">Ollama</span>
-          <span class="status-value" id="ollama-status">Conectando...</span>
-        </div>
-        <div class="status-item">
-          <span class="status-dot online"></span>
-          <span class="status-label">Modelo</span>
-          <span class="status-value" id="model-name">—</span>
-        </div>
+      <div class="action-section">
+        <button id="btn-status-axs" class="btn-primary">📊 ESTATUS AXS</button>
+        <button id="btn-new-chat" class="btn-secondary">+ NUEVA SESIÓN</button>
       </div>
 
-      <div class="sidebar-tools">
-        <h3 class="sidebar-title">Herramientas</h3>
+      <div class="tools-section">
+        <h3 class="nav-title">SISTEMA</h3>
         <div id="tools-list" class="tools-list"></div>
+      </div>
+
+      <div class="footer-status" style="display:flex; align-items:center;">
+        <span class="dot" id="ollama-dot"></span>
+        <span id="ollama-status">Conectado</span>
+        <button id="btn-logout" class="btn-del" title="Cerrar Sesión" style="margin-left:auto; padding: 4px 8px;">⏻</button>
       </div>
     </aside>
 
-    <!-- Main Chat Area -->
-    <main id="chat-area">
-      <!-- Welcome Screen -->
+    <!-- Chat -->
+    <main id="main-content">
       <div id="welcome-screen" class="welcome">
-        <div class="welcome-logo">
-          <div class="welcome-icon">⚡</div>
-          <h1 class="welcome-title">ERIS</h1>
-          <p class="welcome-subtitle">La Diosa del Caos</p>
-        </div>
-        <div class="welcome-chips">
-          <button class="chip" data-msg="¿Qué hora es?">🕐 ¿Qué hora es?</button>
-          <button class="chip" data-msg="¿Cuánta RAM tengo disponible?">💾 Info de mi RAM</button>
-          <button class="chip" data-msg="Busca en internet qué es TypeScript">🌐 Buscar en la web</button>
-          <button class="chip" data-msg="Muestra la info de mi sistema">⚙️ Info del sistema</button>
+        <div class="welcome-inner">
+          <h1 class="w-title">ERIS</h1>
+          <p class="w-subtitle">Sovereign Intelligence Feed</p>
+          <div class="chips">
+            <button class="chip" data-msg="Eris, genera un Reporte de Estatus AXS de 360 grados.">📊 Reporte AXS</button>
+            <button class="chip" data-msg="Eris, dime cómo están mis recursos (CPU/RAM/VRAM).">⚙️ Recursos</button>
+          </div>
         </div>
       </div>
 
-      <!-- Messages Container -->
-      <div id="messages" class="messages"></div>
-
-      <!-- Thinking Indicator -->
-      <div id="thinking" class="thinking hidden">
-        <div class="thinking-dots">
-          <span></span><span></span><span></span>
-        </div>
-        <span id="thinking-text">Pensando...</span>
+      <div id="chat-header" class="chat-header hidden" style="display:flex; justify-content:space-between; align-items:center; padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--bg-app); position: sticky; top: 0; z-index: 10;">
+        <span id="chat-title" style="font-weight: 500; font-size: 14px; color: var(--text-muted);">Sesión Actual</span>
+        <button class="btn-secondary" onclick="window.eris.showAssignMenu(window.eris.currentSessionId, event)" style="padding: 4px 10px; font-size: 12px;">📁 Mover</button>
       </div>
 
-      <!-- Input Area -->
-      <div class="input-area">
-        <div class="input-container">
-          <textarea
-            id="message-input"
-            placeholder="Escríbele a Eris..."
-            rows="1"
-            autofocus
-          ></textarea>
-          <button id="btn-send" class="btn-send" title="Enviar (Enter)">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-            </svg>
-          </button>
+      <div id="messages" class="messages-stream"></div>
+
+      <div id="thinking" class="thinking-overlay hidden">
+        <div class="dots"><span></span><span></span><span></span></div>
+        <span class="think-txt">Eris procesando...</span>
+      </div>
+
+      <div class="input-area-container">
+        <div class="mode-selector-row">
+          <div id="mode-selector" class="mode-selector">
+            <button class="mode-btn" data-mode="auto" title="Eris decide el mejor modo">
+              <span class="mode-icon">🔮</span>
+              <span class="mode-label">Auto</span>
+            </button>
+            <button class="mode-btn" data-mode="flash" title="Respuestas rápidas e instantáneas">
+              <span class="mode-icon">⚡</span>
+              <span class="mode-label">Flash</span>
+            </button>
+            <button class="mode-btn" data-mode="deep" title="Análisis profundo y razonamiento">
+              <span class="mode-icon">🧠</span>
+              <span class="mode-label">Deep</span>
+            </button>
+          </div>
+          <span id="mode-indicator" class="mode-indicator hidden"></span>
         </div>
-        <p class="input-hint">Enter para enviar · Shift+Enter para nueva línea</p>
+        <div class="input-wrapper">
+          <textarea id="message-input" placeholder="Comando ejecutivo..." rows="1"></textarea>
+          <button id="btn-send" class="btn-send-action">⚡</button>
+        </div>
       </div>
     </main>
   </div>
-
   <script src="app.js"></script>
 </body>
 </html>

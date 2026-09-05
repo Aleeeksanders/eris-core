@@ -3,7 +3,7 @@
 // Inspirado en la arquitectura de Claude Code
 // ============================================================
 
-import { z, type ZodSchema } from "zod";
+import { z, type ZodType, type ZodTypeDef } from "zod";
 
 /**
  * Resultado de la ejecución de una herramienta
@@ -28,7 +28,7 @@ export abstract class Tool<TInput = unknown> {
   abstract readonly description: string;
 
   /** Schema Zod del input */
-  abstract readonly inputSchema: ZodSchema<TInput>;
+  abstract readonly inputSchema: ZodType<TInput, ZodTypeDef, any>;
 
   /** Si requiere confirmación del usuario antes de ejecutar */
   readonly requiresConfirmation: boolean = false;
@@ -36,15 +36,15 @@ export abstract class Tool<TInput = unknown> {
   /**
    * Ejecuta la herramienta con el input validado
    */
-  abstract execute(input: TInput): Promise<ToolExecutionResult>;
+  abstract execute(input: TInput, context?: any): Promise<ToolExecutionResult>;
 
   /**
    * Valida y ejecuta la herramienta
    */
-  async run(rawInput: unknown): Promise<ToolExecutionResult> {
+  async run(rawInput: unknown, context?: any): Promise<ToolExecutionResult> {
     try {
       const parsed = this.inputSchema.parse(rawInput);
-      return await this.execute(parsed);
+      return await this.execute(parsed, context);
     } catch (err) {
       if (err instanceof z.ZodError) {
         return {

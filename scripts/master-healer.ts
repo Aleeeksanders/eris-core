@@ -47,12 +47,12 @@ allFiles.filter(f => f.endsWith('.md')).forEach(filePath => {
     // 1. Inyectar Metadatos (YAML)
     if (!content.trim().startsWith('---')) {
         const tier = getTier(relPath);
-        const yaml = `---\nowner: Eris Potts\ntier: ${tier}\nstatus: Activo\n---\n\n`;
+        const yaml = `---\nowner: Eris\ntier: ${tier}\nstatus: Activo\n---\n\n`;
         content = yaml + content;
     } else {
         // Asegurar campos si el YAML ya existe pero está incompleto
         if (!content.includes('owner:')) {
-            content = content.replace('---', `---\nowner: Eris Potts`);
+            content = content.replace('---', `---\nowner: Eris`);
         }
         if (!content.includes('tier:')) {
             const tier = getTier(relPath);

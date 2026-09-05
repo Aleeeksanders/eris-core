@@ -5,11 +5,8 @@
 
 import { z } from "zod";
 import { Tool, type ToolExecutionResult } from "../Tool.js";
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import path from "node:path";
-
-const execAsync = promisify(exec);
+import { VaultService } from "../services/vault/VaultService.js";
 
 const KnowledgeInputSchema = z.object({
   query: z.string().describe("El término o concepto a buscar en las notas de AXS"),
@@ -25,41 +22,32 @@ export class KnowledgeTool extends Tool<KnowledgeInput> {
     "Úsala para entender las teorías de Alex, la arquitectura del sistema o buscar fragmentos de código específicos.";
   readonly inputSchema = KnowledgeInputSchema;
 
-  private readonly AXS_PATH = "c:\\Proyectos\\AXS";
-  private readonly ERIS_PATH = "c:\\Proyectos\\eris";
+  private vaultService: VaultService;
+  private erisVaultService: VaultService;
+
+  constructor() {
+    super();
+    this.vaultService = new VaultService();
+    this.erisVaultService = new VaultService("c:\\Proyectos\\eris");
+  }
 
   async execute(input: KnowledgeInput): Promise<ToolExecutionResult> {
     const { query, scope } = input;
     
-    const searchPaths: string[] = [];
-    if (scope === "notes" || scope === "all") searchPaths.push(this.AXS_PATH);
-    if (scope === "code" || scope === "all") searchPaths.push(this.ERIS_PATH);
-
     try {
       let results = "";
       
-      for (const searchPath of searchPaths) {
-        // Usar ripgrep (rg) si está instalado, si no, buscar archivos recursivamente
-        // Intentamos un comando simple de búsqueda de texto
-        try {
-          // Buscamos archivos .md o .ts que contengan la palabra
-          const command = `grep -rEi "${query}" "${searchPath}" --include="*.md" --include="*.ts" --include="*.tsx" | head -n 15`;
-          const { stdout } = await execAsync(command);
-          
-          if (stdout) {
-            results += `\n--- Resultados en ${path.basename(searchPath)} ---\n${stdout}`;
-          }
-        } catch (e) {
-          // Si grep falla (ej. no hay matches), intentamos listar archivos
-          const commandList = `dir /s /b "${searchPath}" | findstr /i "${query}" | head -n 10`;
-          try {
-            const { stdout } = await execAsync(commandList);
-            if (stdout) {
-              results += `\n--- Archivos encontrados en ${path.basename(searchPath)} ---\n${stdout}`;
-            }
-          } catch(e2) {
-             // Silencioso si no hay nada
-          }
+      if (scope === "notes" || scope === "all") {
+        const axsResults = await this.vaultService.searchInVault(query, 15);
+        if (axsResults.length > 0) {
+          results += `\n--- Resultados en AXS ---\n${axsResults.join("\n")}\n`;
+        }
+      }
+
+      if (scope === "code" || scope === "all") {
+        const erisResults = await this.erisVaultService.searchInVault(query, 15);
+        if (erisResults.length > 0) {
+          results += `\n--- Resultados en Eris ---\n${erisResults.join("\n")}\n`;
         }
       }
 

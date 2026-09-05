@@ -5,9 +5,9 @@
 
 import { z } from "zod";
 import { Tool, type ToolExecutionResult } from "../Tool.js";
-import fs from "node:fs/promises";
 import path from "node:path";
 import { LLMProvider } from "../services/llm/LLMProvider.js";
+import { VaultService } from "../services/vault/VaultService.js";
 
 const LogManagementInputSchema = z.object({
   action: z.enum(["rotate", "create_today"]).describe("Acción a realizar: rotar registros o crear el de hoy"),
@@ -23,15 +23,16 @@ export class LogManagementTool extends Tool<LogManagementInput> {
     "Realiza la síntesis de ayer hacia el Timeline mensual y crea el nuevo log del día.";
   readonly inputSchema = LogManagementInputSchema;
 
-  private readonly BASE_PATH = "c:\\Proyectos\\AXS";
-  private readonly LOGS_PATH = path.join(this.BASE_PATH, "50-59 Intelligence Feed", "52 Logs");
-  private readonly UPDATES_PATH = path.join(this.BASE_PATH, "50-59 Intelligence Feed", "51 Updates");
+  private readonly LOGS_DIR = path.join("50-59 Intelligence Feed", "52 Logs");
+  private readonly UPDATES_DIR = path.join("50-59 Intelligence Feed", "51 Updates");
 
   private provider: LLMProvider;
+  private vaultService: VaultService;
 
   constructor(provider: LLMProvider) {
     super();
     this.provider = provider;
+    this.vaultService = new VaultService();
   }
 
   async execute(input: LogManagementInput): Promise<ToolExecutionResult> {
@@ -56,14 +57,11 @@ export class LogManagementTool extends Tool<LogManagementInput> {
 
   private async createTodayLog(date: string): Promise<ToolExecutionResult> {
     const fileName = `log-${date}.md`;
-    const filePath = path.join(this.LOGS_PATH, fileName);
+    const relPath = path.join(this.LOGS_DIR, fileName);
 
-    // Verificar si ya existe
-    try {
-      await fs.access(filePath);
-      return { output: `El registro diario de hoy (${date}) ya existe en ${filePath}.` };
-    } catch {
-      // No existe, procedemos a crear
+    const exists = await this.vaultService.fileExists(relPath);
+    if (exists) {
+      return { output: `El registro diario de hoy (${date}) ya existe en ${relPath}.` };
     }
 
     const template = `# 📝 AXS Daily Log — ${date}
@@ -83,20 +81,21 @@ export class LogManagementTool extends Tool<LogManagementInput> {
 - 
 
 ---
-*Documento generado automáticamente por Eris Potts.*`;
+*Documento generado automáticamente por Eris.*`;
 
-    await fs.mkdir(this.LOGS_PATH, { recursive: true });
-    await fs.writeFile(filePath, template, "utf-8");
+    await this.vaultService.writeVaultFile(relPath, template);
 
     return {
-      output: `Se ha creado el registro diario para hoy: ${filePath}. Escribe tus avances en la sección correspondiente.`,
+      output: `Se ha creado el registro diario para hoy: ${relPath}. Escribe tus avances en la sección correspondiente.`,
     };
   }
 
   private async rotateLogs(todayDate: string): Promise<ToolExecutionResult> {
     // 1. Buscar archivos de días anteriores
-    const files = await fs.readdir(this.LOGS_PATH);
-    const logFiles = files.filter(f => f.startsWith("log-") && f.endsWith(".md") && !f.includes(todayDate));
+    const allFiles = await this.vaultService.getAllFiles(path.join(this.vaultService.getVaultPath(), this.LOGS_DIR));
+    const logFiles = allFiles
+        .map(f => path.basename(f))
+        .filter(f => f.startsWith("log-") && f.endsWith(".md") && !f.includes(todayDate));
 
     if (logFiles.length === 0) {
       return { output: "No hay registros anteriores para rotar." };
@@ -105,8 +104,8 @@ export class LogManagementTool extends Tool<LogManagementInput> {
     let summaryResults = "";
 
     for (const fileName of logFiles) {
-      const filePath = path.join(this.LOGS_PATH, fileName);
-      const content = await fs.readFile(filePath, "utf-8");
+      const relPath = path.join(this.LOGS_DIR, fileName);
+      const content = await this.vaultService.readVaultFile(relPath);
       const dateStr = fileName.replace("log-", "").replace(".md", "");
 
       // 2. Extraer bullets usando LLM
@@ -116,7 +115,10 @@ export class LogManagementTool extends Tool<LogManagementInput> {
       await this.updateMonthlyTimeline(summary, dateStr);
 
       // 4. Eliminar el archivo viejo
-      await fs.unlink(filePath);
+      // Import fs just for unlink since we didn't put unlink in VaultService to keep it simple,
+      // or we can just use fs.unlink(absolutePath).
+      const fs = await import("node:fs/promises");
+      await fs.unlink(path.join(this.vaultService.getVaultPath(), relPath));
       
       summaryResults += `- Registro ${dateStr} sintetizado y archivado.\n`;
     }
@@ -143,21 +145,18 @@ export class LogManagementTool extends Tool<LogManagementInput> {
     const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
     const monthName = monthNames[parseInt(month) - 1];
     
-    const yearPath = path.join(this.UPDATES_PATH, year);
-    await fs.mkdir(yearPath, { recursive: true });
-
-    const monthFile = path.join(yearPath, `${month} - ${monthName}.md`);
+    const relPath = path.join(this.UPDATES_DIR, year, `${month} - ${monthName}.md`);
     
     let existingContent = "";
-    try {
-      existingContent = await fs.readFile(monthFile, "utf-8");
-    } catch {
+    if (await this.vaultService.fileExists(relPath)) {
+      existingContent = await this.vaultService.readVaultFile(relPath);
+    } else {
       existingContent = `# 📈 Timeline Mensual — ${monthName} ${year}\n\n`;
     }
 
     const newEntry = `### 📅 Día ${date}\n${summary}\n\n---\n`;
     const updatedContent = existingContent + newEntry;
 
-    await fs.writeFile(monthFile, updatedContent, "utf-8");
+    await this.vaultService.writeVaultFile(relPath, updatedContent);
   }
 }

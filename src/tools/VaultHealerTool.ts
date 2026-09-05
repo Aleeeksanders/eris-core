@@ -7,6 +7,7 @@ import { z } from "zod";
 import { Tool, type ToolExecutionResult } from "../Tool.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { VaultService } from "../services/vault/VaultService.js";
 
 const VaultHealerInputSchema = z.object({
   action: z.enum(["auto_heal", "fix_links", "inject_metadata"]).default("auto_heal").describe("Acción de sanación a ejecutar"),
@@ -22,21 +23,29 @@ export class VaultHealerTool extends Tool<VaultHealerInput> {
     "Repara enlaces, inyecta metadatos corporativos y crea archivos de proyecto faltantes de forma autónoma.";
   readonly inputSchema = VaultHealerInputSchema;
 
-  private readonly VAULT_ROOT = "c:\\Proyectos\\AXS";
+  private vaultService: VaultService;
+
+  constructor() {
+    super();
+    this.vaultService = new VaultService();
+  }
 
   async execute(input: VaultHealerInput): Promise<ToolExecutionResult> {
     const { action } = input;
     
     try {
-      const allFiles = await this.getAllFiles(this.VAULT_ROOT);
+      const vaultRoot = this.vaultService.getVaultPath();
+      const allFiles = await this.vaultService.getAllFiles();
       const mdFiles = allFiles.filter(f => f.endsWith(".md"));
       
-      // Mapa de nombres base -> rutas relativas para resolución de enlaces
-      const fileMap = new Map<string, string>();
+      const baseMap = new Map<string, string>();
+      const relPaths = new Set<string>();
+      
       allFiles.forEach(f => {
         const name = path.basename(f, ".md");
-        const rel = path.relative(this.VAULT_ROOT, f).replace(/\\/g, "/");
-        fileMap.set(name, rel);
+        const rel = path.relative(vaultRoot, f).replace(/\\/g, "/");
+        baseMap.set(name.toLowerCase(), name);
+        relPaths.add(rel.toLowerCase());
       });
 
       let healedCount = 0;
@@ -44,9 +53,9 @@ export class VaultHealerTool extends Tool<VaultHealerInput> {
       let createdFiles: string[] = [];
 
       for (const filePath of mdFiles) {
-        let content = await fs.readFile(filePath, "utf-8");
+        let content = await this.vaultService.readVaultFile(filePath);
         const originalContent = content;
-        const relPath = path.relative(this.VAULT_ROOT, filePath).replace(/\\/g, "/");
+        const relPath = path.relative(vaultRoot, filePath).replace(/\\/g, "/");
 
         // 1. Inyectar Metadatos (YAML)
         if (action === "auto_heal" || action === "inject_metadata") {
@@ -55,20 +64,21 @@ export class VaultHealerTool extends Tool<VaultHealerInput> {
 
         // 2. Sanar Enlaces
         if (action === "auto_heal" || action === "fix_links") {
-           const { newContent, repaired, missing } = this.healLinks(content, fileMap);
+           const { newContent, repaired, missing } = this.healLinks(content, baseMap, relPaths);
            content = newContent;
            linksRepaired += repaired;
 
            // 3. Autocreación de placeholders (Carta Blanca)
            if (action === "auto_heal") {
              for (const missingLink of missing) {
-               // Heurística: Si empieza por Mayúscula y no es un path complejo, asumimos proyecto/entidad
-               if (/^[A-Z][a-zA-Z0-0]/.test(missingLink) && !missingLink.includes("/")) {
-                 const created = await this.createPlaceholder(missingLink);
+               // Heurística: Si empieza por Mayúscula y no es un path complejo
+               if (/^[A-Z][a-zA-Z0-9_ -]*$/.test(missingLink) && !missingLink.includes("/")) {
+                 const created = await this.createPlaceholder(missingLink, vaultRoot);
                  if (created) {
                    createdFiles.push(missingLink);
                    // Actualizar mapa para siguientes archivos
-                   fileMap.set(missingLink, `20-29 R&D (The Forge)/${missingLink}.md`);
+                   baseMap.set(missingLink.toLowerCase(), missingLink);
+                   relPaths.add(`20-29 r&d (the forge)/${missingLink.toLowerCase()}.md`);
                  }
                }
              }
@@ -76,7 +86,7 @@ export class VaultHealerTool extends Tool<VaultHealerInput> {
         }
 
         if (content !== originalContent) {
-          await fs.writeFile(filePath, content, "utf-8");
+          await this.vaultService.writeVaultFile(filePath, content);
           healedCount++;
         }
       }
@@ -100,14 +110,14 @@ export class VaultHealerTool extends Tool<VaultHealerInput> {
 
   private ensureMetadata(content: string, relPath: string): string {
     const tier = this.getTier(relPath);
-    const yamlBlock = `---\nowner: Eris Potts\ntier: ${tier}\nstatus: Activo\n---\n\n`;
+    const yamlBlock = `---\nowner: Eris\ntier: ${tier}\nstatus: Activo\n---\n\n`;
 
     if (!content.trim().startsWith("---")) {
       return yamlBlock + content;
     } else {
       let newContent = content;
       if (!content.includes("owner:")) {
-        newContent = newContent.replace("---", "---\nowner: Eris Potts");
+        newContent = newContent.replace("---", "---\nowner: Eris");
       }
       if (!content.includes("tier:")) {
         newContent = newContent.replace("---", `---\ntier: ${tier}`);
@@ -124,21 +134,26 @@ export class VaultHealerTool extends Tool<VaultHealerInput> {
     return "Operativo";
   }
 
-  private healLinks(content: string, fileMap: Map<string, string>): { newContent: string, repaired: number, missing: string[] } {
+  private healLinks(content: string, baseMap: Map<string, string>, relPaths: Set<string>): { newContent: string, repaired: number, missing: string[] } {
     let repaired = 0;
     let missing: string[] = [];
     const linkRegex = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 
     const newContent = content.replace(linkRegex, (match, linkTarget, alias) => {
       const cleanTarget = linkTarget.trim();
-      if (fileMap.has(cleanTarget)) {
-        const newPath = fileMap.get(cleanTarget);
-        if (newPath !== cleanTarget) {
-            repaired++;
-            return `[[${newPath}${alias ? "|" + alias : ""}]]`;
-        }
+      const lowerTarget = cleanTarget.toLowerCase();
+
+      if (baseMap.has(lowerTarget) || relPaths.has(lowerTarget) || relPaths.has(lowerTarget + ".md")) {
+         const exactCase = baseMap.get(lowerTarget);
+         if (exactCase && exactCase !== cleanTarget && !cleanTarget.includes("/")) {
+             repaired++;
+             return `[[${exactCase}${alias ? "|" + alias : ""}]]`;
+         }
+         return match;
       } else {
-          missing.push(cleanTarget);
+         if (!missing.includes(cleanTarget)) {
+             missing.push(cleanTarget);
+         }
       }
       return match;
     });
@@ -146,33 +161,18 @@ export class VaultHealerTool extends Tool<VaultHealerInput> {
     return { newContent, repaired, missing };
   }
 
-  private async createPlaceholder(name: string): Promise<boolean> {
-    const targetDir = path.join(this.VAULT_ROOT, "20-29 R&D (The Forge)");
+  private async createPlaceholder(name: string, vaultRoot: string): Promise<boolean> {
+    const targetDir = path.join(vaultRoot, "20-29 R&D (The Forge)");
     const filePath = path.join(targetDir, `${name}.md`);
 
     try {
       await fs.access(filePath);
       return false; // Ya existe
     } catch {
-      const template = `---\nowner: Eris Potts\ntier: Técnico\nstatus: Placeholder\n---\n# 🆕 ${name}\nArchivo creado automáticamente por protocolo de sanación.\n\n## Descripción\n_Pendiente de definición._`;
+      const template = `---\nowner: Eris\ntier: Técnico\nstatus: Placeholder\n---\n# 🆕 ${name}\nArchivo creado automáticamente por protocolo de sanación.\n\n## Descripción\n_Pendiente de definición._`;
+      await fs.mkdir(targetDir, { recursive: true });
       await fs.writeFile(filePath, template, "utf-8");
       return true;
     }
-  }
-
-  private async getAllFiles(dir: string): Promise<string[]> {
-    let results: string[] = [];
-    const list = await fs.readdir(dir);
-    for (const file of list) {
-        if (file === ".obsidian" || file === ".git") continue;
-        const fullPath = path.join(dir, file);
-        const stat = await fs.stat(fullPath);
-        if (stat && stat.isDirectory()) {
-            results = results.concat(await this.getAllFiles(fullPath));
-        } else {
-            results.push(fullPath);
-        }
-    }
-    return results;
   }
 }

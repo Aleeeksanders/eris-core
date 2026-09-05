@@ -3,7 +3,7 @@
 // Abstracción del modelo de lenguaje
 // ============================================================
 
-import type { ToolDefinition } from "../types/message.js";
+import type { ToolDefinition } from "../../types/message.js";
 
 export interface LLMMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -47,6 +47,9 @@ export interface LLMProvider {
     options?: {
       temperature?: number;
       maxTokens?: number;
+      contextLength?: number;
+      modelOverride?: string;
+      enableThinking?: boolean;
       onToken?: StreamCallback;
       onThinking?: StreamCallback;
     }

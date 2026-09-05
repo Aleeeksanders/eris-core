@@ -11,6 +11,7 @@ import { FileReadTool } from "./tools/FileReadTool.js";
 import { FileWriteTool } from "./tools/FileWriteTool.js";
 import { OpenTool } from "./tools/OpenTool.js";
 import { KnowledgeTool } from "./tools/KnowledgeTool.js";
+import { NutritionTool } from "./tools/NutritionTool.js";
 
 /**
  * Registro centralizado de todas las herramientas de Eris.
@@ -19,8 +20,15 @@ import { KnowledgeTool } from "./tools/KnowledgeTool.js";
 export class ToolRegistry {
   private tools: Map<string, Tool> = new Map();
 
-  constructor() {
-    this.registerDefaults();
+  constructor(preloaded?: Tool[]) {
+    if (preloaded) {
+      // Inicializar con lista pre-filtrada (para roles con permisos restringidos)
+      for (const tool of preloaded) {
+        this.register(tool);
+      }
+    } else {
+      this.registerDefaults();
+    }
   }
 
   private registerDefaults(): void {
@@ -32,6 +40,7 @@ export class ToolRegistry {
       new FileWriteTool(),
       new OpenTool(),
       new KnowledgeTool(),
+      new NutritionTool(),
     ];
 
     for (const tool of defaultTools) {

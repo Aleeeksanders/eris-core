@@ -1,7 +1,7 @@
 # Eris — Custom Ollama Model
 # Usa después de fine-tuning con Unsloth
 
-FROM qwen2.5:3b
+FROM qwen3.5:4b
 ADAPTER ./adapter.safetensors
 
 PARAMETER temperature 0.7

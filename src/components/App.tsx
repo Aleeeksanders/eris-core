@@ -87,7 +87,7 @@ export function App({ queryEngine }: AppProps): React.ReactElement {
           },
         });
 
-        setMessages((prev) => [...prev, response]);
+        setMessages((prev) => [...prev, response.message]);
       } catch (err) {
         const errorMsg = createMessage(
           "system",
@@ -153,7 +153,6 @@ export function App({ queryEngine }: AppProps): React.ReactElement {
           onChange={setInputValue}
           onSubmit={handleSubmit}
           placeholder={isProcessing ? "Esperando respuesta..." : "Escribe tu mensaje..."}
-          isDisabled={isProcessing}
         />
       </Box>
     </Box>

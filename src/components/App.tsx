@@ -2,7 +2,7 @@
 // Eris — Componente principal de la App (CLI)
 // ============================================================
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import { Box, Text, useApp } from "ink";
 import TextInput from "ink-text-input";
 import { Banner } from "./Banner.js";

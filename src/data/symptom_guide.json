@@ -1,0 +1,788 @@
+{
+  "version": 1,
+  "description": "Guía de síntomas y molestias comunes para Eris. Orientación general de autocuidado y señales de alarma (criterio de consenso: primeros auxilios y autocuidado); NO da diagnósticos, ni dosis de medicamentos, ni indica suspender tratamientos. Cada entrada se cruza con el perfil médico (condiciones, medicamentos, embarazo) del usuario. El texto lo redacta el código, no el modelo.",
+  "emergency": {
+    "generic": "Esto puede ser una emergencia. Llama ahora al 131 (SAMU) o ve al servicio de urgencias más cercano. No esperes a ver si pasa y, si te sientes mal, no conduzcas: pide que te lleven o que llegue una ambulancia.",
+    "selfHarm": "Lamento que estés pasando por esto, y me alegra que lo digas. No estás solo/a. Llama ahora a la Línea de Prevención del Suicidio: *4141 (gratis, desde celular, atiende todo el día), o al 131 si estás en peligro inmediato. Si puedes, avisa a alguien de confianza que esté cerca y no te quedes solo/a en este momento."
+  },
+  "redFlags": [
+    {
+      "id": "chest",
+      "label": "dolor u opresión en el pecho",
+      "patterns": [
+        "dolor (fuerte |intenso |opresivo )?(de|en el|del|al) pecho",
+        "me duele (mucho |fuerte |demasiado )?el pecho",
+        "me duele (mucho |fuerte )?el corazon",
+        "opresion en el pecho",
+        "presion en el pecho",
+        "me aprieta el pecho",
+        "dolor que baja (al|por el) brazo"
+      ]
+    },
+    {
+      "id": "breathing",
+      "label": "dificultad para respirar",
+      "patterns": [
+        "no puedo respirar",
+        "me ahogo",
+        "falta de aire (intensa|fuerte|repentina|severa)",
+        "dificultad (grave |seria |severa )?para respirar",
+        "se me cierra la garganta",
+        "labios (morados|azulados)"
+      ]
+    },
+    {
+      "id": "stroke",
+      "label": "señales de un posible derrame cerebral",
+      "patterns": [
+        "cara caida",
+        "rostro caido",
+        "boca torcida",
+        "no puedo (hablar|mover (el|un) (brazo|pierna|lado))",
+        "habla arrastrada",
+        "adormecimiento (de|en) un lado",
+        "perdi la vision",
+        "vision doble repentina",
+        "debilidad (de|en) un lado"
+      ]
+    },
+    {
+      "id": "faint",
+      "label": "desmayo o pérdida de conciencia",
+      "patterns": [
+        "me desmaye",
+        "perdi el conocimiento",
+        "se desmayo",
+        "quedo inconsciente",
+        "esta inconsciente"
+      ]
+    },
+    {
+      "id": "seizure",
+      "label": "convulsiones",
+      "patterns": [
+        "convulsion",
+        "convulsiono",
+        "ataque epileptico"
+      ]
+    },
+    {
+      "id": "bleeding",
+      "label": "sangrado importante",
+      "patterns": [
+        "sangrado (abundante|que no para|muy fuerte)",
+        "no para de sangrar",
+        "vomito sangre",
+        "vomite sangre",
+        "heces negras",
+        "deposiciones negras",
+        "orino sangre",
+        "tos con sangre",
+        "escupo sangre"
+      ]
+    },
+    {
+      "id": "allergy",
+      "label": "reacción alérgica grave",
+      "patterns": [
+        "se me hincha(n)? (la )?(cara|labios|lengua|garganta)",
+        "anafilaxia",
+        "reaccion alergica (grave|fuerte|severa)"
+      ]
+    },
+    {
+      "id": "worstHeadache",
+      "label": "dolor de cabeza repentino e intensísimo",
+      "patterns": [
+        "peor dolor de cabeza de mi vida",
+        "dolor de cabeza (repentino|subito) (y )?(muy )?(fuerte|intenso)",
+        "dolor de cabeza como un martillazo"
+      ]
+    },
+    {
+      "id": "overdose",
+      "label": "posible sobredosis o intoxicación",
+      "patterns": [
+        "sobredosis",
+        "me intoxique",
+        "envenen",
+        "tome (demasiad|muchas pastillas)",
+        "ingeri (cloro|veneno|soda caustica)"
+      ]
+    },
+    {
+      "id": "pregnancy",
+      "label": "sangrado o dolor fuerte en el embarazo",
+      "patterns": [
+        "embarazad\\w+.*(sangr|dolor fuerte|contraccion)",
+        "(sangr|dolor fuerte).*embarazad"
+      ]
+    },
+    {
+      "id": "selfHarm",
+      "label": "pensamientos de hacerse daño",
+      "kind": "selfHarm",
+      "patterns": [
+        "quiero morir",
+        "quiero matarme",
+        "pensamientos de (suicid|matarme|hacerme dano)",
+        "hacerme dano",
+        "no quiero vivir",
+        "suicid",
+        "acabar con mi vida"
+      ]
+    }
+  ],
+  "symptoms": [
+    {
+      "id": "calambre",
+      "label": "Calambre muscular",
+      "quick": "Tranquilo/a, un calambre suele pasar en pocos minutos.",
+      "patterns": [
+        "calambre",
+        "se me (agarr|contrajo|engarrot|acalambr)",
+        "tiron muscular",
+        "espasmo muscular",
+        "pierna dormida y dura"
+      ],
+      "now": [
+        "Detén lo que estés haciendo y estira suavemente el músculo. En el pie o la pantorrilla: apoya el pie en el suelo y ponte de pie con cuidado, o tira de los dedos del pie hacia ti manteniendo la rodilla estirada.",
+        "Masajea la zona con suavidad y aplica calor (un paño tibio) para que se relaje. Si después queda adolorida, el frío la puede aliviar.",
+        "Camina unos pasos y toma agua a sorbos. Si transpiraste mucho, repón sales con comida (plátano, caldo, yogur) o una bebida isotónica si no tienes restricciones."
+      ],
+      "prevent": [
+        "Hidrátate durante el día, estira antes de dormir y después de entrenar, y calienta antes de hacer ejercicio.",
+        "Revisa el calzado y evita pasar horas en la misma postura."
+      ],
+      "consult": [
+        "Si los calambres son frecuentes (varias veces por semana) o te despiertan de noche.",
+        "Si empezaron al comenzar un medicamento nuevo (por ejemplo diuréticos o estatinas): coméntalo con tu médico, sin dejarlo por tu cuenta.",
+        "Si hay debilidad persistente, hormigueo o adormecimiento.",
+        "Si duelen las piernas al caminar y mejoran al detenerte (puede ser un tema de circulación)."
+      ],
+      "urgent": [
+        "Una sola pierna hinchada, roja, caliente y dolorosa (posible trombosis venosa).",
+        "Dolor en la pierna junto con falta de aire o dolor de pecho.",
+        "Dolor muscular intenso con orina muy oscura (color té) después de un esfuerzo fuerte."
+      ],
+      "profile": {
+        "conditions": {
+          "diabetes": "Con diabetes, un calambre puede acompañar una glucosa alta (por deshidratación) o baja: si puedes, mídela ahora.",
+          "ckd": "Con enfermedad renal no tomes suplementos de potasio ni de magnesio, ni sustitutos de sal, sin preguntarle a tu médico.",
+          "heart_failure": "Con insuficiencia cardíaca, cuánto líquido tomar lo define tu cardiólogo, también ahora: no lo subas por tu cuenta aunque aquí diga que tomes líquidos."
+        },
+        "medications": {
+          "diuretic": "Los diuréticos hacen perder potasio y magnesio y pueden causar calambres: avísale a tu médico.",
+          "statin": "Las estatinas pueden dar dolor o calambres musculares. Si son persistentes o notas la orina oscura, consulta pronto (no las suspendas por tu cuenta).",
+          "sglt2": "Con inhibidores SGLT2 pierdes más líquido por la orina: refuerza la hidratación."
+        },
+        "diet": {
+          "embarazo": "En el embarazo los calambres de piernas son frecuentes. Antes de tomar magnesio u otros suplementos, consúltalo con tu matrona o médico."
+        }
+      }
+    },
+    {
+      "id": "dolor_cabeza",
+      "label": "Dolor de cabeza",
+      "quick": "Lamento que te duela la cabeza.",
+      "patterns": [
+        "dolor de cabeza",
+        "me duele la cabeza",
+        "cefalea",
+        "migrana",
+        "jaqueca",
+        "cabeza (pesada|a punto de estallar)"
+      ],
+      "now": [
+        "Descansa en un lugar tranquilo y con poca luz, y toma agua: la deshidratación es una causa muy común.",
+        "Si llevas muchas horas sin comer, come algo. Compresa fría en la frente o tibia en el cuello si sientes tensión.",
+        "Baja el brillo o descansa de pantallas y revisa cuánta cafeína y cuánto sueño tuviste hoy.",
+        "Los analgésicos de venta libre pueden ayudar: úsalos según el envase y consulta a tu médico o farmacéutico según tus condiciones y medicamentos."
+      ],
+      "prevent": [
+        "Dormir regular, hidratarte, no saltarte comidas y anotar qué lo dispara (estrés, ciertos alimentos, pantallas)."
+      ],
+      "consult": [
+        "Si dura más de 3 días, se hace más frecuente o más intenso, o cambia de patrón.",
+        "Si usas analgésicos casi todos los días para controlarlo."
+      ],
+      "urgent": [
+        "Un dolor repentino, el peor de tu vida.",
+        "Con fiebre y rigidez de cuello, o después de un golpe en la cabeza.",
+        "Con confusión, debilidad de un lado, dificultad para hablar, visión doble o pérdida de visión, o convulsión."
+      ],
+      "profile": {
+        "conditions": {
+          "diabetes": "Mide tu glucosa: tanto la alta como la baja pueden dar dolor de cabeza.",
+          "hypertension": "Mide tu presión. Si es muy alta (180/120 o más) y el dolor es intenso, busca atención de urgencia.",
+          "hypotension": "Con presión baja, deshidratación o ayuno son causas frecuentes: hidrátate y come algo.",
+          "heart_failure": "Con insuficiencia cardíaca, cuánto líquido tomar lo define tu cardiólogo, también ahora: no lo subas por tu cuenta aunque aquí diga que tomes líquidos."
+        },
+        "diet": {
+          "embarazo": "En el embarazo, un dolor de cabeza fuerte, sobre todo con hinchazón o visión borrosa, requiere consulta urgente (puede ser preeclampsia)."
+        }
+      }
+    },
+    {
+      "id": "mareo",
+      "label": "Mareo",
+      "quick": "Tranquilo/a: lo primero es evitar una caída.",
+      "patterns": [
+        "mareo",
+        "mareado",
+        "mareada",
+        "vertigo",
+        "me da vueltas",
+        "siento que me desmayo",
+        "cabeza liviana",
+        "vista nublada"
+      ],
+      "now": [
+        "Siéntate o recuéstate de inmediato para evitar una caída, respira lento y apoya la espalda.",
+        "Toma agua a sorbos. Si llevas horas sin comer, come algo con carbohidratos.",
+        "Cuando te pase, levántate despacio (primero sentado, luego de pie)."
+      ],
+      "prevent": [
+        "Hidratarte, no pasar muchas horas sin comer y evitar levantarte de golpe."
+      ],
+      "consult": [
+        "Si se repite, aparece al cambiar de postura o empezó tras un medicamento nuevo.",
+        "Si se acompaña de zumbido en los oídos o pérdida de audición."
+      ],
+      "urgent": [
+        "Desmayo, dolor de pecho, palpitaciones fuertes o falta de aire.",
+        "Debilidad o adormecimiento de un lado, dificultad para hablar, o dolor de cabeza repentino e intenso."
+      ],
+      "profile": {
+        "conditions": {
+          "diabetes": "Mareo con sudor frío, temblor o hambre repentina puede ser una glucosa baja: mídela. Si está bajo 70 mg/dL, toma 15 g de carbohidratos rápidos y vuelve a medir a los 15 minutos (pídeme opciones concretas).",
+          "hypotension": "Puede ser presión baja o deshidratación: mídela si puedes y levántate despacio.",
+          "hypertension": "Mide tu presión: tanto una presión muy alta como una muy baja (si tomas antihipertensivos) pueden marear.",
+          "heart_failure": "Con insuficiencia cardíaca, cuánto líquido tomar lo define tu cardiólogo, también ahora: no lo subas por tu cuenta aunque aquí diga que tomes líquidos."
+        },
+        "medications": {
+          "insulin": "Con insulina, un mareo puede ser hipoglucemia: mide tu glucosa antes que nada.",
+          "sulfonylurea": "Las sulfonilureas pueden causar hipoglucemia: mide tu glucosa antes que nada.",
+          "antihypertensive": "Los antihipertensivos pueden bajar demasiado la presión, sobre todo al pararte: coméntalo con tu médico si se repite.",
+          "diuretic": "Los diuréticos pueden deshidratarte y bajar la presión: hidrátate y coméntalo con tu médico si se repite."
+        }
+      }
+    },
+    {
+      "id": "gastro",
+      "label": "Náuseas, vómitos o diarrea",
+      "quick": "Qué molesto; lo importante ahora es no deshidratarte.",
+      "patterns": [
+        "nausea",
+        "vomit",
+        "diarrea",
+        "guata suelta",
+        "revuelto el estomago",
+        "descompuesto",
+        "descompuesta",
+        "intoxicacion alimentaria",
+        "me dio la chorrera",
+        "\\basco\\b"
+      ],
+      "now": [
+        "Da reposo al estómago unas horas y luego toma líquidos en sorbos pequeños y frecuentes: suero oral, agua o caldo.",
+        "Cuando lo toleres, vuelve a comer algo blando: arroz, plátano, pan tostado, pollo cocido.",
+        "Evita alcohol, café, grasas, picante y lácteos abundantes por un par de días."
+      ],
+      "prevent": [
+        "Lavarte las manos, cuidar la cadena de frío y no consumir alimentos de dudosa procedencia."
+      ],
+      "consult": [
+        "Si la diarrea dura más de 2 días o los vómitos más de 24 horas.",
+        "Si tienes fiebre alta o no logras retener líquidos.",
+        "Si hay señales de deshidratación: orina escasa y muy oscura, boca seca, mareo al pararte."
+      ],
+      "urgent": [
+        "Sangre en el vómito o en las deposiciones (o deposiciones negras).",
+        "Dolor abdominal intenso, abdomen duro, confusión o muy decaído/a, casi sin orina."
+      ],
+      "profile": {
+        "conditions": {
+          "diabetes": "Aunque comas poco, no dejes de medir tu glucosa (cada 3–4 horas) y consulta a tu médico sobre cómo ajustar tu tratamiento en días de enfermedad.",
+          "ckd": "Con enfermedad renal la deshidratación es más riesgosa: consulta pronto.",
+          "heart_failure": "Con insuficiencia cardíaca, vómitos o diarrea pueden descompensarte (y tus medicamentos pueden necesitar ajuste): consulta hoy a tu equipo médico."
+        },
+        "medications": {
+          "sglt2": "Si tomas un inhibidor SGLT2 y estás vomitando o no puedes comer ni beber, avísale a tu médico hoy: hay riesgo de deshidratación y de cetoacidosis.",
+          "metformin": "Con vómitos o diarrea que te deshidraten, pregunta a tu médico si debes pausar temporalmente la metformina.",
+          "diuretic": "Con deshidratación, pregunta a tu médico si debes pausar temporalmente diuréticos o antihipertensivos.",
+          "insulin": "No suspendas la insulina por tu cuenta: consulta a tu médico cómo ajustarla mientras estés enfermo/a."
+        }
+      }
+    },
+    {
+      "id": "fiebre",
+      "label": "Fiebre",
+      "quick": "Lamento que estés con fiebre.",
+      "patterns": [
+        "fiebre",
+        "temperatura alta",
+        "calenturiento",
+        "afiebrad",
+        "38 grados",
+        "39 grados",
+        "40 grados",
+        "escalofrios"
+      ],
+      "now": [
+        "Descansa, toma abundantes líquidos y usa ropa ligera; abrígate solo si tienes escalofríos. Mide la temperatura.",
+        "Los antifebriles de venta libre pueden ayudar: úsalos según el envase y consulta a tu médico o farmacéutico según tus condiciones y medicamentos."
+      ],
+      "prevent": [],
+      "consult": [
+        "Si la fiebre dura más de 3 días o llega a 39 °C o más.",
+        "Si hay dolor al orinar, tos con flema, dolor de oído o de garganta intenso.",
+        "Si estás embarazada o tu defensa inmune está baja, consulta el mismo día."
+      ],
+      "urgent": [
+        "Dificultad para respirar, rigidez de cuello con molestia a la luz, confusión o somnolencia extrema.",
+        "Manchas moradas en la piel o convulsiones."
+      ],
+      "profile": {
+        "conditions": {
+          "diabetes": "La fiebre y las infecciones suben la glucosa: mídela con más frecuencia y toma mucho líquido.",
+          "asthma": "Con asma, vigila la respiración y usa tu plan de acción.",
+          "copd": "Con EPOC, la fiebre con más tos o falta de aire requiere consulta pronto.",
+          "heart_failure": "Con insuficiencia cardíaca, cuánto líquido tomar lo define tu cardiólogo, también ahora: no lo subas por tu cuenta aunque aquí diga que tomes líquidos."
+        },
+        "medications": {
+          "sglt2": "Con inhibidores SGLT2, la enfermedad con fiebre y poca ingesta aumenta el riesgo de deshidratación y cetoacidosis: avisa a tu médico."
+        }
+      }
+    },
+    {
+      "id": "resfrio",
+      "label": "Resfrío, tos o congestión",
+      "quick": "Qué lata el resfrío.",
+      "patterns": [
+        "resfri",
+        "gripe",
+        "\\btos\\b",
+        "congestion",
+        "moqueo",
+        "mocos",
+        "nariz tapada",
+        "estornud",
+        "flema",
+        "engripad",
+        "constipad"
+      ],
+      "now": [
+        "Descansa y toma líquidos tibios. La miel ayuda con la tos (no se da a menores de 1 año).",
+        "Lava la nariz con suero fisiológico y humidifica el ambiente. Evita el tabaco y los ambientes con humo."
+      ],
+      "prevent": [
+        "Lavado de manos, ventilar los espacios y dormir bien."
+      ],
+      "consult": [
+        "Si los síntomas duran más de 10 días o empeoran después de haber mejorado.",
+        "Si hay fiebre alta, dolor intenso de oídos o de senos paranasales."
+      ],
+      "urgent": [
+        "Dificultad para respirar, labios azulados, dolor de pecho o tos con sangre."
+      ],
+      "profile": {
+        "conditions": {
+          "asthma": "Con asma, usa tu plan de acción y tus inhaladores como te indicó tu médico. Si te falta el aire o el de rescate no alcanza, consulta de urgencia.",
+          "copd": "Con EPOC, un resfrío puede descompensarte: si aumentan la tos, la flema o la falta de aire, consulta pronto.",
+          "hypertension": "Ojo con los descongestionantes orales (como pseudoefedrina): pueden subir la presión. Consulta al farmacéutico antes de usarlos.",
+          "diabetes": "Los jarabes con azúcar suben la glucosa: pide versiones sin azúcar. Y la infección puede subirla, así que mídela más seguido.",
+          "heart_failure": "Con insuficiencia cardíaca, cuánto líquido tomar lo define tu cardiólogo, también ahora: no lo subas por tu cuenta aunque aquí diga que tomes líquidos."
+        }
+      }
+    },
+    {
+      "id": "garganta",
+      "label": "Dolor de garganta",
+      "quick": "Lamento el dolor de garganta.",
+      "patterns": [
+        "dolor de garganta",
+        "me duele la garganta",
+        "garganta inflamada",
+        "anginas",
+        "amigdalitis",
+        "garganta irritada"
+      ],
+      "now": [
+        "Toma líquidos tibios con miel (no en menores de 1 año) y haz gárgaras de agua tibia con sal.",
+        "Descansa la voz, hidrátate y usa pastillas para chupar si te alivian."
+      ],
+      "prevent": [],
+      "consult": [
+        "Si dura más de 5 a 7 días, hay fiebre alta, placas blancas en la garganta o ganglios muy inflamados."
+      ],
+      "urgent": [
+        "Dificultad para respirar o para tragar la saliva, babeo, o una voz muy apagada con ruido al respirar."
+      ],
+      "profile": {
+        "conditions": {
+          "diabetes": "Las infecciones pueden subir la glucosa: mídela con más frecuencia.",
+          "heart_failure": "Con insuficiencia cardíaca, cuánto líquido tomar lo define tu cardiólogo, también ahora: no lo subas por tu cuenta aunque aquí diga que tomes líquidos."
+        }
+      }
+    },
+    {
+      "id": "espalda",
+      "label": "Dolor de espalda",
+      "quick": "Lamento el dolor de espalda.",
+      "patterns": [
+        "dolor de espalda",
+        "me duele la espalda",
+        "lumbago",
+        "lumbalgia",
+        "espalda baja",
+        "se me trabo la espalda",
+        "ciatica",
+        "dolor lumbar"
+      ],
+      "now": [
+        "Mantente activo/a con movimiento suave (caminar): el reposo absoluto suele empeorarlo.",
+        "Aplica calor local 15–20 minutos varias veces al día y cambia de postura seguido.",
+        "Evita levantar peso y torcer el tronco mientras dure. Los analgésicos de venta libre pueden ayudar, según el envase y lo que te indique tu médico o farmacéutico."
+      ],
+      "prevent": [
+        "Fortalecer el core, pausas activas si trabajas sentado/a y técnica correcta al levantar peso."
+      ],
+      "consult": [
+        "Si dura más de 2 semanas, o el dolor baja por la pierna con hormigueo."
+      ],
+      "urgent": [
+        "Pérdida de control de la orina o las deposiciones, o adormecimiento entre las piernas.",
+        "Debilidad en las piernas, fiebre, pérdida de peso sin explicación, o dolor tras una caída o golpe fuerte."
+      ],
+      "profile": {
+        "conditions": {
+          "ckd": "Con enfermedad renal, consulta antes de usar antiinflamatorios."
+        }
+      }
+    },
+    {
+      "id": "acidez",
+      "label": "Acidez o dolor de estómago",
+      "quick": "Qué molestia.",
+      "patterns": [
+        "acidez",
+        "reflujo",
+        "agrura",
+        "dolor de estomago",
+        "me duele el estomago",
+        "me duele la guata",
+        "gastritis",
+        "empacho",
+        "hinchazon abdominal",
+        "muchos gases",
+        "estomago inflamado"
+      ],
+      "now": [
+        "Come porciones más chicas y más despacio, y no te acuestes hasta 2–3 horas después de comer.",
+        "Evita por ahora café, alcohol, picante, comidas grasosas y tabaco. Elevar un poco la cabecera de la cama ayuda con el reflujo.",
+        "Los antiácidos de venta libre pueden aliviar de forma ocasional: úsalos según el envase."
+      ],
+      "prevent": [
+        "Cenar liviano y temprano, y anotar qué alimentos te lo provocan."
+      ],
+      "consult": [
+        "Si te pasa más de 2 veces por semana, o hay pérdida de peso, dificultad para tragar o vómitos frecuentes."
+      ],
+      "urgent": [
+        "Vómito con sangre o deposiciones negras.",
+        "Dolor de pecho (no lo asumas como acidez), o dolor abdominal intenso y repentino."
+      ],
+      "profile": {
+        "conditions": {
+          "ibs": "Con síndrome de intestino irritable, identifica tus desencadenantes (FODMAP) y consulta si no mejora."
+        },
+        "medications": {
+          "metformin": "La metformina puede dar molestias digestivas, sobre todo al inicio: coméntalo con tu médico si te afecta."
+        }
+      }
+    },
+    {
+      "id": "dolor_muscular",
+      "label": "Dolor muscular o agujetas",
+      "quick": "Es común después de entrenar o de un esfuerzo.",
+      "patterns": [
+        "agujetas",
+        "dolor muscular",
+        "adolorido",
+        "adolorida",
+        "me duelen los musculos",
+        "contractura",
+        "musculo cargado"
+      ],
+      "now": [
+        "Descansa la zona y haz movimiento suave (caminar, estiramientos livianos): el reposo total alarga la recuperación.",
+        "Calor local para relajar, buena hidratación, proteína en tus comidas y dormir bien."
+      ],
+      "prevent": [
+        "Progresar el entrenamiento de a poco y calentar antes de empezar."
+      ],
+      "consult": [
+        "Si no mejora en una semana o el dolor es intenso desde el inicio."
+      ],
+      "urgent": [
+        "Dolor muscular muy intenso con hinchazón y orina oscura (color té) después de un esfuerzo fuerte."
+      ],
+      "profile": {
+        "medications": {
+          "statin": "Las estatinas pueden dar dolor muscular. Si es persistente o notas la orina oscura, consulta pronto (no las suspendas por tu cuenta)."
+        }
+      }
+    },
+    {
+      "id": "esguince",
+      "label": "Torcedura, golpe o dolor articular",
+      "quick": "Qué mala suerte con esa lesión.",
+      "patterns": [
+        "esguince",
+        "torcedura",
+        "me torci",
+        "me pegue",
+        "me golpee",
+        "me duele el tobillo",
+        "me duele la rodilla",
+        "se me hincho el tobillo",
+        "luxacion",
+        "me caigo y"
+      ],
+      "now": [
+        "Protege la zona y evita apoyar o cargar con dolor los primeros días (reposo relativo).",
+        "Hielo envuelto en un paño 15–20 minutos, varias veces al día. Compresión suave con venda y elevación por encima del corazón.",
+        "Después de los primeros 1–2 días, empieza a mover la articulación suavemente dentro de lo que tolere."
+      ],
+      "prevent": [
+        "Calzado adecuado, calentar antes de entrenar y fortalecer los tobillos y las rodillas."
+      ],
+      "consult": [
+        "Si no mejora en 5 a 7 días o sientes la articulación inestable."
+      ],
+      "urgent": [
+        "No puedes apoyar el pie o mover la articulación, o se ve deformada.",
+        "Duele mucho al presionar el hueso, hay adormecimiento, o el pie está frío o pálido."
+      ],
+      "profile": {
+        "conditions": {
+          "diabetes": "Con diabetes, las lesiones en los pies cicatrizan peor: no las dejes pasar y consulta si no mejora pronto."
+        }
+      }
+    },
+    {
+      "id": "insomnio",
+      "label": "Problemas para dormir",
+      "quick": "Lamento que estés durmiendo mal.",
+      "patterns": [
+        "insomnio",
+        "no puedo dormir",
+        "no logro dormir",
+        "me despierto de noche",
+        "duermo mal",
+        "no pude dormir"
+      ],
+      "now": [
+        "Mantén horarios regulares, evita la cafeína desde la tarde y las pantallas la última hora antes de dormir.",
+        "Cena liviano, deja la habitación oscura y fresca, y si no te duermes en unos 20 minutos, levántate y haz algo tranquilo con poca luz.",
+        "Prueba respiración lenta (inhala 4 segundos, exhala 6) durante 2–3 minutos."
+      ],
+      "prevent": [
+        "Luz natural en la mañana, ejercicio durante el día y la cama solo para dormir."
+      ],
+      "consult": [
+        "Si dura más de 3 semanas o te afecta el día (cansancio, ánimo, concentración)."
+      ],
+      "urgent": [],
+      "profile": {
+        "conditions": {
+          "diabetes": "Despertares nocturnos con sudor o palpitaciones pueden ser una glucosa baja: mídela.",
+          "depression": "El sueño y el ánimo se afectan mutuamente: si el ánimo está bajo, coméntalo con tu equipo de salud.",
+          "anxiety": "La ansiedad suele alterar el sueño: las técnicas de respiración y una rutina fija ayudan; si persiste, consulta."
+        }
+      }
+    },
+    {
+      "id": "ansiedad",
+      "label": "Ansiedad, estrés o crisis de pánico",
+      "quick": "Estoy contigo; vamos por partes.",
+      "patterns": [
+        "ansiedad",
+        "ataque de panico",
+        "angustia",
+        "nervios",
+        "estoy estresado",
+        "estoy estresada",
+        "estres",
+        "me siento agobiado",
+        "me siento agobiada",
+        "palpitaciones por nervios"
+      ],
+      "now": [
+        "Respira lento: inhala 4 segundos por la nariz y exhala 6 por la boca, durante 2–3 minutos. Alargar la exhalación calma el cuerpo.",
+        "Ancla la atención: nombra 5 cosas que ves, 4 que tocas, 3 que oyes, 2 que hueles y 1 que saboreas.",
+        "Si puedes, camina un poco, toma agua y reduce por hoy la cafeína. Hablar con alguien de confianza también ayuda."
+      ],
+      "prevent": [
+        "Rutina de sueño, ejercicio regular, límites con la cafeína y pausas durante el día."
+      ],
+      "consult": [
+        "Si interfiere con tu día a día o dura semanas: un psicólogo o psiquiatra te puede ayudar mucho."
+      ],
+      "urgent": [
+        "Pensamientos de hacerte daño: llama al *4141 (Línea de Prevención del Suicidio) o al 131.",
+        "Dolor de pecho o falta de aire que no cede: no lo asumas como ansiedad, ve a urgencias."
+      ],
+      "profile": {
+        "conditions": {
+          "diabetes": "Una glucosa baja puede parecer ansiedad (temblor, sudor, palpitaciones): mídela."
+        },
+        "medications": {
+          "anxiolytic": "No cambies ni suspendas tus medicamentos por tu cuenta; si sientes que no te ayudan, coméntalo con tu médico."
+        }
+      }
+    },
+    {
+      "id": "estrenimiento",
+      "label": "Estreñimiento",
+      "quick": "Es más común de lo que parece y suele resolverse con hábitos simples.",
+      "patterns": [
+        "estrenimiento",
+        "constipacion",
+        "no puedo ir al bano",
+        "no hago caca",
+        "hace dias que no voy al bano",
+        "prision de vientre"
+      ],
+      "now": [
+        "Aumenta la fibra (frutas, verduras, legumbres, avena; las ciruelas ayudan) y toma más agua durante el día.",
+        "Muévete: caminar estimula el intestino. Ve al baño a una hora regular y no aguantes las ganas."
+      ],
+      "prevent": [
+        "Fibra y agua constantes, y ejercicio regular."
+      ],
+      "consult": [
+        "Si dura más de 1 semana, hay sangre en las deposiciones, dolor o pérdida de peso sin explicación."
+      ],
+      "urgent": [
+        "Dolor abdominal intenso con vómitos y sin poder eliminar gases ni deposiciones."
+      ],
+      "profile": {
+        "conditions": {
+          "hypothyroidism": "El hipotiroidismo puede causar estreñimiento: coméntalo con tu médico si es persistente.",
+          "ibs": "Con intestino irritable, sube la fibra de a poco para no aumentar los gases.",
+          "heart_failure": "Con insuficiencia cardíaca, cuánto líquido tomar lo define tu cardiólogo, también ahora: no lo subas por tu cuenta aunque aquí diga que tomes líquidos."
+        }
+      }
+    },
+    {
+      "id": "deshidratacion",
+      "label": "Sed intensa o deshidratación",
+      "quick": "Vamos a rehidratarte de a poco.",
+      "patterns": [
+        "deshidrat",
+        "sed intensa",
+        "mucha sed",
+        "boca seca",
+        "orina oscura",
+        "orino poco"
+      ],
+      "now": [
+        "Bebe líquidos en sorbos frecuentes; si hubo vómitos o diarrea, suero oral. Descansa a la sombra o en un lugar fresco.",
+        "Cuenta el agua del día: dime cuánto has tomado y lo registro."
+      ],
+      "prevent": [
+        "Tomar agua a lo largo del día (no esperar a tener sed), sobre todo con calor o ejercicio."
+      ],
+      "consult": [
+        "Si la sed o la orina oscura persisten a pesar de tomar líquidos."
+      ],
+      "urgent": [
+        "Confusión, mareo intenso, casi sin orina o desmayo."
+      ],
+      "profile": {
+        "conditions": {
+          "diabetes": "Sed intensa con mucha orina puede indicar glucosa alta: mídela.",
+          "ckd": "Con enfermedad renal la deshidratación es más riesgosa, pero no todos pueden tomar mucho líquido: sigue la indicación de tu médico.",
+          "heart_failure": "Con insuficiencia cardíaca no todos pueden tomar mucho líquido: sigue el límite que te dio tu cardiólogo y, si tienes mucha sed u orinas poco, consúltalo pronto."
+        },
+        "medications": {
+          "sglt2": "Los inhibidores SGLT2 y los diuréticos aumentan la pérdida de líquido: refuerza la hidratación."
+        }
+      }
+    },
+    {
+      "id": "herida",
+      "label": "Herida o corte",
+      "quick": "Calma: lo primero es controlar el sangrado y limpiar.",
+      "patterns": [
+        "me corte",
+        "herida",
+        "corte en",
+        "sangra un poco",
+        "raspon",
+        "rasguno",
+        "me pinche"
+      ],
+      "now": [
+        "Presiona con una gasa o paño limpio durante unos 10 minutos para detener el sangrado y mantén la zona elevada.",
+        "Lava con agua corriente y jabón, seca con suavidad y cubre con un apósito limpio.",
+        "Revisa si tienes la vacuna del tétano al día (refuerzo cada 10 años)."
+      ],
+      "prevent": [],
+      "consult": [
+        "Si los bordes quedan separados o es profunda (puede necesitar puntos), o quedó suciedad dentro.",
+        "Si aparecen señales de infección: enrojecimiento que se extiende, pus, calor, fiebre."
+      ],
+      "urgent": [
+        "Sangrado que no cede tras 10 minutos de presión firme, o un objeto clavado (no lo retires)."
+      ],
+      "profile": {
+        "conditions": {
+          "diabetes": "Con diabetes las heridas, sobre todo en los pies, cicatrizan peor: revísalas a diario y consulta si no mejoran en 2–3 días."
+        }
+      }
+    },
+    {
+      "id": "quemadura",
+      "label": "Quemadura leve",
+      "quick": "Calma: si es leve, se maneja bien en casa.",
+      "patterns": [
+        "me queme",
+        "quemadura",
+        "escaldadura",
+        "me salpico aceite"
+      ],
+      "now": [
+        "Enfría de inmediato con agua corriente fresca (no helada) durante 10–20 minutos. No uses hielo, pasta de dientes ni mantequilla.",
+        "No revientes las ampollas. Cubre con una gasa limpia y no adhesiva."
+      ],
+      "prevent": [],
+      "consult": [
+        "Si es más grande que la palma de tu mano, aparecen ampollas grandes, o no mejora en unos días."
+      ],
+      "urgent": [
+        "Quemaduras en cara, manos, genitales o articulaciones, profundas (blancas o negras), eléctricas o químicas."
+      ],
+      "profile": {
+        "conditions": {
+          "diabetes": "Con diabetes, cualquier quemadura (sobre todo en los pies) merece consulta: cicatriza peor."
+        }
+      }
+    }
+  ],
+  "generic": {
+    "now": [
+      "Descansa, mantente hidratado/a y observa cómo evoluciona en las próximas horas.",
+      "Anota desde cuándo lo tienes, qué lo mejora o empeora, y si hay fiebre u otros síntomas: le servirá a tu médico."
+    ],
+    "consult": [
+      "Si dura más de 2–3 días, empeora, o se repite.",
+      "Si te preocupa o afecta tu día a día."
+    ],
+    "urgent": [
+      "Dolor intenso o repentino, dificultad para respirar, dolor de pecho, desmayo, confusión, sangrado importante o debilidad de un lado del cuerpo."
+    ]
+  }
+}

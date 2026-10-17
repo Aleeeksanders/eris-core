@@ -1,0 +1,284 @@
+{
+  "version": "1.0",
+  "description": "Eris — base de conocimiento médico. Una entrada por ConditionId y por MedicationType (src/memory.ts), no por combinación. numericAdjustment SOLO cuando dirección y magnitud son de bajo riesgo y bien establecidas; todo lo demás es guidance cualitativa para que el LLM la redacte en tono conversacional, nunca una cifra clínica calculada aquí. Todo el contenido está deliberadamente conservador y remitido a un profesional de salud — no reemplaza indicación médica.",
+  "conditions": {
+    "diabetes_t1": {
+      "label": "Diabetes Tipo 1",
+      "scopes": [
+        "nutrition",
+        "glucose",
+        "general"
+      ],
+      "guidance": "El usuario vive con diabetes tipo 1 (dependiente de insulina) — cualquier cálculo de glucosa, dosis o rango objetivo se remite siempre a GlucoTrack, nunca se calcula aquí. Ten presente que el conteo de carbohidratos suele ser más estricto que en tipo 2. Cualquier ajuste de dieta o insulina debe confirmarse con su equipo médico."
+    },
+    "diabetes_t2": {
+      "label": "Diabetes Tipo 2",
+      "scopes": [
+        "nutrition",
+        "glucose",
+        "general"
+      ],
+      "guidance": "El usuario vive con diabetes tipo 2 — prioriza alimentos de bajo índice/carga glucémica y porciones de carbohidratos consistentes; cualquier cálculo de glucosa o insulina se remite siempre a GlucoTrack, nunca se calcula aquí. Ajustes de dieta o medicación deben confirmarse con su médico."
+    },
+    "prediabetes": {
+      "label": "Prediabetes",
+      "scopes": [
+        "nutrition",
+        "general"
+      ],
+      "guidance": "El usuario tiene prediabetes — el enfoque es preventivo: favorece constancia en horarios de comida y actividad regular más que restricciones estrictas. No apliques umbrales de glucosa como si fuera diabetes diagnosticada."
+    },
+    "hypertension": {
+      "label": "Hipertensión",
+      "scopes": [
+        "nutrition",
+        "training",
+        "general"
+      ],
+      "guidance": "El usuario tiene hipertensión — menciona con naturalidad la conveniencia de moderar el sodio y de calentar bien antes de esfuerzo físico intenso. Si reporta cifras de presión fuera de su rango habitual, sugiere que lo confirme con su médico en vez de interpretarlo tú."
+    },
+    "hypotension": {
+      "label": "Hipotensión",
+      "scopes": [
+        "nutrition",
+        "training",
+        "general"
+      ],
+      "guidance": "El usuario tiene presión baja — ten cautela con recomendaciones de ayuno prolongado, deshidratación o levantarse bruscamente tras esfuerzo, ya que pueden empeorar mareos. No sugieras restringir sodio o líquidos sin que lo indique su médico."
+    },
+    "hypothyroidism": {
+      "label": "Hipotiroidismo",
+      "scopes": [
+        "nutrition",
+        "general"
+      ],
+      "guidance": "El usuario tiene hipotiroidismo — su metabolismo y energía pueden variar más de lo típico entre días, especialmente si su tratamiento aún se está ajustando. Si toma levotiroxina, recuérdale (sin insistir en exceso) que suele tomarse en ayunas separada de calcio/hierro/café. No relaciones cambios de peso directamente con esfuerzo o dieta sin considerar esto."
+    },
+    "hyperthyroidism": {
+      "label": "Hipertiroidismo",
+      "scopes": [
+        "nutrition",
+        "general"
+      ],
+      "guidance": "El usuario tiene hipertiroidismo — su metabolismo puede estar acelerado, con mayor gasto energético, intolerancia al calor y posible mayor necesidad de hidratación de lo habitual. No apliques metas calóricas o de hidratación genéricas sin matizarlo."
+    },
+    "obesity": {
+      "label": "Obesidad",
+      "scopes": [
+        "nutrition",
+        "training",
+        "general"
+      ],
+      "guidance": "El usuario está en tratamiento o seguimiento por obesidad — evita lenguaje centrado en peso/báscula y enfócate en hábitos sostenibles (sueño, actividad, alimentación). No apliques déficits calóricos agresivos ni los calcules tú; eso debe venir de su equipo de salud."
+    },
+    "dyslipidemia": {
+      "label": "Dislipidemia (colesterol/triglicéridos)",
+      "scopes": [
+        "nutrition",
+        "general"
+      ],
+      "guidance": "El usuario tiene dislipidemia — al hablar de grasas en la dieta, distingue calidad (saturadas/trans vs. insaturadas) más que solo cantidad total. No sugieras restricciones numéricas de colesterol dietario; eso lo define su médico."
+    },
+    "asthma": {
+      "label": "Asma",
+      "scopes": [
+        "training",
+        "general"
+      ],
+      "guidance": "El usuario tiene asma — sugiere calentamiento gradual antes de ejercicio intenso y prestar atención a factores ambientales (frío, contaminación) que pueden gatillar síntomas. Si reporta falta de aire fuera de lo normal, sugiere que lo consulte en vez de que Eris lo evalúe."
+    },
+    "copd": {
+      "label": "EPOC",
+      "scopes": [
+        "training",
+        "general"
+      ],
+      "guidance": "El usuario tiene EPOC — prioriza progresión gradual de actividad física y pausas frecuentes sobre intensidad; la disnea (falta de aire) debe tratarse como señal de descanso, no de esfuerzo extra. No fijes metas de pasos o actividad genéricas sin matizarlo."
+    },
+    "ckd": {
+      "label": "Enfermedad Renal Crónica",
+      "scopes": [
+        "nutrition",
+        "hydration",
+        "training",
+        "general"
+      ],
+      "guidance": "El usuario tiene enfermedad renal crónica — ten cautela conversacional con sodio, potasio y proteína altos, y con metas de hidratación muy elevadas (en ERC avanzada el exceso de líquido también puede ser un riesgo, no solo el defecto). No fijes ni sugieras un límite numérico de líquidos, sodio, potasio o proteína: son estrictamente individuales y deben venir del nefrólogo del usuario."
+    },
+    "heart_failure": {
+      "label": "Insuficiencia Cardíaca",
+      "scopes": [
+        "nutrition",
+        "hydration",
+        "training",
+        "general"
+      ],
+      "guidance": "El usuario tiene insuficiencia cardíaca — no le fijes ni sugieras una meta de agua ni le digas que tome más líquido: cuánto líquido y cuánta sal puede tomar es individual y lo indica su cardiólogo. Si lleva un límite, recuerda con naturalidad que la jalea, las sopas, el helado y el hielo también cuentan como líquido. El ejercicio, según lo que le haya indicado su equipo médico (rehabilitación cardíaca). Si cuenta falta de aire que aumenta, hinchazón de piernas o un aumento de peso brusco en pocos días, sugiere consultar pronto a su equipo médico, sin interpretarlo tú."
+    },
+    "celiac": {
+      "label": "Celiaquía",
+      "scopes": [
+        "nutrition",
+        "general"
+      ],
+      "guidance": "El usuario tiene celiaquía — la exclusión de gluten debe ser estricta (incluyendo contaminación cruzada), no una preferencia flexible. Al sugerir alimentos o recetas, ten esto presente por defecto."
+    },
+    "ibs": {
+      "label": "Síndrome de Intestino Irritable",
+      "scopes": [
+        "nutrition",
+        "general"
+      ],
+      "guidance": "El usuario tiene colon irritable — los alimentos que le hacen mal son altamente individuales (no hay una lista universal de 'alimentos prohibidos'); si menciona síntomas digestivos, pregunta por su propio patrón en vez de asumir una dieta genérica tipo bajo-FODMAP completa."
+    },
+    "depression": {
+      "label": "Depresión",
+      "scopes": [
+        "sleep",
+        "training",
+        "general"
+      ],
+      "guidance": "El usuario tiene depresión diagnosticada — cambios en sueño o actividad pueden reflejar el estado de ánimo, no solo hábitos; mantén un tono empático y sin juicio al comentar días de baja energía o actividad. No conviertas esto en presión adicional ('deberías moverte más')."
+    },
+    "anxiety": {
+      "label": "Ansiedad / Estrés crónico",
+      "scopes": [
+        "sleep",
+        "general"
+      ],
+      "guidance": "El usuario tiene ansiedad o estrés crónico diagnosticado — al hablar de sueño o frecuencia cardíaca elevada, considera que la ansiedad puede ser una causa además de las físicas; evita un tono alarmista que pueda generar más ansiedad."
+    },
+    "other": {
+      "label": "Otra condición",
+      "scopes": [
+        "general"
+      ],
+      "guidance": "El usuario declaró una condición médica no catalogada en el sistema — revisa las notas libres de su perfil si existen, y por defecto sé más conservador con cualquier recomendación numérica, remitiendo a su médico ante la duda."
+    }
+  },
+  "medications": {
+    "insulin_rapid": {
+      "label": "Insulina rápida",
+      "scopes": [
+        "nutrition",
+        "glucose"
+      ],
+      "guidance": "El usuario usa insulina rápida — su timing suele estar ligado a las comidas. Cualquier ajuste de dosis o corrección se remite siempre a GlucoTrack/su equipo médico, nunca se calcula aquí."
+    },
+    "insulin_long": {
+      "label": "Insulina lenta/basal",
+      "scopes": [
+        "glucose"
+      ],
+      "guidance": "El usuario usa insulina basal (lenta) — cubre su nivel de fondo, no las comidas puntuales. Cualquier ajuste de dosis se remite siempre a GlucoTrack/su equipo médico."
+    },
+    "insulin_mixed": {
+      "label": "Insulina mixta",
+      "scopes": [
+        "nutrition",
+        "glucose"
+      ],
+      "guidance": "El usuario usa insulina mixta — combina cobertura basal y de comidas, por lo que el timing de sus comidas es más relevante que con insulina basal sola. Ajustes de dosis se remiten siempre a GlucoTrack/su equipo médico."
+    },
+    "metformin": {
+      "label": "Metformina",
+      "scopes": [
+        "nutrition"
+      ],
+      "guidance": "El usuario toma metformina — puede causar molestias digestivas si se toma con el estómago vacío; tomarla con comida suele ayudar. No tiene una interacción relevante con hidratación o ejercicio más allá de lo habitual."
+    },
+    "sglt2": {
+      "label": "Inhibidor SGLT2 (ej. empagliflozina)",
+      "scopes": [
+        "hydration"
+      ],
+      "guidance": "El usuario toma un inhibidor SGLT2 (empagliflozina, dapagliflozina…). Cómo actúa: hace que el riñón elimine glucosa por la orina, y con ella más líquido: puede necesitar más agua que una persona sin este medicamento, sobre todo con calor o actividad física intensa. Por sí solo casi no causa hipoglucemia. Si piensa hacer una dieta muy baja en carbohidratos o ayunos largos, que lo converse antes con su médico (con este medicamento hay un riesgo raro de cetoacidosis aunque la glucosa no esté alta).",
+      "numericAdjustment": {
+        "metric": "hydrationL",
+        "multiplier": 1.3,
+        "reason": "ajustada al alza porque el usuario toma un inhibidor SGLT2 (aumenta la pérdida de líquidos por orina) — es una estimación conservadora, no un valor clínico exacto; recomiéndale confirmar su meta de hidratación con su médico."
+      }
+    },
+    "glp1": {
+      "label": "Agonista GLP-1 (ej. semaglutida)",
+      "scopes": [
+        "nutrition"
+      ],
+      "guidance": "El usuario toma un agonista GLP-1 — suele reducir el apetito y enlentecer el vaciado gástrico, por lo que puede comer porciones más pequeñas de lo habitual sin que sea preocupante; presta atención si reporta ingesta muy baja o náuseas persistentes, sugiriendo consultarlo con su médico."
+    },
+    "dpp4": {
+      "label": "Inhibidor DPP-4 (ej. vildagliptina)",
+      "scopes": [
+        "nutrition"
+      ],
+      "guidance": "El usuario toma un inhibidor DPP-4 (vildagliptina, sitagliptina, linagliptina…). Cómo actúa: prolonga el efecto de las incretinas, hormonas del intestino que hacen que el páncreas libere más insulina SOLO cuando la glucosa sube y que bajan el glucagón. NO es un sensibilizador de insulina (eso es la metformina). Por sí solo casi no causa hipoglucemia (sí puede si se combina con sulfonilureas o insulina). No tiene una interacción relevante con hidratación ni actividad física. Si reporta molestias digestivas nuevas o dolor abdominal fuerte y persistente, sugiere consultarlo con su médico."
+    },
+    "sulfonylurea": {
+      "label": "Sulfonilurea",
+      "scopes": [
+        "nutrition",
+        "glucose"
+      ],
+      "guidance": "El usuario toma una sulfonilurea, que conlleva riesgo de hipoglucemia si se saltea comidas — evita sugerir ayunos prolongados o retrasos largos entre comidas sin mencionarlo. Cualquier síntoma de glucosa baja se remite a GlucoTrack/su médico."
+    },
+    "antihypertensive": {
+      "label": "Antihipertensivo",
+      "scopes": [
+        "hydration",
+        "training"
+      ],
+      "guidance": "El usuario toma medicación antihipertensiva — la deshidratación o el calor pueden potenciar mareos al levantarse (hipotensión ortostática); sugiere hidratarse bien antes de ejercicio intenso. No ajustes su dosis ni sugieras suspenderla."
+    },
+    "diuretic": {
+      "label": "Diurético",
+      "scopes": [
+        "hydration"
+      ],
+      "guidance": "El usuario toma un diurético, que aumenta la pérdida de líquidos por orina de forma similar a un inhibidor SGLT2 — puede necesitar más agua de lo habitual, pero a diferencia del SGLT2 esto todavía no tiene un ajuste numérico validado en Eris; menciónalo cualitativamente y sugiere confirmar su meta de hidratación con su médico."
+    },
+    "beta_blocker": {
+      "label": "Betabloqueador",
+      "scopes": [
+        "training"
+      ],
+      "guidance": "El usuario toma un betabloqueador, que reduce artificialmente la frecuencia cardíaca en reposo y durante el ejercicio — no interpretes una FC baja o una FC de esfuerzo baja como señal de mala condición física; el esfuerzo percibido es una mejor referencia que la FC en este caso."
+    },
+    "levothyroxine": {
+      "label": "Levotiroxina",
+      "scopes": [
+        "nutrition"
+      ],
+      "guidance": "El usuario toma levotiroxina — suele tomarse en ayunas, separada de calcio, hierro o café por al menos 30-60 min, ya que esto puede afectar su absorción. No es información para que Eris ajuste dosis, solo para tenerlo presente en el contexto de hábitos matutinos."
+    },
+    "statin": {
+      "label": "Estatina",
+      "scopes": [
+        "nutrition",
+        "training"
+      ],
+      "guidance": "El usuario toma una estatina — un efecto secundario poco frecuente es dolor o debilidad muscular; si reporta molestia muscular nueva o inusual tras entrenar, sugiere que lo mencione a su médico en vez de asumir que es solo agujetas normales."
+    },
+    "antidepressant": {
+      "label": "Antidepresivo",
+      "scopes": [
+        "sleep",
+        "nutrition"
+      ],
+      "guidance": "El usuario toma un antidepresivo — algunos pueden alterar el apetito o el patrón de sueño de forma muy individual (algunos dan más sueño, otros menos, algunos afectan el apetito en direcciones opuestas). No asumas un efecto genérico; si el usuario nota un cambio marcado, sugiere comentarlo con quien le recetó el medicamento."
+    },
+    "anxiolytic": {
+      "label": "Ansiolítico",
+      "scopes": [
+        "sleep"
+      ],
+      "guidance": "El usuario toma un ansiolítico — puede causar somnolencia, y combinarlo con alcohol no es seguro; si el patrón de sueño cambia notoriamente, coméntalo con naturalidad y sugiere consultarlo con quien se lo recetó."
+    },
+    "other": {
+      "label": "Otro medicamento",
+      "scopes": [
+        "general"
+      ],
+      "guidance": "El usuario toma un medicamento no catalogado en el sistema — sé más conservador con cualquier recomendación numérica de hidratación, nutrición o ejercicio, y remite a su médico ante cualquier duda sobre interacciones."
+    }
+  }
+}

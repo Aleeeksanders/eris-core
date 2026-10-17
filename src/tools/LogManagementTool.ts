@@ -135,7 +135,7 @@ export class LogManagementTool extends Tool<LogManagementInput> {
     const response = await this.provider.generate([
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt }
-    ], undefined, { temperature: 0.1, maxTokens: 256 });
+    ], undefined, { temperature: 0.1, maxTokens: 256, enableThinking: false }); // con razonamiento, 256 tokens no alcanzaban para los bullets
 
     return response.content.trim();
   }

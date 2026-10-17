@@ -7,21 +7,64 @@
 import { QueryEngine } from "./QueryEngine.js";
 import { ToolRegistry } from "./tools.js";
 import { OllamaProvider } from "./services/llm/OllamaProvider.js";
+import { WhisperProvider } from "./services/stt/WhisperProvider.js";
+import { PiperProvider } from "./services/tts/PiperProvider.js";
+import { buildSpokenVersion } from "./services/SpokenVersion.js";
 import { ContextCompressor } from "./services/ContextCompressor.js";
 import { loadSystemPrompt } from "./context.js";
 import { DEFAULT_CONFIG, THINKING_MODES } from "./types/config.js";
 import type { ThinkingMode } from "./types/config.js";
-import { FileSystemAdapter, type MemoryAdapter } from "./memory.js";
+import { FileSystemAdapter, type MemoryAdapter, type ChatPersona, TEMP_MAX_AI_REPLIES } from "./memory.js";
+import { VaultService } from "./services/vault/VaultService.js";
+import { VaultIndex } from "./services/vault/VaultIndex.js";
+import { buildProject } from "./services/vault/VaultBriefing.js";
+import { buildAxsDashboard } from "./services/vault/AxsDashboard.js";
+import { systemStatus } from "./services/SystemStatus.js";
+import { parseServiceRequest, runServiceAction, SERVICE_LABEL } from "./services/ServiceControl.js";
+import { sanitizeDump, saveFinanceBackup, listFinanceBackups, pullFinanceBackup } from "./services/FinanceBackup.js";
+import { leerCartola } from "./services/FinanceStatement.js";
+import { leerBoletaFoto } from "./services/ReceiptOcr.js";
+import { diagnoseBaseline, formatDiagnosisForLLM } from "./services/BaselineEngine.js";
+import { deriveRestrictions } from "./services/DietaryRestrictions.js";
+import { assessFood } from "./services/FoodSafetyCheck.js";
+import { getGuidance } from "./services/MedicalKnowledgeBase.js";
+import { buildMedicalContext } from "./services/LiveContext.js";
+import { getUserNotes, formatNotesForLLM, deleteUserNote } from "./tools/UserContextTool.js";
+import { getJournalEntries, addJournalEntry } from "./tools/JournalTool.js";
+import { getDismissals, getOverrides, clearDismissal, clearOverride } from "./tools/InsightFeedbackTool.js";
 import { join } from "path";
 import type { Message } from "./types/message.js";
 import { createMessage } from "./types/message.js";
 import { roleManager } from "./services/security/RoleManager.js";
 import { ROLES, canUseTool, type Role } from "./services/security/RoleSystem.js";
 import { authRateLimiter } from "./services/security/AuthRateLimiter.js";
+import { resolveSso, isSafeProfileId } from "./services/security/SsoAuth.js";
+import { accountStore } from "./services/security/AccountStore.js";
+import { getAuditLog } from "./services/security/AuditLog.js";
+import { removeItem, todayPayload, isValidDay, applyGoalUpdate, upsertChatRollup, sanitizePhoneFoodLog } from "./services/NutritionLog.js";
+import { todayKeyOf } from "./services/NutritionDay.js";
+import { dayCtxFrom, nutritionDayOf, isoDayKey } from "./services/MealSchedule.js";
+import { AdminService } from "./services/security/AdminService.js";
+import { getFeatures, setFeature, isFeatureName, FEATURE_LABELS } from "./services/Features.js";
+import { loadTargets, sanitizeBody } from "./services/DailyTargets.js";
+import { buildNudge, parseNudgeRequest } from "./services/NudgeSuggest.js";
+import { isTone, getTone, toneForAge } from "./services/Tone.js";
+import { manualSleepFor } from "./tools/SleepLogTool.js";
+import { AdminOverviewTool } from "./tools/AdminOverviewTool.js";
+import { AxsBriefingTool } from "./tools/AxsBriefingTool.js";
+import { VaultNoteTool } from "./tools/VaultNoteTool.js";
+import { routeTools, TOOL_GROUP } from "./services/ToolRouter.js";
+import type { ApprovalRequest, ApprovalDecision } from "./QueryEngine.js";
 import { GlucoService } from "./services/gluco/GlucoService.js";
 import { UnifiedFoodService } from "./services/gluco/UnifiedFoodService.js";
 import { GlucoTool } from "./tools/GlucoTool.js";
 import { NutritionTool } from "./tools/NutritionTool.js";
+import { resolveFinanceOp } from "./services/FinanceBridge.js";
+import { lookupBarcode, contributeProduct } from "./services/BarcodeLookup.js";
+import { searchPackagedHits } from "./services/PackagedFoods.js";
+import { waterTotalToday } from "./services/WaterToday.js";
+import { understandVoice, voiceVocabulary, lexiconIndex } from "./services/stt/VoiceFix.js";
+import { ProfileManagementTool } from "./tools/ProfileManagementTool.js";
 import { emailService } from "./services/EmailService.js";
 import { CryptoService } from "./services/security/CryptoService.js";
 import { readFile, writeFile } from "fs/promises";
@@ -34,16 +77,106 @@ const ROLE_PROMPTS: Record<Role, string> = {
   eris: join((import.meta as any).dir || process.cwd(), '..', 'data', 'system-prompt.md'),
 };
 
-const PORT = 3000;
+const PORT = Number(process.env.ERIS_PORT) || 3000;
+const MAX_USER_MESSAGE_CHARS = 8000;
+// (El contexto de Ollama ya no es fijo por perfil: lo elige ContextPlanner por turno, entre 8192 y 16384, según lo que de verdad se
+//  envía. Antes Ikaros tenía 16384 fijo —14 % más lento en cada respuesta— y cada cambio de perfil o de modo recargaba el modelo.)
+
+/**
+ * Acceso anterior con ID + PIN. Mientras esté en 1 sirve para MIGRAR perfiles viejos y para apps sin actualizar;
+ * ERIS_LEGACY_LOGIN=0 lo desactiva del todo (solo Google). Un perfil ya ligado a Google no se abre con su PIN viejo
+ * (se re-cifró con la llave del servidor), así que dejarlo activo no expone a las cuentas ya migradas.
+ */
+const LEGACY_LOGIN_ENABLED = process.env.ERIS_LEGACY_LOGIN !== "0";
+
+/** sessionId → perfil dueño. Impide que un perfil lea/borre el historial de otro pasando su id de sesión. */
+const sessionOwners = new Map<string, string>();
+function claimSession(id: string, profileId: string): string {
+  const owner = sessionOwners.get(id);
+  if (owner && owner !== profileId) id = crypto.randomUUID();
+  sessionOwners.set(id, profileId);
+  return id;
+}
+
+/** Límite simple por IP para el envío de correos de PIN: 5 por hora. */
+const notifyHits = new Map<string, number[]>();
+function notifyPinAllowed(ip: string): boolean {
+  const now = Date.now();
+  const recent = (notifyHits.get(ip) ?? []).filter((t) => now - t < 3600_000);
+  if (recent.length >= 5) { notifyHits.set(ip, recent); return false; }
+  recent.push(now); notifyHits.set(ip, recent);
+  return true;
+}
 const CONTEXT_RECENT = 12;
 const COMPRESS_THRESHOLD = 16;
+
+// Mapea cada métrica del BaselineEngine a la categoría de nota personal
+// correspondiente (UserContextTool), para filtrar solo las notas
+// relevantes a la variable que se está comentando en un tip/card.
+const METRIC_TO_NOTE_SCOPE: Record<string, "hydration" | "sleep" | "nutrition" | "training" | "finance" | "general"> = {
+  hydrationL: "hydration",
+  sleepHours: "sleep",
+  proteinG: "nutrition",
+  steps: "training",
+  restingHR: "training",
+  disponible: "finance",
+  savingsRate: "finance",
+  moodScore: "general",
+};
+
+const BASELINE_PHRASING_SYSTEM_PROMPT =
+  "Eres Eris. Se te dan datos YA CALCULADOS sobre cómo está el usuario hoy comparado con su propio patrón " +
+  "histórico personal (nunca umbrales genéricos de industria). Si el texto incluye un bloque 'TENDENCIA SOSTENIDA " +
+  "DETECTADA', es una señal DISTINTA al desvío de hoy — compara la última semana completa contra la anterior, así " +
+  "que un patrón sostenido de varios días pesa más que un día atípico puntual y merece más seriedad (o, si mejora, " +
+  "un reconocimiento genuino); no lo mezcles con el desvío de hoy en una sola frase confusa. Si además se incluye " +
+  "un bloque de historial médico (condiciones, medicamentos activos), tenlo en cuenta para el tono y las " +
+  "recomendaciones — pero nunca des indicaciones clínicas específicas (dosis, diagnósticos); para eso remite al " +
+  "usuario a su médico. Tu único trabajo es redactar el texto pedido, en español, natural y directo, sin inventar " +
+  "números ni datos médicos adicionales a los que se te dan. Habla SOLO de las métricas que aparecen, por su nombre " +
+  "(si es de Finanzas, di que es de Finanzas): nunca hables de glucosa, azúcar en sangre ni 'control' de una " +
+  "enfermedad si esa métrica no está en los datos. Nunca uses markdown, headers ni listas — solo texto " +
+  "plano de conversación.";
 
 // ─── PIN ejecutivo Ikaros ───────────────────────────────────
 // El acceso remoto a 'ikaros' está protegido por el PIN en .env
 
 // Cache de memorias y query engines aislados por perfil
 const memories = new Map<string, MemoryAdapter>();
-const queryEngines = new Map<string, QueryEngine>(); // profileKey → QueryEngine
+const queryEngines = new Map<string, QueryEngine>(); // profileKey → QueryEngine (y profileKey#eris: Ikaros en modo Eris)
+
+/** Con quién habla esta conexión: Hestia (perfil Ikaros en Modo AXS o empresa) o Eris. Los chats van separados. */
+const personaOfWs = (ws: any): ChatPersona => (ws?.data?.role === "ikaros" && ws?.data?.persona === "hestia" ? "hestia" : "eris");
+
+/**
+ * Los chats de quien atiende ahora (los antiguos, sin marca, se ven en ambos), con los cortos marcados como temporales:
+ * 5 respuestas o menos, sin proyecto y que no sea el abierto → la app los muestra en "Chats temporales" (no se borran).
+ */
+function convList(memory: MemoryAdapter, ws: any) {
+  const persona = personaOfWs(ws);
+  const ikaros = ws?.data?.role === "ikaros";
+  const active = ws?.data?.sessionId;
+  return memory.listConversations()
+    // Los antiguos (sin marca) van a quien corresponden por tema; los vacíos se ven en ambas listas
+    .filter((c: any) => !ikaros || (c.persona ?? c.inferredPersona ?? persona) === persona)
+    .map((c: any) => ({ ...c, temporary: !c.projectId && c.id !== active && (c.aiReplies ?? 0) <= TEMP_MAX_AI_REPLIES }));
+}
+/**
+ * ¿Mostrarle la bienvenida? Solo a quien recién empieza: nunca la vio y todavía no ha conversado con Eris. Queda guardado en
+ * su perfil, así que no vuelve a salir al reinstalar ni en otro teléfono. 2026-10-11: le salía a un tester que ya usaba la
+ * app (la marca vivía solo en el teléfono y se ponía al terminarla; si la cerraba a medias, salía de nuevo).
+ */
+async function shouldWelcome(memory: MemoryAdapter): Promise<boolean> {
+  if (await memory.get("welcome_done").catch(() => null)) return false;
+  if (memory.listConversations().some((c: any) => (c.aiReplies ?? 0) > 0)) {
+    await memory.set("welcome_done", { at: new Date().toISOString(), by: "ya usaba la app" }).catch(() => {});
+    return false;
+  }
+  return true;
+}
+
+/** Grupos de herramientas que solo existen para Ikaros en el Modo AXS Executive (PC, administración, bóveda de AXS). */
+const IKAROS_ONLY_GROUPS = new Set(["axs", "system", "admin"]);
 const activeGlucoServices = new Map<string, GlucoService>();
 // Clientes WebSocket activos por profileId → para push de alertas CGM
 const activeClients = new Map<string, Set<any>>(); // profileId → Set<ServerWebSocket>
@@ -64,6 +197,59 @@ function registerClient(profileId: string, ws: any) {
 
 function unregisterClient(profileId: string, ws: any) {
   activeClients.get(profileId)?.delete(ws);
+}
+
+// ─── Aprobaciones humanas ───────────────────────────────────────────────────
+// Las acciones sensibles (comandos, escribir archivos, reparar la bóveda…) esperan a que una PERSONA toque
+// "Aprobar" en la app. La solicitud vive en el servidor: el celular solo devuelve {id, approved}; el contenido a
+// aprobar nunca lo puede cambiar el cliente ni el modelo. Solo vale la respuesta que llega por la MISMA conexión.
+const APPROVAL_TTL_MS = 180_000;
+interface PendingApproval { ws: any; profileId: string; finish: (d: ApprovalDecision, notify: boolean) => void }
+const pendingApprovals = new Map<string, PendingApproval>();
+const lastLoginAudit = new Map<string, number>(); // `${perfil}:${tipo}` → último registro de acceso en la bitácora
+
+function askApproval(ws: any, profileId: string, req: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalDecision> {
+  // Una app vieja no sabe mostrar la tarjeta: se deniega de inmediato en vez de dejar colgado el chat 3 minutos
+  if (!(ws.data as any)?.canApprove) return Promise.resolve("unavailable");
+  const id = crypto.randomUUID();
+  return new Promise<ApprovalDecision>((resolve) => {
+    let timer: ReturnType<typeof setTimeout>;
+    const finish = (d: ApprovalDecision, notify: boolean) => {
+      if (!pendingApprovals.has(id)) return;
+      clearTimeout(timer);
+      pendingApprovals.delete(id);
+      if (notify) { try { ws.send(JSON.stringify({ type: "confirm_cancelled", id, reason: d })); } catch {} }
+      resolve(d);
+    };
+    timer = setTimeout(() => finish("timeout", true), APPROVAL_TTL_MS);
+    pendingApprovals.set(id, { ws, profileId, finish });
+    signal?.addEventListener("abort", () => finish("denied", true), { once: true });
+    try {
+      ws.send(JSON.stringify({
+        type: "confirm_request", id, tool: req.tool, title: req.title,
+        detail: String(req.detail).slice(0, 3000), risk: req.risk, flags: req.flags, ttlMs: APPROVAL_TTL_MS,
+      }));
+    } catch { finish("denied", false); }
+  });
+}
+
+/** Cancela (como rechazo) todo lo pendiente de una conexión, o de un perfil entero. */
+function denyApprovals(match: { ws?: any; profileId?: string }) {
+  for (const p of [...pendingApprovals.values()]) {
+    if ((match.ws && p.ws === match.ws) || (match.profileId && p.profileId === match.profileId)) p.finish("denied", true);
+  }
+}
+
+/**
+ * Saca a un perfil de sus conexiones abiertas y descarta sus motores en caché, para que el próximo ingreso arme todo
+ * de nuevo con el rol vigente (cambio de rol) o falle si la sesión ya no existe (cierre de sesiones / suspensión).
+ */
+function kickProfile(profileId: string) {
+  for (const k of [...queryEngines.keys()]) if (k.startsWith(profileId + ":")) queryEngines.delete(k);
+  denyApprovals({ profileId });
+  for (const ws of [...(activeClients.get(profileId) ?? [])]) {
+    try { ws.close(4001, "session_changed"); } catch {}
+  }
 }
 
 // Cooldowns de alertas: evitar spam (1 alerta por tipo cada 10 min por perfil)
@@ -94,6 +280,47 @@ function wireGlucoAlerts(profileId: string, svc: GlucoService, thresholds?: impo
 // UnifiedFoodService: singleton del servidor — usa USDA (env) + local DB + Open Food Facts (sin key)
 const usdaApiKey = process.env.USDA_API_KEY ?? "DEMO_KEY";
 const unifiedFood = new UnifiedFoodService(usdaApiKey);
+
+
+/** Estado de nutrición de HOY para el móvil (comidas, agua efectiva y cada toma de agua). */
+async function buildNutritionToday(memory: MemoryAdapter) {
+  // El día de COMIDA (termina al dormir, no a medianoche): el mismo que calcula el teléfono
+  const today = await todayKeyOf(memory);
+  const nutritionLog = await memory.get(`nutrition_log_${today}`).catch(() => []);
+  const hydrationLog = await memory.get(`hydration_log_${today}`).catch(() => []);
+  // Metas configuradas por chat (set_nutritional_goals): el móvil las guardaba solo localmente y nada las llenaba
+  // desde el servidor, así que el resumen del día siempre mostraba los valores por defecto (2000 kcal / 2,5 L).
+  const storedGoals = (await memory.get("nutrition_goals").catch(() => null)) || {};
+  // Sodio/azúcar/fibra/grasa: antes se mostraba solo cuánto consumiste, nunca si eso era mucho o poco. Van en el
+  // mismo objeto `goals` (el móvil ya sabe fusionar cualquier campo numérico ahí, ver mergeGoals) pero se
+  // recalculan siempre del perfil médico — no son algo que el usuario edite en "Metas nutricionales". Un objeto
+  // NUEVO, nunca se mutan `storedGoals`: si `memory.get` alguna vez devolviera una referencia compartida,
+  // mutarla podría terminar persistiéndose por accidente la próxima vez que se guarden metas de verdad.
+  // Metas efectivas de HOY desde la fuente única (DailyTargets): calorías y agua según Forge y el perfil médico, no
+  // 2.000 kcal / 2,5 L fijos. `null` = esa meta no aplica (p. ej. agua con enfermedad renal): el móvil la borra.
+  let goals: Record<string, number | null> = { ...storedGoals };
+  let goalsSet: Record<string, number> = {};
+  let targets: Record<string, unknown> | undefined;
+  try {
+    const t = await loadTargets(memory);
+    goals = {
+      ...goals,
+      calories: t.kcal, waterLiters: t.waterL, waterTargetOff: t.waterL === null ? 1 : null,
+      proteinGGoal: t.proteinG, proteinIsCap: t.proteinIsCap ? 1 : null,
+      // rango con respaldo de la meta de proteína (según el objetivo de Forge); null = no aplica (tope renal o fijada a mano)
+      proteinGMin: t.proteinRange?.[0] ?? null, proteinGMax: t.proteinRange?.[1] ?? null,
+      sodiumMgLimit: t.sodiumMgLimit, sugarGLimit: t.sugarGLimit, fiberGGoal: t.fiberGGoal,
+      fatGLimit: storedGoals.fat || t.fatGLimit,
+    };
+    goalsSet = t.set as Record<string, number>;
+    targets = { sources: t.sources, notes: t.notes, kcalMaintenance: t.kcalMaintenance, kcalTraining: t.kcalTraining };
+  } catch {}
+  // Hidratación EFECTIVA (café/alcohol/bebidas azucaradas hidratan menos que el agua), igual que get_daily_log
+  // y el asesor metabólico — antes esto sumaba litros crudos y las cifras no coincidían entre pantallas.
+  // Sueño anotado por chat para anoche (sleep_log): el teléfono lo usa en Métricas y en el puntaje si el reloj no lo midió
+  const sleepToday = await manualSleepFor(memory).catch(() => null);
+  return { ...todayPayload(nutritionLog, hydrationLog), goals, goalsSet, targets, sleepToday };
+}
 
 async function getOrCreateMemory(
   profileId: string,
@@ -134,14 +361,34 @@ async function startServer() {
     DEFAULT_CONFIG.llm.model
   );
 
+  // Sin Ollama el servidor arranca igual (2026-10-14, "solo registro": el usuario apagó el chat para liberar RAM y GPU):
+  // el registro, la sincronización y los avisos del teléfono no usan el modelo. El chat responde que está en pausa.
   const isAvailable = await provider.isAvailable();
   if (!isAvailable) {
-    console.log("⚠️  Ollama no está disponible. Ejecuta: ollama serve");
-    process.exit(1);
+    console.log("⚠️  Ollama no está disponible: el chat queda en pausa; el registro y los avisos siguen funcionando. Para el chat: ollama serve");
+  } else {
+    // Precarga del modelo (sin generar nada): el primer mensaje real no paga la carga (~5 s) ni espera a que se cargue.
+    void provider.warmup(THINKING_MODES.flash.model, THINKING_MODES.flash.contextLength).then((ok) =>
+      console.log(ok ? "🔥 Modelo precargado en memoria." : "⚠️  No se pudo precargar el modelo (se cargará con el primer mensaje).")
+    );
   }
 
-  const promptPath = join((import.meta as any).dir, "..", "data", "system-prompt.md");
-  const systemPrompt = await loadSystemPrompt(promptPath);
+  // Whisper es opcional — si no está corriendo, todo Eris sigue funcionando
+  // normal, solo el dictado por voz falla con un mensaje claro en vez de
+  // tumbar el server entero (a diferencia de Ollama, que es obligatorio).
+  const whisperProvider = new WhisperProvider();
+  const whisperOk = await whisperProvider.isAvailable();
+  console.log(whisperOk
+    ? "🎙️  Whisper (voz) disponible."
+    : "🎙️  Whisper (voz) no disponible — el dictado por voz no funcionará hasta levantar whisper-server.");
+
+  // Piper (voz de respuesta) — también opcional, mismo criterio que Whisper.
+  const piperProvider = new PiperProvider();
+  const piperOk = await piperProvider.isAvailable("daniela");
+  console.log(piperOk
+    ? "🗣️  Piper (voz de respuesta) disponible."
+    : "🗣️  Piper (voz de respuesta) no disponible — la respuesta hablada no funcionará hasta levantar los servidores de Piper.");
+
   const toolRegistry = new ToolRegistry();
 
   // ─── Herramientas estándar ──────────────────────────────────────────
@@ -155,22 +402,39 @@ async function startServer() {
   toolRegistry.register(new VaultAuditTool());
   toolRegistry.register(new VaultHealerTool());
   toolRegistry.register(new ExecutiveReportTool(provider));
+  // Estaba importada pero nunca se registraba: el prompt de Ikaros manda guardar las decisiones con `crystallize` y cada
+  // intento fallaba con "herramienta no disponible". Es `dangerous`: pide aprobación antes de escribir en la bóveda.
+  toolRegistry.register(new CrystallizeTool());
   toolRegistry.register(new GlucoTool());
   toolRegistry.register(new NutritionTool());
+  toolRegistry.register(new ProfileManagementTool());
 
-  // Mapa de health snapshots por sesión (profileId → snapshot serializado)
-  const healthSnapshots = new Map<string, string>();
+  // ─── Administración y auditoría ─────────────────────────────────────
+  const audit = getAuditLog();
+  const adminService = new AdminService({
+    store: accountStore,
+    profilesDir: join(os.homedir(), ".eris", "profiles"),
+    audit,
+    online: (id) => activeClients.get(id)?.size ?? 0,
+    roles: {
+      getRole: (id) => roleManager.getRole(id),
+      setRole: async (id, role) => {
+        if (role === "eris") await roleManager.revokeRole(id, "ikaros");
+        else await roleManager.assignRole(id, role, "ikaros");
+      },
+    },
+  });
+  toolRegistry.register(new AdminOverviewTool(adminService, audit));
+  // Herramientas de AXS que hacen el trabajo en código (solo Ikaros: el rol público no las tiene en su lista)
+  toolRegistry.register(new AxsBriefingTool());
+  toolRegistry.register(new VaultNoteTool());
 
-  // Mapa de contexto financiero por sesión (profileId → texto de contexto Hunter Wallet)
-  const financialContexts = new Map<string, string>();
-
-  const queryEngine = new QueryEngine(provider, toolRegistry, systemPrompt);
   const compressor = new ContextCompressor(provider);
 
   const sessions = new Map<string, Message[]>();
   const webDir = join((import.meta as any).dir, "..", "web");
 
-  const server = Bun.serve({
+  Bun.serve({
     port: PORT,
     async fetch(req, server) {
       const url = new URL(req.url);
@@ -179,17 +443,14 @@ async function startServer() {
         const sessionId = url.searchParams.get("session") || crypto.randomUUID();
         const rawProfileId = url.searchParams.get("profile") || "default";
         const profileId = rawProfileId.toLowerCase();
+        // El id se usa como nombre de carpeta: solo letras, números, punto, guion y guion bajo (evita "../../" y rutas raras)
+        if (!isSafeProfileId(profileId)) return new Response("Perfil inválido", { status: 400 });
         // PIN ya NO viaja en la URL — se envía como primer mensaje WebSocket
 
         const remoteAddress =
           req.headers.get('x-forwarded-for')?.split(',')[0].trim() ||
           server.requestIP(req)?.address ||
           '';
-
-        const isLocal =
-          remoteAddress === '127.0.0.1' ||
-          remoteAddress === '::1' ||
-          remoteAddress.startsWith('::ffff:127.');
 
         // Ya no bloqueamos la conexión remota por defecto si es ikaros, 
         // porque usará la app (Tailscale) y requiere PIN.
@@ -200,25 +461,20 @@ async function startServer() {
       }
 
       if (url.pathname === "/api/status") {
+        // Público (sin login): solo lo mínimo. Antes listaba todas las herramientas y el modelo.
         const ollamaOk = await provider.isAvailable();
-        return Response.json({
-          status: "ok",
-          ollama: ollamaOk,
-          model: DEFAULT_CONFIG.llm.model,
-          defaultMode: DEFAULT_CONFIG.defaultMode,
-          tools: toolRegistry.listNames(),
-          features: {
-            glucoTrack: true,
-            fatSecret: true,
-          },
-        });
+        return Response.json({ status: "ok", ollama: ollamaOk });
       }
 
       // ─── Reset de PIN usando Recovery Key ────────────────────────────
+      if ((url.pathname === "/api/auth/reset-pin-with-rk" || url.pathname === "/api/auth/notify-pin") && !LEGACY_LOGIN_ENABLED) {
+        return Response.json({ error: "Desactivado: el acceso es solo con Google." }, { status: 410 });
+      }
+
       if (url.pathname === "/api/auth/reset-pin-with-rk" && req.method === "POST") {
         try {
           const body = await req.json() as { profileId: string; recoveryKey: string };
-          if (!body.profileId || !body.recoveryKey) {
+          if (!body.profileId || !body.recoveryKey || !isSafeProfileId(String(body.profileId).toLowerCase())) {
             return Response.json({ error: "Faltan campos." }, { status: 400 });
           }
 
@@ -261,6 +517,20 @@ async function startServer() {
           if (!body.email || !body.pin || !body.profileId) {
             return Response.json({ error: "Faltan campos requeridos." }, { status: 400 });
           }
+          // Antes cualquiera podía mandar correos con texto propio desde la cuenta del servidor (phishing / spam).
+          // Ahora: límite por IP, correo con formato válido, y solo se envía si el PIN corresponde de verdad al perfil.
+          const ip = server.requestIP(req)?.address || "desconocida";
+          if (!notifyPinAllowed(ip)) return Response.json({ error: "Demasiadas solicitudes." }, { status: 429 });
+          const pid = String(body.profileId).toLowerCase();
+          if (!isSafeProfileId(pid) || !/^[^\s@]{1,64}@[^\s@]{1,190}$/.test(String(body.email))) {
+            return Response.json({ error: "Datos inválidos." }, { status: 400 });
+          }
+          try {
+            const km = JSON.parse(await readFile(join(os.homedir(), ".eris", "profiles", pid, "key.json"), "utf-8"));
+            if (!new CryptoService().unlock(String(body.pin), km)) return Response.json({ error: "No autorizado." }, { status: 401 });
+          } catch {
+            return Response.json({ error: "No autorizado." }, { status: 401 });
+          }
           const result = await emailService.sendNewProfilePin({
             email: body.email,
             name: body.name || body.profileId,
@@ -275,8 +545,19 @@ async function startServer() {
       }
 
       if (url.pathname.startsWith("/api/gluco/")) {
-        const profileId = req.headers.get("x-profile-id");
-        const pin = req.headers.get("x-pin");
+        let profileId = req.headers.get("x-profile-id");
+        let pin = req.headers.get("x-pin");
+        const bearer = (req.headers.get("authorization") || "").match(/^Bearer\s+(\S+)$/i)?.[1];
+        if (bearer) {
+          // Sesión de Google: el perfil y la llave salen del token, no de lo que mande el cliente
+          try {
+            const r = await resolveSso({ type: "auth_session", token: bearer });
+            profileId = r.profileId; pin = r.pin;
+          } catch { return Response.json({ error: "Sesión inválida o vencida." }, { status: 401 }); }
+        } else if (!LEGACY_LOGIN_ENABLED) {
+          return Response.json({ error: "Inicia sesión con Google." }, { status: 401 });
+        }
+        if (profileId && !isSafeProfileId(profileId.toLowerCase())) return Response.json({ error: "Perfil inválido." }, { status: 400 });
         
         if (!profileId || !pin) {
           return Response.json({ error: "No autorizado. Faltan cabeceras de perfil o PIN." }, { status: 401 });
@@ -295,6 +576,10 @@ async function startServer() {
         const isFoodApi = url.pathname.startsWith("/api/gluco/food/");
         
         if (!isFoodApi) {
+          // Módulo de glucosa sin visto bueno del administrador: ni conexión al sensor, ni lecturas, ni alertas
+          if (!(await getFeatures()).glucose) {
+            return Response.json({ ok: false, code: "module_disabled", message: "El módulo de glucosa está desactivado por ahora." }, { status: 403 });
+          }
           // ─── Diagnóstico de conexión (crea servicio temporal, no usa caché) ──
           if (url.pathname === "/api/gluco/test") {
             const profile = await vault.getProfile();
@@ -445,26 +730,56 @@ async function startServer() {
       },
 
       async message(ws, message) {
-        const { sessionId, profileId, remoteAddress } = ws.data as any;
+        let { sessionId, profileId, remoteAddress } = ws.data as any;
         let data: any;
         try { data = JSON.parse(message as string); } catch { return; }
 
         // ─── Handshake de autenticación ──────────────────────────────────────
         if (!((ws.data as any).authenticated)) {
-          if (data.type !== 'auth') {
-            ws.send(JSON.stringify({ type: 'error', message: 'Autenticación requerida.' }));
-            return;
-          }
+          let pin: string | undefined;
+          let sessionTokenOut: string | undefined;
+          let ssoLogin = false;
+          // Capacidades del cliente: solo una app que sabe mostrar la tarjeta "Aprobar/Rechazar" puede ejecutar acciones sensibles
+          (ws.data as any).canApprove = Array.isArray(data.caps) && data.caps.includes("approvals");
+          // …y solo una app que sabe aplicar operaciones en Finanzas (FinanceBridge) recibe las de finance_tracker
+          (ws.data as any).canFinance = Array.isArray(data.caps) && data.caps.includes("finance_ops");
 
-          const pin: string | undefined = data.pin;
-
-          // ─── Hardcode de Ikaros en servidor ───────────────────────────────────
-          if (profileId === 'ikaros') {
-            const serverIkarosPin = process.env.IKAROS_PIN;
-            if (serverIkarosPin && pin !== serverIkarosPin) {
-              ws.send(JSON.stringify({ type: 'error', message: 'Credenciales administrativas incorrectas para Ikaros.' }));
+          if (data.type === 'auth_google' || data.type === 'auth_session') {
+            // ─── SSO de Google: el SERVIDOR verifica la identidad; el perfil sale de la cuenta, no de lo que diga el cliente ───
+            try {
+              const r = await resolveSso(data);
+              profileId = r.profileId;
+              pin = r.pin;              // llave interna del servidor: jamás viaja al celular
+              sessionTokenOut = r.sessionToken;
+              ssoLogin = true;
+              (ws.data as any).profileId = profileId;
+              (ws.data as any).sso = true;
+            } catch (e: any) {
+              ws.send(JSON.stringify({ type: 'auth_error', code: e?.code || 'forbidden', message: e?.message || 'No se pudo iniciar sesión.', ...(e?.extra || {}) }));
+              // Se deja constancia de lo que sí importa (token falso, cuenta suspendida); una sesión vencida es rutina
+              if (e?.code === 'invalid_token' || e?.code === 'account_disabled' || e?.code === 'forbidden') {
+                void audit.record({ event: 'login_failed', profileId: 'desconocido', detail: String(e?.code || 'forbidden'), ip: remoteAddress });
+              }
               return;
             }
+          } else if (data.type === 'auth') {
+            if (!LEGACY_LOGIN_ENABLED) {
+              ws.send(JSON.stringify({ type: 'auth_error', code: 'legacy_disabled', message: 'El acceso con ID y PIN está desactivado. Inicia sesión con Google.' }));
+              return;
+            }
+            pin = data.pin;
+
+            // ─── Hardcode de Ikaros en servidor ───────────────────────────────────
+            if (profileId === 'ikaros') {
+              const serverIkarosPin = process.env.IKAROS_PIN;
+              if (serverIkarosPin && pin !== serverIkarosPin) {
+                ws.send(JSON.stringify({ type: 'error', message: 'Credenciales administrativas incorrectas para Ikaros.' }));
+                return;
+              }
+            }
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: 'Autenticación requerida.' }));
+            return;
           }
 
           try {
@@ -472,6 +787,9 @@ async function startServer() {
             (ws.data as any).pin = pin;
             (ws.data as any).authenticated = true;
             (ws.data as any).memory = memory;
+            // El id de sesión viene de la URL (lo elige el cliente): si ya es de OTRO perfil, se le da uno nuevo.
+            sessionId = claimSession(sessionId, profileId);
+            (ws.data as any).sessionId = sessionId;
 
             const userProfile = await memory.getProfile();
 
@@ -480,8 +798,8 @@ async function startServer() {
             // para usarse en la app móvil. El PIN protege el acceso.
             (ws.data as any).role = profileRole;
 
-            const roleDefinition = ROLES[profileRole];
-            const rolPromptPath = ROLE_PROMPTS[profileRole];
+            const roleDefinition = ROLES[profileRole] ?? ROLES.eris;
+            const rolPromptPath = ROLE_PROMPTS[profileRole] ?? ROLE_PROMPTS.eris;
 
             // Cargar archivos de contexto opcionales del perfil
             const profileDir = join(os.homedir(), ".eris", "profiles", profileId);
@@ -491,20 +809,16 @@ async function startServer() {
               trainingPlanBlock = `\n\n### Plan de Entrenamiento Actual\n${tp}`;
             } catch { /* sin plan registrado */ }
 
-            let personalizedPrompt: string;
-            if (userProfile) {
-              const profileText = [
-                userProfile.displayName ? `Nombre: ${userProfile.displayName}` : '',
-                userProfile.role ? `Contexto: ${userProfile.role}` : '',
-                userProfile.goals ? `Objetivos: ${userProfile.goals}` : '',
-                userProfile.language ? `Idioma preferido: ${userProfile.language}` : '',
-                userProfile.customContext || '',
-              ].filter(Boolean).join('\n') + trainingPlanBlock;
-              personalizedPrompt = await loadSystemPrompt(rolPromptPath, profileText, profileRole);
-            } else {
-              const profileText = trainingPlanBlock.trim() || undefined;
-              personalizedPrompt = await loadSystemPrompt(rolPromptPath, profileText, profileRole);
-            }
+            const profileText = userProfile
+              ? [
+                  userProfile.displayName ? `Nombre: ${userProfile.displayName}` : '',
+                  userProfile.role ? `Contexto: ${userProfile.role}` : '',
+                  userProfile.goals ? `Objetivos: ${userProfile.goals}` : '',
+                  userProfile.language ? `Idioma preferido: ${userProfile.language}` : '',
+                  userProfile.customContext || '',
+                ].filter(Boolean).join('\n') + trainingPlanBlock
+              : trainingPlanBlock.trim() || undefined;
+            const personalizedPrompt = await loadSystemPrompt(rolPromptPath, profileText, profileRole);
 
             const filteredRegistry = roleDefinition.allowedTools.includes('*')
               ? toolRegistry
@@ -512,7 +826,23 @@ async function startServer() {
 
             const profileKey = `${profileId}:${pin || ''}`;
             if (!queryEngines.has(profileKey)) {
-              queryEngines.set(profileKey, new QueryEngine(provider, filteredRegistry, personalizedPrompt));
+              const allTools = roleDefinition.allowedTools.includes('*');
+              queryEngines.set(profileKey, new QueryEngine(provider, filteredRegistry, personalizedPrompt, {
+                // Con todas las herramientas, el modelo solo ve las del grupo que pide cada mensaje
+                router: allTools ? routeTools : undefined,
+              }));
+            }
+            // Separación Eris / Ikaros. Con el Modo AXS Executive APAGADO, el perfil Ikaros habla con ERIS: su prompt (reglas de
+            // nutrición, Finanzas, salud) y SIN herramientas del PC, de administración ni de AXS. Antes seguía siendo Hestia, cuyo
+            // prompt habla de comandos y aprobaciones y no trae las reglas de nutrición: "ingresa 1 empanada… como once" terminó
+            // en una tarjeta para aprobar un comando en el PC (2026-10-03). Hestia y todo lo demás quedan en el Modo AXS Executive.
+            if (profileRole === 'ikaros' && !queryEngines.has(`${profileKey}#eris`)) {
+              const erisModeNote = 'Estás en el modo Eris de la app. Si pide algo del PC (archivos, comandos, abrir programas), de administración ' +
+                'o de AXS (bóveda, proyectos, briefing), dile en una frase que eso se hace en el Modo AXS Executive (Perfil → Modo AXS Executive). No intentes hacerlo.\n' +
+                'La persona con la que hablas es el fundador de AXS: él te creó. Si te lo menciona, reconócelo con cercanía (nunca le digas que no es tu creador).';
+              const erisPrompt = await loadSystemPrompt(ROLE_PROMPTS.eris, [profileText, erisModeNote].filter(Boolean).join('\n'), 'eris');
+              const erisRegistry = new ToolRegistry(toolRegistry.getAll().filter((t) => !IKAROS_ONLY_GROUPS.has(TOOL_GROUP[t.name])));
+              queryEngines.set(`${profileKey}#eris`, new QueryEngine(provider, erisRegistry, erisPrompt, { router: routeTools }));
             }
 
             if (!sessions.has(sessionId)) sessions.set(sessionId, memory.getConversation(sessionId));
@@ -523,16 +853,28 @@ async function startServer() {
 
             ws.send(JSON.stringify({
               type: 'connected',
+              features: await getFeatures(),
               sessionId, profileId,
               role: profileRole,
-              recoveryKey,
+              showWelcome: await shouldWelcome(memory),
+              // Con Google no hay PIN ni llave de recuperación que mostrar; el token de sesión solo viaja en el inicio
+              recoveryKey: ssoLogin ? undefined : recoveryKey,
+              sessionToken: sessionTokenOut,
               userProfile,
-              conversations: memory.listConversations(),
+              conversations: convList(memory, ws),
               projects: memory.listProjects(),
               history: history.map(m => ({ role: m.role, content: m.content, id: m.id })),
               defaultMode: DEFAULT_CONFIG.defaultMode,
               availableModes: Object.values(THINKING_MODES).map(m => ({ id: m.id, label: m.label, icon: m.icon, description: m.description })),
             }));
+
+            // Bitácora de accesos. Las reconexiones automáticas de la app se agrupan: una entrada cada 30 min por perfil.
+            const loginKind = sessionTokenOut ? 'google' : ssoLogin ? 'sesión' : 'legacy';
+            const lk = `${profileId}:${loginKind}`;
+            if (loginKind !== 'sesión' || Date.now() - (lastLoginAudit.get(lk) ?? 0) > 30 * 60_000) {
+              lastLoginAudit.set(lk, Date.now());
+              void audit.record({ event: 'login', profileId, role: profileRole, detail: loginKind, ip: remoteAddress });
+            }
           } catch (err: any) {
             console.error('[WS] Error de autenticación/memoria:', err);
             ws.send(JSON.stringify({ type: 'error', message: err?.message || 'PIN incorrecto.' }));
@@ -555,7 +897,157 @@ async function startServer() {
         try {
           const data = JSON.parse(message as string);
 
+          if (data.type === "logout") {
+            // Cerrar sesión: el token deja de valer también en el servidor
+            try {
+              const s = data.token ? await accountStore.resolveSession(String(data.token)) : null;
+              if (s && s.profileId === profileId) await accountStore.revokeSession(String(data.token));
+            } catch {}
+            ws.send(JSON.stringify({ type: "logged_out" }));
+            void audit.record({ event: "logout", profileId, role: (ws.data as any).role, ip: remoteAddress });
+            return;
+          }
+
+          // ─── Respuesta a una tarjeta de aprobación ───────────────────────────
+          // Solo cuenta si llega por la misma conexión y del mismo perfil que la recibió; el contenido lo puso el servidor.
+          if (data.type === "confirm_response") {
+            const p = pendingApprovals.get(String(data.id));
+            if (!p || p.ws !== ws || p.profileId !== profileId) return;
+            p.finish(data.approved === true ? "approved" : "denied", false);
+            return;
+          }
+
+          // ─── Panel de administración (solo Ikaros con Google) ────────────────
+          if (typeof data.type === "string" && data.type.startsWith("admin_")) {
+            const isAdmin = (ws.data as any).role === "ikaros" && (ws.data as any).sso === true;
+            if (!isAdmin) {
+              void audit.record({ event: "security", profileId, role: (ws.data as any).role, detail: `intento de ${String(data.type).slice(0, 40)} sin ser administrador`, ok: false, ip: remoteAddress });
+              ws.send(JSON.stringify({ type: "admin_result", ok: false, message: "Permiso denegado." }));
+              return;
+            }
+            const sendOverview = async () => {
+              ws.send(JSON.stringify({
+                type: "admin_overview",
+                profiles: await adminService.overview(),
+                integrity: await audit.verify(),
+                server: {
+                  uptimeSec: Math.round(process.uptime()),
+                  connections: [...activeClients.values()].reduce((n, s) => n + s.size, 0),
+                  pendingApprovals: pendingApprovals.size,
+                  legacyLogin: LEGACY_LOGIN_ENABLED,
+                },
+                features: await getFeatures(),
+              }));
+            };
+            const target = String(data.profileId ?? "").toLowerCase();
+            const reply = async (action: string, r: { ok: boolean; message: string }) => {
+              ws.send(JSON.stringify({ type: "admin_result", action, ok: r.ok, message: r.message }));
+              await sendOverview();
+            };
+
+            if (data.type === "admin_overview") { await sendOverview(); return; }
+
+            // ─── Modo empresa de la app: estado de AXS (bóveda) y del PC, calculados en código ──
+            if (data.type === "admin_axs_dashboard") {
+              const [dash, system] = await Promise.all([
+                VaultIndex.build(new VaultService().getVaultPath()).then((idx) => buildAxsDashboard(idx)).catch((e) => ({ error: String(e?.message ?? e) })),
+                systemStatus(PORT).catch(() => null),
+              ]);
+              ws.send(JSON.stringify({
+                type: "admin_axs_dashboard",
+                ...("error" in dash ? { ok: false, message: `No pude leer la bóveda de AXS (${dash.error.slice(0, 120)}).` } : { ok: true, dashboard: dash }),
+                system,
+                server: { connections: [...activeClients.values()].reduce((n, x) => n + x.size, 0), pendingApprovals: pendingApprovals.size, integrity: await audit.verify().catch(() => null) },
+              }));
+              return;
+            }
+            // ─── Sistema (Modo AXS): iniciar, detener o reiniciar un servicio de Eris con un botón (services/ServiceControl.ts) ──
+            if (data.type === "admin_service") {
+              const req = parseServiceRequest(data.service, data.action, PORT);
+              const base = { type: "admin_service", service: String(data.service ?? "").slice(0, 20), action: String(data.action ?? "").slice(0, 20) };
+              if ("error" in req) { ws.send(JSON.stringify({ ...base, ok: false, message: req.error })); return; }
+              ws.send(JSON.stringify({ ...base, pending: true }));
+              const r = await runServiceAction(req.service, req.action);
+              void audit.record({ event: "admin", profileId, role: "ikaros", detail: `Servicios: ${req.action} ${SERVICE_LABEL[req.service]}${r.ok ? "" : " (no resultó)"}`, ok: r.ok, ip: remoteAddress });
+              try { ws.send(JSON.stringify({ ...base, ok: r.ok, message: r.message, restartingServer: !!r.restartingServer, system: r.restartingServer ? undefined : await systemStatus(PORT).catch(() => null) })); } catch {}
+              return;
+            }
+            // Ficha de un proyecto o nota (la misma del chat: «¿en qué está Lander?»)
+            if (data.type === "admin_axs_project") {
+              try {
+                const idx = await VaultIndex.build(new VaultService().getVaultPath());
+                const r = buildProject(idx, String(data.name ?? "").slice(0, 120));
+                ws.send(JSON.stringify({ type: "admin_axs_project", requestId: data.requestId, ok: !!r.found, name: r.found?.name ?? String(data.name ?? ""), path: r.found?.path, text: r.text }));
+              } catch (e: any) {
+                ws.send(JSON.stringify({ type: "admin_axs_project", requestId: data.requestId, ok: false, name: String(data.name ?? ""), text: "No pude leer la bóveda de AXS." }));
+              }
+              return;
+            }
+
+            if (data.type === "admin_audit") {
+              const f = String(data.filter ?? "all");
+              const event = f === "tools" ? "tool" : f === "access" ? ["login", "login_failed", "logout"] as any : f === "admin" ? ["admin", "security"] as any : undefined;
+              ws.send(JSON.stringify({ type: "admin_audit", filter: f, entries: await audit.tail({ limit: Math.min(Number(data.limit) || 80, 200), event, profileId: data.profileId ? target : undefined }) }));
+              return;
+            }
+
+            if (data.type === "admin_set_role") {
+              const role = data.role === "ikaros" ? "ikaros" : "eris";
+              // Primero se valida: no se le pide al admin aprobar algo que igual se rechazaría
+              const pre = await adminService.checkSetRole(profileId, target, role);
+              if (!pre.ok) { await reply("set_role", pre); return; }
+              if (role === "ikaros" && !pre.unchanged) {
+                // Dar Ikaros es dar el control de este PC (con aprobación): se pide una confirmación aparte
+                const ok = await askApproval(ws, profileId, {
+                  toolCallId: "admin", tool: "admin_set_role", risk: "high", flags: ["acceso total al sistema"],
+                  title: `Dar el rol Ikaros a ${target}`,
+                  detail: `${target} podrá pedirle a Eris que ejecute comandos y toque archivos de este PC (cada acción sigue pidiendo aprobación en SU teléfono, no en el tuyo), y administrar a todos los usuarios.\n\nSolo se lo das a alguien de total confianza.`,
+                });
+                if (ok !== "approved") { await reply("set_role", { ok: false, message: "Cambio cancelado." }); return; }
+              }
+              const r = await adminService.setRole(profileId, target, role);
+              if (r.ok) kickProfile(target);
+              await reply("set_role", r);
+              return;
+            }
+
+            if (data.type === "admin_revoke_sessions") {
+              const r = await adminService.revokeSessions(profileId, target);
+              if (r.ok) kickProfile(target);
+              await reply("revoke_sessions", r);
+              return;
+            }
+
+            // Visto bueno de un módulo (p. ej. glucosa). Se aplica en vivo a todos los teléfonos conectados.
+            if (data.type === "admin_set_feature") {
+              const feature: unknown = data.feature;
+              if (!isFeatureName(feature)) { await reply("set_feature", { ok: false, message: "Función desconocida." }); return; }
+              const on = data.enabled === true;
+              const features = await setFeature(feature, on);
+              void audit.record({ event: "admin", profileId, role: "ikaros", detail: `${FEATURE_LABELS[feature]}: ${on ? "activado" : "desactivado"}`, ok: true, ip: remoteAddress });
+              if (feature === "glucose" && !on) {
+                // Apagarlo corta la lectura del sensor y sus alertas en el acto
+                for (const [pid, svc] of [...activeGlucoServices.entries()]) { try { svc.stopPolling(); } catch {} activeGlucoServices.delete(pid); }
+              }
+              for (const set of activeClients.values()) for (const c of set) { try { c.send(JSON.stringify({ type: "features_updated", features })); } catch {} }
+              await reply("set_feature", { ok: true, message: `${FEATURE_LABELS[feature]} ${on ? "activado" : "desactivado"} para todos.` });
+              return;
+            }
+
+            if (data.type === "admin_set_disabled") {
+              const r = await adminService.setDisabled(profileId, target, data.disabled === true);
+              if (r.ok && data.disabled === true) kickProfile(target);
+              await reply("set_disabled", r);
+              return;
+            }
+            return;
+          }
+
           if (data.type === "change_pin") {
+            if ((ws.data as any).sso) {
+              ws.send(JSON.stringify({ type: "error", message: "Tu cuenta usa Google: no hay PIN que cambiar." }));
+              return;
+            }
             const newPin = data.newPin;
             if (!newPin) throw new Error("Nuevo PIN inválido");
             await memory.changePin(newPin);
@@ -570,13 +1062,46 @@ async function startServer() {
             return;
           }
 
+          // ─── Eris ↔ Hestia: la app avisa en qué modo está (al conectar y al cambiar). Cada una tiene su lista de chats y
+          // su último chat abierto; los datos (comida, agua, metas, Finanzas) son los mismos para las dos. ──
+          if (data.type === "set_persona") {
+            const prev = personaOfWs(ws);
+            (ws.data as any).persona = (ws.data as any).role === "ikaros" && data.axs === true ? "hestia" : "eris";
+            const next = personaOfWs(ws);
+            const cur = (ws.data as any).sessionId;
+            const curOwner = memory.conversationPersona(cur);
+            const curHasMsgs = (sessions.get(cur)?.length ?? 0) > 0;
+            // El chat abierto ya es de quien atiende (p. ej. al reconectar en Hestia): se queda; solo cambia la lista
+            if (curOwner === next || (!curOwner && prev === next)) {
+              ws.send(JSON.stringify({ type: "conversations_updated", conversations: convList(memory, ws), projects: memory.listProjects() }));
+              return;
+            }
+            // El chat abierto queda como el último de quien atendía; se abre el último de la otra (o uno nuevo; uno vacío se reusa)
+            if (curHasMsgs) await memory.set(`last_chat_${curOwner ?? prev}`, cur).catch(() => {});
+            const remembered = await memory.get(`last_chat_${next}`).catch(() => null);
+            const valid = typeof remembered === "string" && remembered !== cur &&
+              memory.getConversation(remembered).length > 0 && (memory.conversationPersona(remembered) ?? next) === next;
+            const targetId = valid ? claimSession(remembered, profileId) : curHasMsgs ? crypto.randomUUID() : cur;
+            if (!sessions.has(targetId)) sessions.set(targetId, valid ? memory.getConversation(targetId) : []);
+            sessionOwners.set(targetId, profileId);
+            (ws.data as any).sessionId = targetId;
+            const h = sessions.get(targetId) || [];
+            ws.send(JSON.stringify({
+              type: "chat_switched", sessionId: targetId,
+              history: h.map((m) => ({ role: m.role, content: m.content, id: m.id })),
+              conversations: convList(memory, ws), projects: memory.listProjects(),
+            }));
+            return;
+          }
+
           if (data.type === "new_chat") {
             const newId = crypto.randomUUID();
             sessions.set(newId, []);
+            sessionOwners.set(newId, profileId);
             (ws.data as any).sessionId = newId;
             
             if (data.projectId) {
-              await memory.saveConversation(newId, []);
+              await memory.saveConversation(newId, [], personaOfWs(ws));
               await memory.assignConversationToProject(newId, data.projectId);
             }
 
@@ -584,13 +1109,14 @@ async function startServer() {
               type: "chat_switched",
               sessionId: newId,
               history: [],
-              conversations: memory.listConversations(),
+              conversations: convList(memory, ws),
             }));
             return;
           }
 
           if (data.type === "switch_chat") {
-            const targetId = data.conversationId;
+            // Si ese chat es de otro perfil no se muestra (se abre uno vacío): antes los ids de sesión eran globales
+            const targetId = claimSession(String(data.conversationId), profileId);
             if (!sessions.has(targetId)) {
               const saved = memory.getConversation(targetId);
               sessions.set(targetId, saved);
@@ -601,14 +1127,14 @@ async function startServer() {
               type: "chat_switched",
               sessionId: targetId,
               history: history.map(m => ({ role: m.role, content: m.content, id: m.id })),
-              conversations: memory.listConversations(),
+              conversations: convList(memory, ws),
             }));
             return;
           }
 
           if (data.type === "delete_chat") {
             const targetId = data.conversationId;
-            sessions.delete(targetId);
+            if (sessionOwners.get(targetId) === profileId || !sessionOwners.has(targetId)) sessions.delete(targetId);
             await memory.clearConversation(targetId);
             const currentId = (ws.data as any).sessionId;
             if (currentId === targetId) {
@@ -619,19 +1145,28 @@ async function startServer() {
                 type: "chat_switched",
                 sessionId: newId,
                 history: [],
-                conversations: memory.listConversations(),
+                conversations: convList(memory, ws),
               }));
             } else {
               ws.send(JSON.stringify({
                 type: "conversations_updated",
-                conversations: memory.listConversations(),
+                conversations: convList(memory, ws),
               }));
             }
             return;
           }
 
+          if (data.type === "rename_chat") {
+            await memory.renameConversation(data.conversationId, data.title || "");
+            ws.send(JSON.stringify({
+              type: "conversations_updated",
+              conversations: convList(memory, ws),
+            }));
+            return;
+          }
+
           if (data.type === "create_project") {
-            const project = await memory.createProject(data.name || "Nuevo Proyecto", data.emoji || "📁");
+            const project = await memory.createProject(data.name || "Nuevo Proyecto", data.emoji || "📁", typeof data.instructions === "string" ? data.instructions : undefined);
             ws.send(JSON.stringify({
               type: "project_created",
               project,
@@ -644,7 +1179,7 @@ async function startServer() {
             await memory.deleteProject(data.projectId);
             ws.send(JSON.stringify({
               type: "conversations_updated",
-              conversations: memory.listConversations(),
+              conversations: convList(memory, ws),
               projects: memory.listProjects(),
             }));
             return;
@@ -654,7 +1189,22 @@ async function startServer() {
             await memory.assignConversationToProject(data.conversationId, data.projectId);
             ws.send(JSON.stringify({
               type: "conversations_updated",
-              conversations: memory.listConversations(),
+              conversations: convList(memory, ws),
+              projects: memory.listProjects(),
+            }));
+            return;
+          }
+
+          // Editar un proyecto: nombre, emoji y/o instrucciones (las instrucciones se aplican a TODOS sus chats)
+          if (data.type === "update_project") {
+            await memory.updateProject(data.projectId, {
+              name: typeof data.name === "string" ? data.name : undefined,
+              emoji: typeof data.emoji === "string" ? data.emoji : undefined,
+              instructions: typeof data.instructions === "string" ? data.instructions : undefined,
+            });
+            ws.send(JSON.stringify({
+              type: "conversations_updated",
+              conversations: convList(memory, ws),
               projects: memory.listProjects(),
             }));
             return;
@@ -664,7 +1214,7 @@ async function startServer() {
             await memory.renameProject(data.projectId, data.name, data.emoji);
             ws.send(JSON.stringify({
               type: "conversations_updated",
-              conversations: memory.listConversations(),
+              conversations: convList(memory, ws),
               projects: memory.listProjects(),
             }));
             return;
@@ -678,10 +1228,12 @@ async function startServer() {
             const history = sessions.get(currentSessionId) || [];
             ws.send(JSON.stringify({
               type: 'connected',
+              features: await getFeatures(),
               sessionId: currentSessionId,
               profileId,
               role: (ws.data as any).role,
-              conversations: memory.listConversations(),
+              showWelcome: await shouldWelcome(memory),
+              conversations: convList(memory, ws),
               projects: memory.listProjects(),
               history: history.map((m: any) => ({ role: m.role, content: m.content, id: m.id })),
               defaultMode: DEFAULT_CONFIG.defaultMode,
@@ -700,8 +1252,15 @@ async function startServer() {
           }
 
           if (data.type === "save_profile") {
+            // La app manda el perfil completo que tenía en pantalla: lo que guardó Eris por chat y la app no conoce (exámenes)
+            // no se pierde por guardar desde el teléfono
+            const current = await memory.getProfile().catch(() => null);
+            if (data.profile?.medical && data.profile.medical.labs === undefined && current?.medical?.labs?.length) {
+              data.profile = { ...data.profile, medical: { ...data.profile.medical, labs: current.medical.labs } };
+            }
             await memory.saveProfile(data.profile);
             queryEngines.delete(`${profileId}:${pin || ''}`);
+            queryEngines.delete(`${profileId}:${pin || ''}#eris`);
             const oldGluco = activeGlucoServices.get(profileId);
             if (oldGluco) { oldGluco.stopPolling(); activeGlucoServices.delete(profileId); }
             ws.send(JSON.stringify({ type: "profile_saved", profile: data.profile }));
@@ -709,6 +1268,11 @@ async function startServer() {
           }
 
           // ─── Insulina ──────────────────────────────────────────────────────
+          // Registrar dosis es TRATAR, no cuidar (decisión 2026-10-07): va con el módulo de glucosa, apagado hasta su visto bueno
+          if ((data.type === "log_insulin" || data.type === "get_insulin_log" || data.type === "delete_insulin_dose") && !(await getFeatures()).glucose) {
+            ws.send(JSON.stringify({ type: "error", message: "El registro de insulina está desactivado por ahora." }));
+            return;
+          }
           if (data.type === "log_insulin") {
             try {
               await memory.logInsulin(data.dose);
@@ -744,51 +1308,587 @@ async function startServer() {
           // Lo guardamos en memoria para inyectarlo al contexto del LLM.
           if (data.type === "update_health_snapshot") {
             if (data.snapshot) {
+              // Lista de alimentos del día que manda el teléfono (lo anotado a mano incluido): es entrada externa, se valida.
+              if (data.snapshot.foodLog !== undefined) {
+                const foodLog = sanitizePhoneFoodLog(data.snapshot.foodLog);
+                if (foodLog) data.snapshot.foodLog = foodLog; else delete data.snapshot.foodLog;
+              }
+              // Qué tomas de agua del chat ya están en el total del teléfono (services/WaterToday.ts): solo instantes válidos
+              if (data.snapshot.chatWaterCounted !== undefined) {
+                const list = Array.isArray(data.snapshot.chatWaterCounted)
+                  ? data.snapshot.chatWaterCounted.filter((t: unknown) => typeof t === "string" && t.length <= 40 && !Number.isNaN(Date.parse(t))).slice(-200)
+                  : null;
+                if (list) data.snapshot.chatWaterCounted = list; else delete data.snapshot.chatWaterCounted;
+              }
               // Merge en lugar de reemplazar para que cada fuente (métricas, nutrición, etc.)
-              // pueda actualizar su propia parte sin borrar las demás.
-              const existing = healthSnapshots.get(profileId);
-              const merged = existing ? { ...JSON.parse(existing), ...data.snapshot } : data.snapshot;
-              healthSnapshots.set(profileId, JSON.stringify(merged));
+              // pueda actualizar su propia parte sin borrar las demás. Antes esto vivía en un
+              // Map en memoria (se perdía al reiniciar el server); ahora el merge se hace
+              // directo contra lo último persistido, que es también lo que lee LiveContextTool.
+              let merged = data.snapshot;
+              let prevActivity: any = null;
               try {
+                const existing = await memory.get('health_snapshot_latest');
+                prevActivity = existing?.activity ?? null;
+                merged = existing ? { ...existing, ...data.snapshot } : data.snapshot;
                 await memory.set('health_snapshot_latest', merged);
+              } catch {}
+              // La actividad del reloj cambió (terminó un partido): las metas de hoy cambian (DailyTargets) → al teléfono
+              try {
+                const na = merged?.activity;
+                if (na && typeof na.kcal === "number" && (!prevActivity || na.day !== prevActivity.day || Math.abs(na.kcal - (prevActivity.kcal ?? 0)) >= 50)) {
+                  ws.send(JSON.stringify({ type: "nutrition_today", ...(await buildNutritionToday(memory)) }));
+                }
+              } catch {}
+              try {
+                // Sueño, pulso, pasos y entreno: el día calendario
+                await memory.upsertDailyRollup({
+                  sleepHours: merged.sleep?.durationHours,
+                  restingHR: merged.heartRate?.resting,
+                  steps: merged.steps,
+                  // Solo si Forge dijo que fue HOY: `trained` a secas quedaba en true para siempre y marcaba todos los días
+                  trained: merged.trainedDay === isoDayKey(new Date()) || undefined,
+                });
+                // Comida y agua: el día de COMIDA (termina al dormir; services/MealSchedule.ts). A las 2 AM sin haber dormido
+                // los totales del teléfono son los de ayer y van a ayer.
+                await memory.upsertDailyRollup({
+                  // La cuenta única del agua (teléfono + lo del chat que el teléfono aún no contó); solo lo BEBIDO: los días
+                  // anteriores del historial no tienen el agua de la comida y el análisis compara contra ellos
+                  hydrationL: (await waterTotalToday(memory).catch(() => null))?.drinksL ?? merged.hydration,
+                  proteinG: merged.nutrition?.protein,
+                  carbsG: merged.nutrition?.carbs,
+                  fatG: merged.nutrition?.fat,
+                  calories: merged.nutrition?.calories,
+                }, isoDayKey(nutritionDayOf(new Date(), dayCtxFrom(merged))));
               } catch {}
               ws.send(JSON.stringify({ type: "health_snapshot_received" }));
             }
             return;
           }
 
+          // ─── Resultado de una operación de Finanzas pedida por finance_tracker ───
+          if (data.type === "finance_op_result") {
+            resolveFinanceOp(ws, data);
+            return;
+          }
+
           // ─── Contexto financiero desde Hunter Wallet ─────────────────────────
           if (data.type === "update_financial_context") {
             if (data.context) {
-              financialContexts.set(profileId, data.context);
+              try { await memory.set('financial_context_latest', data.context); } catch {}
+              // Finanzas 2.0: los números como dato (el asesor de comida usa el presupuesto al día; MetabolicAnalysis)
+              if (data.summary && typeof data.summary === "object") {
+                const sm = data.summary, num = (v: any) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+                const presupuesto = Array.isArray(sm.presupuesto) ? sm.presupuesto.slice(0, 20).filter((l: any) => l && typeof l.cat === "string")
+                  .map((l: any) => ({ cat: String(l.cat).slice(0, 30), estado: String(l.estado ?? "").slice(0, 20), queda: num(l.queda), porDia: num(l.porDia), presup: num(l.presup), gastado: num(l.gastado) })) : undefined;
+                try {
+                  await memory.set('financial_summary_latest', { at: new Date().toISOString(), disponible: num(sm.disponible), libre: num(sm.libre), porDia: num(sm.porDia),
+                    runwayDias: num(sm.runwayDias), patrimonio: num(sm.patrimonio), rating: sm.rating && typeof sm.rating.nota === "string" ? { nota: sm.rating.nota.slice(0, 4), score: num(sm.rating.score) } : undefined,
+                    ...(presupuesto ? { presupuesto } : {}) });
+                } catch {}
+              }
+              if (data.summary) {
+                try {
+                  // Sin movimientos anotados hace más de una semana, la tasa de ahorro sale 100 % (no hay gastos) y el análisis la
+                  // celebraba como mejora (2026-10-07). Las apps nuevas mandan ultimoMovimiento; con eso, sin movimientos recientes no cuenta.
+                  const last = data.summary.ultimoMovimiento;
+                  const stale = "ultimoMovimiento" in data.summary && (typeof last !== "string" || Date.now() - Date.parse(`${last}T12:00:00`) > 7 * 86_400_000);
+                  await memory.upsertDailyRollup({
+                    disponible: data.summary.disponible,
+                    ahorroAcum: data.summary.ahorroAcum,
+                    savingsRate: stale ? undefined : data.summary.savingsRate,
+                  });
+                } catch {}
+              }
               ws.send(JSON.stringify({ type: "financial_context_received" }));
             }
             return;
           }
 
+          // ─── Chequeo de restricciones de un alimento (la app lo pide al elegir/escanear) ──
+          // Solo INFORMA: el usuario decide. Usa el catálogo de Eris + productos envasados (por código de barras).
+          if (data.type === "check_food_safety") {
+            try {
+              const profile = await memory.getProfile();
+              const restrictions = deriveRestrictions(profile?.medical);
+              let name = String(data.name || "");
+              let safety: any = undefined;
+              if (data.barcode) {
+                const f = await unifiedFood.findByBarcode(String(data.barcode)).catch(() => null);
+                if (f) { name = f.name || name; safety = f.safety; }
+              }
+              const risk = name ? assessFood(name, safety, restrictions) : null;
+              ws.send(JSON.stringify({
+                type: "food_safety_result", requestId: data.requestId,
+                risk: risk ? { level: risk.level, reason: risk.reason } : null,
+              }));
+            } catch {
+              ws.send(JSON.stringify({ type: "food_safety_result", requestId: data.requestId, risk: null }));
+            }
+            return;
+          }
+
+          // ─── Código de barras: búsqueda en cascada (base local → OFF → USDA → solo nombre) ──
+          if (data.type === "food_barcode") {
+            try {
+              const hit = await lookupBarcode(String(data.code || ""));
+              ws.send(JSON.stringify({ type: "food_barcode_result", requestId: data.requestId, ...hit }));
+            } catch {
+              ws.send(JSON.stringify({ type: "food_barcode_result", requestId: data.requestId, found: false, code: String(data.code || "") }));
+            }
+            return;
+          }
+          // ─── Buscador de Nutrición: envasados chilenos (con su calce) + corrección del texto con todas las bases ──
+          // Misma normalización que el resto (FoodText): tildes, mayúsculas, símbolos, espacios, orden y errores de tipeo.
+          if (data.type === "food_search") {
+            const query = String(data.query || "").slice(0, 80);
+            let hits: Array<{ product: unknown; score: number }> = [];
+            let corrected: string | null = null;
+            try {
+              hits = searchPackagedHits(query, 8, { prefix: true, partial: true }).map((h) => ({ product: h.item, score: Math.round(h.score * 100) / 100 }));
+              corrected = unifiedFood.correctQuery(query);
+            } catch {}
+            ws.send(JSON.stringify({ type: "food_search_result", requestId: data.requestId, hits, corrected }));
+            return;
+          }
+          // ─── El tono con que habla Eris (lo elige la persona; la edad de Forge solo sugiere uno) ──
+          if (data.type === "set_tone") {
+            if (isTone(data.tone)) { try { await memory.set("tone", data.tone); } catch {} }
+            ws.send(JSON.stringify({ type: "tone", tone: (await getTone(memory)) ?? null }));
+            return;
+          }
+          if (data.type === "get_tone") {
+            const body: any = await memory.get("body_profile").catch(() => null);
+            ws.send(JSON.stringify({ type: "tone", requestId: data.requestId, tone: (await getTone(memory)) ?? null, suggested: toneForAge(body?.age) }));
+            return;
+          }
+          // ─── Sugerencia concreta para un aviso del teléfono (fibra, proteína, colación): por código, sin el modelo ──
+          if (data.type === "nudge_suggest") {
+            let suggestion = null;
+            const req = parseNudgeRequest(data);
+            if (req) { try { suggestion = await buildNudge(memory, req); } catch {} }
+            ws.send(JSON.stringify({ type: "nudge_suggestion", requestId: data.requestId, suggestion }));
+            return;
+          }
+          // ─── Respaldo de Finanzas, cifrado en el PC (services/FinanceBackup.ts) ──
+          if (data.type === "finance_backup_push") {
+            const dump = sanitizeDump(data.dump, profileId);
+            if (!dump) { ws.send(JSON.stringify({ type: "finance_backup_saved", ok: false })); return; }
+            try {
+              const r = await saveFinanceBackup(memory, dump);
+              if (r.saved) console.log(`[Finanzas] respaldo de ${profileId}: ${dump.stats.tx} movimientos, ${dump.stats.cuentas} cuentas`);
+              ws.send(JSON.stringify({ type: "finance_backup_saved", ...r }));
+            } catch (e: any) {
+              console.warn("[Finanzas] no se pudo guardar el respaldo:", e?.message ?? e);
+              ws.send(JSON.stringify({ type: "finance_backup_saved", ok: false }));
+            }
+            return;
+          }
+          if (data.type === "finance_backup_list") {
+            ws.send(JSON.stringify({ type: "finance_backup_list", requestId: data.requestId, copies: await listFinanceBackups(memory).catch(() => []) }));
+            return;
+          }
+          if (data.type === "finance_backup_pull") {
+            const day = typeof data.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.day) ? data.day : undefined;
+            const dump = await pullFinanceBackup(memory, day).catch(() => null);
+            ws.send(JSON.stringify({ type: "finance_backup_pull", requestId: data.requestId, ok: !!dump, dump }));
+            return;
+          }
+          // Cartola del banco (Excel/CSV) → movimientos; se lee en memoria y no se guarda (services/FinanceStatement.ts).
+          // La conciliación con lo anotado la hace el teléfono con el núcleo (conciliarCartola).
+          if (data.type === "finance_statement_parse") {
+            const b64 = typeof data.data === "string" ? data.data : "";
+            const name = typeof data.name === "string" ? data.name.slice(0, 120) : "";
+            let r: any;
+            // La clave del PDF (si la pide): solo para abrirlo ahora; no se guarda ni se registra
+            const clave = typeof data.clave === "string" ? data.clave.slice(0, 64) : "";
+            try { r = leerCartola(b64, name, new Date(), clave); } catch (e: any) { r = { ok: false, code: "formato", msg: "No pude leer la cartola." }; }
+            if (r.ok) console.log(`[Finanzas] cartola de ${profileId}: ${r.movimientos.length} movimientos (${r.formato})`);
+            ws.send(JSON.stringify({ type: "finance_statement_parsed", requestId: data.requestId, ...r }));
+            return;
+          }
+          // Foto de la boleta → productos y total (OCR de Windows en el PC; la imagen se borra al terminar; services/ReceiptOcr.ts)
+          if (data.type === "finance_receipt_photo") {
+            const img = typeof data.image === "string" ? data.image : "";
+            let r: any;
+            try { r = await leerBoletaFoto(img); } catch { r = { ok: false, code: "ocr", msg: "No pude leer la foto." }; }
+            if (r.ok) console.log(`[Finanzas] boleta de ${profileId}: ${r.items.length} productos, ${r.cuadra ? "cuadra" : "NO cuadra"} con el total`);
+            ws.send(JSON.stringify({ type: "finance_receipt_read", requestId: data.requestId, ...r }));
+            return;
+          }
+          // Producto que el usuario cargó a mano desde el envase: queda en la base para la próxima vez
+          if (data.type === "food_barcode_contribute") {
+            const saved = data.product ? contributeProduct(data.product) : null;
+            ws.send(JSON.stringify({ type: "food_barcode_saved", requestId: data.requestId, ok: !!saved, product: saved }));
+            return;
+          }
+
+          // ─── Historial diario desde Health Connect: el teléfono manda los días anteriores y se rellenan SOLO los huecos ──
+          if (data.type === "backfill_rollup") {
+            const num = (v: unknown, max: number) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= max ? v : undefined);
+            const days = (Array.isArray(data.days) ? data.days : []).slice(0, 120).map((d: any) => {
+              // La comida de un día solo si es creíble: con menos de 300 kcal el día quedó a medio anotar, y con más de 4.500 kcal
+              // o 300 g de proteína son registros duplicados o de prueba (2026-10-10: Health Connect traía días de 7.879 kcal y
+              // 413 g de proteína de cuando se probaba la app). Un día así arruinaría el patrón personal.
+              const kcal = num(d?.calories, 15000), prot = num(d?.proteinG, 1000);
+              const food = kcal !== undefined && kcal >= 300 && kcal <= 4500 && (prot ?? 0) <= 300;
+              return {
+                date: typeof d?.date === "string" ? d.date.slice(0, 10) : "",
+                steps: num(d?.steps, 100000), sleepHours: num(d?.sleepHours, 20), hydrationL: num(d?.hydrationL, 15),
+                ...(food ? { calories: kcal, proteinG: prot, carbsG: num(d?.carbsG, 2000), fatG: num(d?.fatG, 1000) } : {}),
+              };
+            });
+            try {
+              const n = await memory.fillDailyRollupGaps(days);
+              if (n) console.log(`[Historial] ${profileId}: ${n} día(s) completados desde Health Connect`);
+            } catch (e) { console.warn("[Historial] No se pudo completar desde Health Connect:", e); }
+            return;
+          }
+
           // ─── Sync nutrición: el móvil pide el log del día al montar NutritionScreen ──
           if (data.type === "sync_nutrition_today") {
+            try { ws.send(JSON.stringify({ type: "nutrition_today", ...(await buildNutritionToday(memory)) })); } catch {}
+            return;
+          }
+
+          // ─── Lo anotado por chat para días anteriores («ayer cené…»): el teléfono lo pide al conectarse, por si no estaba
+          // conectado cuando se anotó. Solo esas entradas (pastDay): lo de cada día ya le llegó cuando ese día era hoy.
+          if (data.type === "sync_nutrition_days") {
             try {
-              const today = new Date().toDateString();
-              const nutritionLog = await memory.get(`nutrition_log_${today}`).catch(() => []);
-              const hydrationLog = await memory.get(`hydration_log_${today}`).catch(() => []);
-              const totalWater = Array.isArray(hydrationLog)
-                ? Math.round(hydrationLog.reduce((s: number, e: any) => s + (e.liters || 0), 0) * 100) / 100
-                : 0;
-              ws.send(JSON.stringify({
-                type: "nutrition_today",
-                entries: Array.isArray(nutritionLog) ? nutritionLog : [],
-                waterLiters: totalWater,
-              }));
+              const asked = Array.isArray(data.days) ? data.days.filter(isValidDay).slice(0, 7) : [];
+              const days: Array<{ day: string; entries: unknown[] }> = [];
+              for (const day of asked) {
+                const log = await memory.get(`nutrition_log_${day}`).catch(() => []);
+                const entries = (Array.isArray(log) ? log : []).filter((e: any) => e?.pastDay);
+                if (entries.length) days.push({ day, entries });
+              }
+              ws.send(JSON.stringify({ type: "nutrition_days", days }));
             } catch {}
             return;
           }
 
-          if (data.type === "message") {
+          // ─── Forge → cuerpo y entreno de hoy: con esto se calculan las metas de todos los módulos (DailyTargets) ──
+          if (data.type === "sync_body_profile") {
+            const body = sanitizeBody(data.body);
+            if (body) {
+              try { await memory.set("body_profile", body); } catch {}
+              try { ws.send(JSON.stringify({ type: "nutrition_today", ...(await buildNutritionToday(memory)) })); } catch {}
+            }
+            return;
+          }
+
+          // ─── Botón "+250 ml" de la notificación de agua: se anota sin abrir el chat, con la misma lógica que el chat
+          // (registro del día, rollup y aviso hydration_logged → la app vuelve a sincronizar y recalcula sus avisos).
+          if (data.type === "log_water_quick") {
+            const ml = Number(data.ml);
+            const liters = Number.isFinite(ml) && ml >= 50 && ml <= 1000 ? Math.round(ml) / 1000 : 0.25;
+            try {
+              const r = await toolRegistry.get("nutrition_tracker")?.execute({ action: "log_water", waterLiters: liters, beverageType: "agua" } as any, { memory, wsClient: ws });
+              ws.send(JSON.stringify({ type: "water_quick_logged", liters, ok: !!r && !(r as any).error }));
+            } catch {
+              try { ws.send(JSON.stringify({ type: "water_quick_logged", liters, ok: false })); } catch {}
+            }
+            return;
+          }
+
+          // ─── El móvil fija metas nutricionales directo (Perfil), sin pasar por el chat ──
+          // Misma validación que `set_nutritional_goals` (NutritionTool): rangos compartidos en NutritionLog.ts.
+          if (data.type === "set_nutrition_goals") {
+            try {
+              const current = (await memory.get("nutrition_goals").catch(() => null)) || {};
+              const { next, saved, rejected } = applyGoalUpdate(current, data.goals || {});
+              if (saved.length) await memory.set("nutrition_goals", next);
+              ws.send(JSON.stringify({ type: "nutrition_goals_updated", goals: next, rejected }));
+              // Las metas efectivas cambian (lo fijado manda sobre lo calculado): se reenvía el día completo
+              if (saved.length) { try { ws.send(JSON.stringify({ type: "nutrition_today", ...(await buildNutritionToday(memory)) })); } catch {} }
+            } catch {
+              ws.send(JSON.stringify({ type: "nutrition_goals_updated", goals: null, error: "No se pudo guardar." }));
+            }
+            return;
+          }
+
+          // ─── El móvil borró un alimento de su registro: se borra también acá ──
+          // Antes el borrado era solo local: al reabrir la pantalla el servidor reenviaba todo y el alimento "resucitaba",
+          // y el asesor seguía contándolo. Se identifica por instante de la comida + nombre + gramos (un solo ítem).
+          if (data.type === "delete_nutrition_entry") {
+            try {
+              const name = typeof data.name === "string" ? data.name.slice(0, 200) : "";
+              const grams = Number(data.grams);
+              const timestamp = typeof data.timestamp === "string" ? data.timestamp.slice(0, 40) : "";
+              const todayKey = await todayKeyOf(memory);
+              const day = data.date === undefined ? todayKey : data.date;
+              if (!name || !timestamp || !Number.isFinite(grams) || !isValidDay(day)) {
+                ws.send(JSON.stringify({ type: "nutrition_delete_result", ok: false, removed: false }));
+                return;
+              }
+              const key = `nutrition_log_${day}`;
+              const { log, removed } = removeItem(await memory.get(key).catch(() => []), { timestamp, name, grams });
+              if (removed) {
+                await memory.set(key, log);
+                if (day === todayKey) {
+                  const hydrationLog = await memory.get(`hydration_log_${day}`).catch(() => []);
+                  await upsertChatRollup(memory, log, hydrationLog).catch(() => {});
+                }
+              }
+              ws.send(JSON.stringify({ type: "nutrition_delete_result", ok: true, removed: !!removed, timestamp, name, grams }));
+              // Si fue el día de hoy, se reenvía el estado fresco para que Inicio y Nutrición se alineen de inmediato
+              if (day === todayKey) ws.send(JSON.stringify({ type: "nutrition_today", ...(await buildNutritionToday(memory)) }));
+            } catch {
+              try { ws.send(JSON.stringify({ type: "nutrition_delete_result", ok: false, removed: false })); } catch {}
+            }
+            return;
+          }
+
+          // ─── Sync desde Forge/Toji: rutina markdown y/o catálogo de ejercicios
+          // personalizados, para que TrainingPlanTool pueda leerlos aunque el
+          // usuario le hable a Eris con Forge cerrado. Envíos parciales OK —
+          // el móvil manda solo lo que cambió (rutina al guardarla/borrarla,
+          // catálogo en cada cambio de customExercises).
+          if (data.type === "sync_toji_context") {
+            try {
+              if (data.routineMd !== undefined) {
+                await memory.set("toji_routine_md", data.routineMd ? { md: data.routineMd, name: data.routineName || "rutina.md" } : null);
+              }
+              if (data.customExercises !== undefined) {
+                await memory.set("toji_exercise_catalog", { custom: data.customExercises });
+              }
+              ws.send(JSON.stringify({ type: "toji_context_received" }));
+            } catch {}
+            return;
+          }
+
+          // ─── Diagnóstico basado en patrón personal (tip proactivo + card de Pulso) ──
+          // No pasa por el loop agéntico de QueryEngine (no hay forma de forzar la
+          // llamada a la tool ahí) — el diagnóstico ya es aritmética determinista en
+          // TS (BaselineEngine), así que le pedimos al LLM solo la redacción vía una
+          // llamada directa a provider.generate(), igual que ExecutiveReportTool.
+          // No se guarda en sessions/history — no debe ensuciar la conversación real.
+          if (data.type === "request_proactive_tip" || data.type === "request_daily_insight") {
+            const isCard = data.type === "request_daily_insight";
+            try {
+              const [log, profile, medicalContext, dismissals, overrides] = await Promise.all([
+                memory.getDailyRollupLog(),
+                memory.getProfile(),
+                buildMedicalContext(memory),
+                getDismissals(memory),
+                getOverrides(memory),
+              ]);
+              const diag = diagnoseBaseline(log, new Date(), { medical: profile?.medical, dismissals, overrides, day: dayCtxFrom(await memory.get("health_snapshot_latest").catch(() => null)) });
+              const primaryScope = diag.primary ? METRIC_TO_NOTE_SCOPE[diag.primary.key] : undefined;
+              const notesText = formatNotesForLLM(await getUserNotes(memory), primaryScope);
+              const personalNotesBlock = notesText
+                ? `\n\nContexto que el usuario ya explicó sobre este tema (tenlo en cuenta, no lo contradigas):\n${notesText}`
+                : '';
+              const dataBlock = formatDiagnosisForLLM(diag) + personalNotesBlock + medicalContext;
+              const instruction = isCard
+                ? "Escribe el texto de una tarjeta 'Análisis del Día': 2-3 frases dirigidas al usuario, terminando " +
+                  "opcionalmente con una pregunta abierta. Si nada está fuera de rango, dilo brevemente en tono " +
+                  "positivo — SIEMPRE debe haber texto visible, nunca respondas vacío."
+                : "Escribe un tip para notificación push: máximo 1 frase, menos de 160 caracteres. Si no hay nada " +
+                  "relevante que decir (todo en rango o confianza insuficiente en todo), responde EXACTAMENTE la " +
+                  "palabra NADA y nada más.";
+
+              const ask = (extra = "") => provider.generate(
+                [
+                  { role: "system", content: BASELINE_PHRASING_SYSTEM_PROMPT },
+                  { role: "user", content: `${dataBlock}\n\n${instruction}${extra}` },
+                ],
+                undefined,
+                // Sin razonamiento: con 220 tokens, "pensar" se los comía y la tarjeta o el aviso salían vacíos
+                { temperature: 0.6, maxTokens: 220, modelOverride: THINKING_MODES.flash.model, enableThinking: false }
+              );
+              let text = (await ask()).content?.trim();
+              // Sin datos de glucosa (módulo apagado) el modelo igual escribía "mientras controlas tu glucosa" o "tu nivel de
+              // glucosa se mantiene estable" (2026-10-10): una vez más, pidiéndole que no la nombre
+              const glucoseInData = /glucos|gluc[eé]mi/i.test(formatDiagnosisForLLM(diag));
+              if (text && !glucoseInData && /glucos|gluc[eé]mi|az[uú]car en (la )?sangre/i.test(text)) {
+                const again = (await ask("\n\nNo menciones la glucosa ni el azúcar en sangre: no hay datos de eso.")).content?.trim();
+                if (again && !/glucos|gluc[eé]mi|az[uú]car en (la )?sangre/i.test(again)) text = again;
+              }
+              const readiness = diag.readiness;
+
+              if (isCard) {
+                ws.send(JSON.stringify({
+                  type: "daily_insight",
+                  text: text || "Todo en orden por ahora.",
+                  unlocked: readiness.unlocked,
+                  daysTracked: readiness.daysTracked,
+                  daysRemaining: readiness.daysRemaining,
+                }));
+              } else if (text && text.toUpperCase() !== "NADA" && text.length < 400) {
+                ws.send(JSON.stringify({ type: "proactive_tip", text }));
+              } else {
+                ws.send(JSON.stringify({ type: "proactive_tip_skipped" }));
+              }
+            } catch {
+              if (isCard) ws.send(JSON.stringify({ type: "daily_insight", text: "No pude analizar tu día en este momento." }));
+              else ws.send(JSON.stringify({ type: "proactive_tip_skipped" }));
+            }
+            return;
+          }
+
+          // ─── Juicio semántico de "¿es el mismo alimento?" — el móvil ya
+          // filtró candidatos por texto (comparten una palabra distintiva);
+          // acá se decide de verdad, porque nombres parecidos pueden ser
+          // preparaciones con macros muy distintas (empanada de pino ≠
+          // empanada de carne). Mismo patrón que request_daily_insight:
+          // llamada directa a provider.generate(), fuera de QueryEngine,
+          // no se guarda en el historial de la conversación. ──
+          if (data.type === "check_food_similarity") {
+            try {
+              const newFood = data.newFood;
+              const candidates: Array<{ name: string; brand?: string }> = Array.isArray(data.candidates) ? data.candidates : [];
+              if (!newFood?.name || candidates.length === 0) {
+                ws.send(JSON.stringify({ type: "food_similarity_result", matchIndex: null }));
+                return;
+              }
+
+              const list = candidates
+                .map((c, i) => `${i + 1}. ${c.name}${c.brand ? ` (marca: ${c.brand})` : ""}`)
+                .join("\n");
+
+              // Prompt con ejemplos en ambas direcciones (mismo alimento con
+              // nombre distinto vs. nombre parecido pero alimento distinto) —
+              // sin los ejemplos "positivos" el modelo flash (4B, sin
+              // thinking) se volvía excesivamente conservador y respondía
+              // NINGUNO incluso para casos obviamente iguales. Verificado
+              // contra Ollama real con el caso reportado por el usuario.
+              const response = await provider.generate(
+                [
+                  {
+                    role: "system", content:
+                      "Eres un clasificador de alimentos. Decides si un alimento nuevo es el MISMO producto/plato " +
+                      "que uno ya registrado, aunque el nombre esté escrito distinto (otro idioma, con/sin marca, " +
+                      "abreviado). Ejemplos de MISMO alimento (nombres distintos, mismo producto real):\n" +
+                      '- "Empanada, beef" = "empanada de carne" (misma preparación, un nombre está en inglés)\n' +
+                      '- "Coca Cola 350ml" = "Coca-Cola lata 350 ml" (mismo producto, formato de texto distinto)\n' +
+                      "Ejemplos de alimentos DISTINTOS (nombre parecido, producto real distinto):\n" +
+                      '- "empanada de pino" ≠ "empanada de carne" (relleno distinto)\n' +
+                      '- "leche entera" ≠ "leche descremada" (distinto contenido graso)\n' +
+                      "Responde SOLO con el número del candidato que es el mismo alimento, o NINGUNO si ninguno lo es. Nunca expliques.",
+                  },
+                  {
+                    role: "user",
+                    content: `Alimento nuevo: "${newFood.name}"${newFood.brand ? ` (marca: ${newFood.brand})` : ""}\n\nCandidatos ya registrados:\n${list}\n\n¿Cuál es el mismo alimento?`,
+                  },
+                ],
+                undefined,
+                { temperature: 0, maxTokens: 20, modelOverride: THINKING_MODES.flash.model, enableThinking: false }
+              );
+
+              const raw = (response.content || "").trim();
+              const num = parseInt(raw.match(/\d+/)?.[0] || "", 10);
+              const matchIndex = Number.isInteger(num) && num >= 1 && num <= candidates.length ? num - 1 : null;
+              ws.send(JSON.stringify({ type: "food_similarity_result", matchIndex }));
+            } catch {
+              ws.send(JSON.stringify({ type: "food_similarity_result", matchIndex: null }));
+            }
+            return;
+          }
+
+          // ─── "Sobre mí": transparencia total de lo que Eris sabe/calculó ──
+          // No pasa por el LLM — es un volcado directo de los datos ya
+          // calculados (BaselineEngine, MedicalKnowledgeBase, notas
+          // personales) para que el usuario vea el "por qué" de las
+          // decisiones, en vez de vivir oculto en el prompt.
+          if (data.type === "request_about_me") {
+            try {
+              const [log, profile, notes, journal, dismissals, overrides, latestSnapshot] = await Promise.all([
+                memory.getDailyRollupLog(),
+                memory.getProfile(),
+                getUserNotes(memory),
+                getJournalEntries(memory),
+                getDismissals(memory),
+                getOverrides(memory),
+                memory.get("health_snapshot_latest").catch(() => null),
+              ]);
+              // Mismo peso que usa dailyLimits() para la meta de proteína — sin esto,
+              // la referencia de "Sobre mí" ignoraba el peso real del usuario aunque
+              // Eris ya lo supiera.
+              const weightKg = typeof (latestSnapshot as any)?.weight === "number" ? (latestSnapshot as any).weight : undefined;
+              const diag = diagnoseBaseline(log, new Date(), { medical: profile?.medical, dismissals, overrides, weightKg, day: dayCtxFrom(latestSnapshot) });
+              const kbGuidance = getGuidance(profile?.medical);
+              const now = Date.now();
+              const activeDismissals = Object.entries(dismissals)
+                .filter(([, until]) => until && new Date(until as string).getTime() > now)
+                .map(([metric, until]) => ({ metric, until }));
+              const activeOverrides = Object.entries(overrides).map(([metric, ov]) => ({ metric, ...(ov as object) }));
+              ws.send(JSON.stringify({
+                type: "about_me",
+                readiness: diag.readiness,
+                metrics: diag.all,
+                trends: diag.trends,
+                kbGuidance,
+                notes,
+                journal: journal.slice(0, 14),
+                dismissals: activeDismissals,
+                overrides: activeOverrides,
+                // Perfil fresco (ya lo leímos arriba para kbGuidance) — el móvil
+                // solo tenía el snapshot cacheado de 'connected', que queda
+                // desactualizado si el perfil cambió por chat sin reconectar.
+                userProfile: profile,
+              }));
+            } catch {
+              ws.send(JSON.stringify({ type: "about_me", readiness: null, metrics: [], trends: [], kbGuidance: [], notes: [], journal: [], dismissals: [], overrides: [] }));
+            }
+            return;
+          }
+
+          // ─── La bienvenida ya se mostró (la app la marca al abrirla, no al terminarla) ──
+          if (data.type === "welcome_done") {
+            await memory.set("welcome_done", { at: new Date().toISOString(), by: "app" }).catch(() => {});
+            return;
+          }
+
+          // ─── Reactivar un tema silenciado / quitar un objetivo verificado (desde "Sobre mí") ──
+          if (data.type === "clear_metric_feedback" && (data.metric)) {
+            try {
+              if (data.kind === "override") await clearOverride(memory, data.metric);
+              else await clearDismissal(memory, data.metric);
+              ws.send(JSON.stringify({ type: "metric_feedback_cleared", metric: data.metric, kind: data.kind || "dismissal" }));
+            } catch {}
+            return;
+          }
+
+          // ─── Borrado directo de una nota de contexto personal (desde "Sobre mí") ──
+          if (data.type === "delete_user_note") {
+            try {
+              if (data.noteId) await deleteUserNote(memory, data.noteId);
+              ws.send(JSON.stringify({ type: "user_note_deleted", noteId: data.noteId }));
+            } catch {}
+            return;
+          }
+
+          // ─── Entrada directa al bloc de notas (quick check-in desde Pulso) ──
+          if (data.type === "add_journal_entry") {
+            try {
+              const entry = await addJournalEntry(memory, { moodScore: data.moodScore, note: data.note });
+              ws.send(JSON.stringify({ type: "journal_entry_added", entry }));
+            } catch (e: any) {
+              ws.send(JSON.stringify({ type: "journal_entry_error", error: e?.message || String(e) }));
+            }
+            return;
+          }
+
+          // ─── Cancelar la consulta en curso en esta conexión (botón "detener") ──
+          if (data.type === "stop") {
+            const activeAbort = (ws.data as any).abortController as AbortController | undefined;
+            if (activeAbort) activeAbort.abort();
+            // Nada en curso en esta conexión (p. ej. el cliente se reconectó a mitad de una respuesta): igual se confirma,
+            // o la app queda en "procesando" para siempre esperando un "stopped" que nunca llegaba.
+            else ws.send(JSON.stringify({ type: "stopped" }));
+            return;
+          }
+
+          // Cuerpo compartido entre texto tipeado ("message") y texto
+          // transcripto por voz ("voice_message" → Whisper → acá) — una vez
+          // que hay texto del usuario, el camino es idéntico sin importar de
+          // dónde vino (tools, modos, persistencia, todo igual).
+          const handleUserText = async (userText: string, requestedMode: ThinkingMode) => {
+            // Tope de largo: un mensaje gigante no debe inundar el contexto del modelo ni hacer gastar el equipo
+            if (typeof userText !== "string") return;
+            if (userText.length > MAX_USER_MESSAGE_CHARS) userText = userText.slice(0, MAX_USER_MESSAGE_CHARS);
             const currentSessionId = (ws.data as any).sessionId;
             const history = sessions.get(currentSessionId) || [];
-            const userText = data.content;
-            const requestedMode: ThinkingMode = data.mode || DEFAULT_CONFIG.defaultMode;
 
             console.log(`\n[MSG] ${profileId}: "${userText.substring(0, 30)}..." | Modo: ${requestedMode}`);
             const startTime = Date.now();
@@ -803,140 +1903,150 @@ async function startServer() {
 
             // Usar el engine personalizado de este perfil
             const profileKey = `${profileId}:${pin || ''}`;
-            const engine = queryEngines.get(profileKey) || queryEngine;
-
-            // Inyectar snapshot de salud + historial médico en el contexto
-            let healthContext = '';
-            const cachedSnapshot = healthSnapshots.get(profileId);
-            if (cachedSnapshot) {
-              try {
-                const snap = JSON.parse(cachedSnapshot);
-                const parts: string[] = ['\n\n## 📊 Métricas de Salud Actuales (del dispositivo del usuario):'];
-                if (snap.sleep)     parts.push(`- Sueño: ${snap.sleep.durationHours}h`);
-                if (snap.heartRate) parts.push(`- FC: ${snap.heartRate.average} bpm (reposo: ${snap.heartRate.resting} bpm)`);
-                if (snap.hrv)       parts.push(`- HRV: ${snap.hrv}ms`);
-                if (snap.steps)     parts.push(`- Pasos hoy: ${snap.steps.toLocaleString()}`);
-                if (snap.distance)  parts.push(`- Distancia: ${snap.distance} km`);
-                if (snap.calories)  parts.push(`- Calorías activas: ${snap.calories.active} kcal`);
-                if (snap.spo2)      parts.push(`- SpO2: ${snap.spo2}%`);
-                if (snap.weight)    parts.push(`- Peso: ${snap.weight} kg`);
-                if (snap.nutrition) parts.push(`- Nutrición: ${snap.nutrition.calories} kcal | Prot: ${snap.nutrition.protein}g | Carbos: ${snap.nutrition.carbs}g | Grasas: ${snap.nutrition.fat}g`);
-                if (snap.hydration) parts.push(`- Hidratación: ${snap.hydration}L`);
-                if (snap.workouts?.length) parts.push(`- Entrenamientos: ${snap.workouts.length} sesion(es)`);
-                parts.push(`- Actualizado: ${new Date(snap.lastUpdated).toLocaleTimeString('es-ES')}`);
-                healthContext = parts.join('\n');
-              } catch {}
+            // Sin motor de respaldo: el genérico tiene TODAS las herramientas. Si el motor de este perfil no está
+            // (p. ej. le cambiaron el rol y se descartó), se le pide reconectar para armarlo con su rol actual.
+            // Perfil Ikaros con la app en modo Eris (no AXS Executive): el motor de Eris (ver la separación al conectar)
+            const erisMode = (ws.data as any).role === 'ikaros' && data.axs === false;
+            const engine = (erisMode && queryEngines.get(`${profileKey}#eris`)) || queryEngines.get(profileKey);
+            if (!engine) {
+              ws.send(JSON.stringify({ type: "error", message: "Tu sesión cambió. Reconectando…" }));
+              try { ws.close(4001, "session_changed"); } catch {}
+              return;
             }
 
-            // Contexto médico: condiciones, medicamentos, insulina reciente
-            let medicalContext = '';
+            // Antes acá se forzaba salud+médico+personal+finanzas en CADA mensaje —
+            // por eso Eris comentaba tu glucosa aunque solo dijeras "hola". Ahora ese
+            // contexto vive detrás de get_live_context (LiveContextTool): Eris lo pide
+            // cuando la conversación realmente lo amerita, no en cada respuesta.
+            //
+            // AbortController por conexión — permite que el botón "detener" del
+            // cliente (mensaje {type:'stop'}) corte esta generación a mitad de
+            // camino. Se guarda en ws.data para que la rama "stop" de arriba lo
+            // encuentre; se limpia en el finally para no dejarlo colgado.
+            const ac = new AbortController();
+            (ws.data as any).abortController = ac;
+            // Rastro de este turno (Message.trace): qué herramientas se llamaron y cuáles fallaron
+            const traceTools: string[] = [];
+            const traceErrors: string[] = [];
+            let queryResult;
             try {
-              const userProf = await memory.getProfile();
-              const med = userProf?.medical;
-              if (med) {
-                const mParts: string[] = ['\n\n## 🏥 Historial Médico del Usuario:'];
-                if (med.conditions?.length) {
-                  mParts.push('Condiciones: ' + med.conditions.map(c => c.id.replace(/_/g, ' ')).join(', '));
-                }
-                if (med.medications?.filter(m => m.active).length) {
-                  const meds = med.medications.filter(m => m.active).map(m => `${m.name} ${m.dose || ''}`.trim());
-                  mParts.push('Medicamentos activos: ' + meds.join(', '));
-                }
-                if (med.thresholds) {
-                  const t = med.thresholds;
-                  mParts.push(`Umbrales glucosa: bajo <${t.glucoseLow} · alto >${t.glucoseHigh} · urgente bajo <${t.glucoseUrgentLow} · urgente alto >${t.glucoseUrgentHigh} mg/dL`);
-                }
-                if (med.bloodType) mParts.push(`Grupo sanguíneo: ${med.bloodType}`);
-                if (med.allergies) mParts.push(`Alergias: ${med.allergies}`);
-                // Últimas dosis de insulina (si es diabético)
-                const isDiabetic = med.conditions?.some(c => c.id.startsWith('diabetes'));
-                if (isDiabetic) {
-                  const recentInsulin = await memory.getInsulinLog(1);
-                  if (recentInsulin.length > 0) {
-                    const last = recentInsulin[0];
-                    const ago = Math.round((Date.now() - new Date(last.timestamp).getTime()) / 60000);
-                    mParts.push(`Última insulina: ${last.units}UI ${last.type === 'rapid' ? 'rápida' : last.type === 'long' ? 'lenta' : 'mixta'} hace ${ago} min${last.glucoseAtTime ? ` (glucosa ${last.glucoseAtTime} mg/dL entonces)` : ''}`);
-                  }
-                }
-                medicalContext = mParts.join('\n');
+              queryResult = await engine.query(
+                userText,
+                recentHistory,
+                {
+                  onToken: (token) => {
+                    ws.send(JSON.stringify({ type: "token", content: token }));
+                  },
+                  onThinking: (text) => {
+                    ws.send(JSON.stringify({ type: "thinking_token", content: text }));
+                  },
+                  onToolCall: (tc) => {
+                    traceTools.push(tc.name);
+                    ws.send(JSON.stringify({
+                      type: "tool_call",
+                      name: tc.name,
+                      input: tc.input,
+                    }));
+                  },
+                  onToolResult: (result) => {
+                    if (result.error) traceErrors.push(`${result.name}: ${String(result.error).slice(0, 120)}`);
+                    ws.send(JSON.stringify({
+                      type: "tool_result",
+                      name: result.name,
+                      output: result.output,
+                      error: result.error,
+                      duration: result.duration,
+                    }));
+                  },
+                  onModeResolved: (mode, model) => {
+                    ws.send(JSON.stringify({
+                      type: "mode_resolved",
+                      mode,
+                      model,
+                    }));
+                  },
+                  // Acciones sensibles: tarjeta "Aprobar / Rechazar" en la app (se cancela si se pulsa "detener")
+                  onConfirm: (req) => askApproval(ws, profileId, req, ac.signal),
+                },
+                ctx.summary,
+                requestedMode,
+                {
+                  profileId,
+                  memory,
+                  role: (ws.data as any).role,
+                  wsClient: ws,
+                  glucoService: activeGlucoServices.get(profileId) || null,
+                  foodService: unifiedFood,
+                  // La app manda si está en Modo AXS Executive: fuera de él, Eris no usa las herramientas de AXS
+                  // (bóveda, briefing, reportes). Sin el dato (web, clientes viejos) todo sigue como antes.
+                  axsMode: typeof data.axs === "boolean" ? data.axs : undefined,
+                },
+                undefined,
+                ac.signal,
+                // Instrucciones del proyecto al que pertenece este chat (si tiene)
+                memory.getProjectOfConversation(currentSessionId)?.instructions
+              );
+            } catch (err) {
+              // Chat en pausa (Ollama apagado para liberar memoria): un aviso claro en vez de un error técnico, y el
+              // mensaje sin respuesta no queda en la conversación
+              if (!(await provider.isAvailable().catch(() => false))) {
+                history.pop();
+                ws.send(JSON.stringify({ type: "error", message: "El chat de Eris está en pausa por ahora. Lo que anotes en la app se sigue guardando." }));
+                return;
               }
-            } catch {}
-
-            const financialContext = financialContexts.get(profileId) || '';
-            const autoCtx = [healthContext, medicalContext, financialContext].filter(Boolean).join('');
-            const enrichedUserText = autoCtx
-              ? `${userText}\n\n[CONTEXTO AUTOMÁTICO - NO MOSTRAR AL USUARIO]${autoCtx}`
-              : userText;
-
-            const queryResult = await engine.query(
-              enrichedUserText,
-              recentHistory,
-              {
-                onToken: (token) => {
-                  ws.send(JSON.stringify({ type: "token", content: token }));
-                },
-                onThinking: (text) => {
-                  ws.send(JSON.stringify({ type: "thinking_token", content: text }));
-                },
-                onToolCall: (tc) => {
-                  ws.send(JSON.stringify({
-                    type: "tool_call",
-                    name: tc.name,
-                    input: tc.input,
-                  }));
-                },
-                onToolResult: (result) => {
-                  ws.send(JSON.stringify({
-                    type: "tool_result",
-                    name: result.name,
-                    output: result.output,
-                    error: result.error,
-                    duration: result.duration,
-                  }));
-                },
-                onModeResolved: (mode, model) => {
-                  ws.send(JSON.stringify({
-                    type: "mode_resolved",
-                    mode,
-                    model,
-                  }));
-                },
-              },
-              ctx.summary,
-              requestedMode,
-              {
-                profileId,
-                memory,
-                role: (ws.data as any).role,
-                wsClient: ws,
-                glucoService: activeGlucoServices.get(profileId) || null,
-                foodService: unifiedFood,
-              }
-            );
+              throw err;
+            } finally {
+              (ws.data as any).abortController = null;
+            }
 
             const response = queryResult.message;
+            response.trace = {
+              tools: traceTools,
+              ...(traceErrors.length ? { errors: traceErrors } : {}),
+              ...(queryResult.quick ? { quick: true } : {}),
+              ms: Date.now() - startTime,
+            };
             history.push(response);
             sessions.set(currentSessionId, history);
-            await memory.saveConversation(currentSessionId, history);
+            // Persistir SIEMPRE, incluso si el socket ya murió (app en segundo
+            // plano/cerrada) — así la respuesta está lista cuando el cliente
+            // reconecte y vuelva a pedir el historial de esta sesión.
+            // De quién es el chat: lo dice el modo con que llegó el mensaje (Modo AXS → Hestia); sin el dato, el de la conexión
+            if (typeof data.axs === "boolean") (ws.data as any).persona = (ws.data as any).role === "ikaros" && data.axs ? "hestia" : "eris";
+            const chatPersona = personaOfWs(ws);
+            await memory.saveConversation(currentSessionId, history, chatPersona);
+            await memory.set(`last_chat_${chatPersona}`, currentSessionId).catch(() => {});
 
             // Guardar para training (en background)
             memory.saveTrainingData(currentSessionId, history).catch(() => {});
 
             const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-            console.log(`[OK] ${profileId} Resp: "${response.content.substring(0, 50).replace(/\n/g, " ")}..."`);
+            console.log(`[OK] ${profileId} ${duration}s${queryResult.quick ? " (al instante)" : ""} Resp: "${response.content.substring(0, 50).replace(/\n/g, " ")}..."`);
 
-            ws.send(JSON.stringify({
-              type: "stream_end",
-              content: response.content,
-              id: response.id,
-              modeUsed: queryResult.modeUsed,
-              modelUsed: queryResult.modelUsed,
-            }));
+            // Los ws.send de acá en adelante son best-effort: si el socket ya
+            // cerró (app minimizada/matada mientras generaba), la respuesta ya
+            // quedó guardada arriba — no queremos que un send fallido tire el
+            // resto del handler.
+            try {
+              ws.send(JSON.stringify(
+                queryResult.stopped
+                  ? { type: "stopped", content: response.content, id: response.id }
+                  : {
+                      type: "stream_end",
+                      content: response.content,
+                      id: response.id,
+                      modeUsed: queryResult.modeUsed,
+                      modelUsed: queryResult.modelUsed,
+                    }
+              ));
+            } catch {}
 
-            ws.send(JSON.stringify({
-              type: "conversations_updated",
-              conversations: memory.listConversations(),
-            }));
+            try {
+              ws.send(JSON.stringify({
+                type: "conversations_updated",
+                conversations: convList(memory, ws),
+              }));
+            } catch {}
 
             // ─── Compresión en background ───
             if (history.length > COMPRESS_THRESHOLD) {
@@ -946,6 +2056,8 @@ async function startServer() {
                 compressor
                   .compress(toSummarize, ctx.summary)
                   .then((summary) => {
+                    // Un resumen vacío (falló el modelo) no reemplaza al anterior ni da por resumidos esos mensajes
+                    if (!summary.trim()) return;
                     const upTo = history.length - 6;
                     memory.updateSummary(currentSessionId, summary, upTo);
                   })
@@ -954,6 +2066,79 @@ async function startServer() {
                   });
               }
             }
+          };
+
+          if (data.type === "message") {
+            await handleUserText(data.content, data.mode || DEFAULT_CONFIG.defaultMode);
+            return;
+          }
+
+          if (data.type === "voice_message") {
+            try {
+              const audioBuffer = Buffer.from(data.audioBase64, "base64");
+              // Dictado con contexto (stt/VoiceFix.ts): Whisper recibe el vocabulario de Eris y del usuario y lo último que
+              // dijo Eris; lo que oyó con duda se corrige por sonido y, si hace falta, el modelo lo reinterpreta con la
+              // conversación. Antes iba tal cual: "Registra … Chocapic … once" llegaba "Te distra … chocopiqui … donce".
+              const sessionHistory = sessions.get((ws.data as any).sessionId) || [];
+              const lastAssistant = [...sessionHistory].reverse().find((m: any) => m.role === "assistant" && m.content)?.content;
+              const vocabulary = await voiceVocabulary(memory);
+              const core = lexiconIndex(vocabulary);
+              const busy = !!(ws.data as any).abortController;
+              const v = await understandVoice({ lastAssistant, vocabulary }, {
+                transcribe: (prompt) => whisperProvider.transcribeVerbose(audioBuffer, data.mimeType || "audio/m4a", prompt),
+                indexes: [...unifiedFood.vocabularyIndexes(), core],
+                core,
+                // Con otra consulta en curso no se usa el modelo (quedaría en cola detrás de ella)
+                llm: busy ? null : async (system, user) => (await provider.generate(
+                  [{ role: "system", content: system }, { role: "user", content: user }], undefined,
+                  { temperature: 0.1, maxTokens: 160, modelOverride: THINKING_MODES.flash.model, enableThinking: false },
+                )).content || "",
+              });
+              const transcribed = v.text.trim();
+              if (v.heard) console.log(`[Voz] ${v.ms.whisper} ms + ${v.ms.fix} ms · oído: "${v.heard.slice(0, 80)}"${v.fixes.length ? ` → "${transcribed.slice(0, 80)}" (${v.fixes.join("; ")})` : ""}`);
+              if (!transcribed) {
+                ws.send(JSON.stringify({ type: "voice_transcribed", text: "" }));
+                return;
+              }
+              ws.send(JSON.stringify({ type: "voice_transcribed", text: transcribed, ...(transcribed !== v.heard ? { heard: v.heard } : {}) }));
+              await handleUserText(transcribed, data.mode || DEFAULT_CONFIG.defaultMode);
+            } catch (err) {
+              ws.send(JSON.stringify({
+                type: "error",
+                message: `No pude transcribir el audio: ${err instanceof Error ? err.message : String(err)}`,
+              }));
+            }
+            return;
+          }
+
+          // ─── Voz de respuesta (TTS) — el cliente pide esto explícitamente
+          // cuando el usuario tiene el toggle de voz activado, no en cada
+          // respuesta automáticamente (así no se bloquea la entrega del texto). ──
+          if (data.type === "tts_request") {
+            try {
+              // La voz NO lee el texto de pantalla: dice una versión corta y
+              // con la personalidad de Eris (canal distinto, complementa lo
+              // escrito). Si el texto ya es breve se habla tal cual.
+              const fullText = String(data.text || "").trim();
+              const sessionHistory = sessions.get((ws.data as any).sessionId) || [];
+              const lastUserMsg = [...sessionHistory].reverse().find((m) => m.role === "user")?.content ?? null;
+              const busy = !!(ws.data as any).abortController; // hay una consulta en curso en esta conexión
+              const spoken = await buildSpokenVersion(provider, fullText, lastUserMsg, THINKING_MODES.flash.model, { skipLLM: busy });
+              if (!spoken) return;
+              const wav = await piperProvider.synthesize(spoken, "daniela");
+              if (wav.length === 0) return;
+              ws.send(JSON.stringify({
+                type: "tts_audio",
+                audioBase64: wav.toString("base64"),
+                mimeType: "audio/wav",
+              }));
+            } catch (err) {
+              ws.send(JSON.stringify({
+                type: "error",
+                message: `No pude generar la voz: ${err instanceof Error ? err.message : String(err)}`,
+              }));
+            }
+            return;
           }
 
           if (data.type === "clear") {
@@ -963,7 +2148,7 @@ async function startServer() {
             ws.send(JSON.stringify({ type: "cleared" }));
             ws.send(JSON.stringify({
               type: "conversations_updated",
-              conversations: memory.listConversations(),
+              conversations: convList(memory, ws),
             }));
           }
         } catch (err) {
@@ -976,6 +2161,7 @@ async function startServer() {
 
       close(ws) {
         const pid = (ws.data as any)?.profileId;
+        denyApprovals({ ws }); // lo que esperaba respuesta en esta conexión ya no se puede aprobar
         if (pid) unregisterClient(pid, ws);
       },
     },

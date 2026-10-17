@@ -37,10 +37,12 @@ export const THINKING_MODES: Record<ThinkingMode, ThinkingModeConfig> = {
     description: "Respuestas rápidas e instantáneas",
     // Sin thinking = ahorra 1-3s en el primer token
     // temp 0.3 = más determinista, menos "duda"
-    temperature: 0.3,
-    maxTokens: 2048,   // Aumentado para dar espacio al <think>
-    contextLength: 4096,
-    enableThinking: true, // Reactivado para evitar que escupa el razonamiento en crudo
+    temperature: 0.0, // Cero alucinaciones para datos concretos
+    maxTokens: 2048,   // Reducido para velocidad
+    // Base 8192 (antes 6144): el prompt público solo ya mide ~5 400 tokens y con unos turnos de historial Ollama descartaba conversación.
+    // Igual que Deep, así cambiar de modo NO recarga el modelo. El contexto real lo elige ContextPlanner por turno (8192-16384).
+    contextLength: 8192,
+    enableThinking: false, // Apagado nativamente para respuesta instantánea sin razonamiento
   },
   deep: {
     id: "deep",
@@ -49,8 +51,8 @@ export const THINKING_MODES: Record<ThinkingMode, ThinkingModeConfig> = {
     icon: "🧠",
     description: "Análisis profundo y razonamiento complejo",
     temperature: 0.6,  // Bajado de 0.7: más preciso sin perder creatividad
-    maxTokens: 6144,   // Subido para análisis largos
-    contextLength: 8192,
+    maxTokens: 8192,   // Balanceado para no eternizarse
+    contextLength: 8192, // Mantenido en 8k para evitar que el KV cache se vaya a RAM y tumbe los tokens/s
     enableThinking: true,
   },
   auto: {
@@ -82,11 +84,10 @@ const DEEP_KEYWORDS = [
   "cuéntame de ti", "cuentame de ti", "cuéntame sobre ti", "cuentame sobre ti",
   "qué puedes", "que puedes", "qué sabes", "que sabes",
   "sobre eris", "de eris", "acerca de eris",
-  "registro", "registros", "libro de", "historial", "log",
-  // Funciones de la App Móvil
-  "glucosa", "azúcar", "azucar", "cgm", "librelink", "diabetes", "métrica", "metrica",
-  "comida", "comí", "comi", "alimento", "calorías", "calorias", "macronutrientes", "macros", "dieta", "desayuno", "almuerzo", "cena",
-  "nota", "crea nota", "guarda", "recuerda", "recordatorio"
+  "libro de", "historial",
+  // OJO: comida, registros, glucosa, notas y recordatorios ya NO están acá. Son flujos de HERRAMIENTAS (registrar, consultar,
+  // asesor metabólico) que el modelo resuelve bien en Flash; en Deep razonaba minutos ("desayuno" → Deep) y la respuesta
+  // posterior al registro se pasaba del tiempo máximo. Si quieres razonamiento profundo, pídelo (explica, compara, analiza…).
 ];
 
 /** Patrones que disparan modo Flash */
@@ -110,9 +111,10 @@ export function classifyQuery(query: string): "flash" | "deep" {
     if (isFlash) return "flash";
   }
 
-  // Si contiene keywords de profundidad → Deep
+  // Si contiene keywords de profundidad → Deep.
+  // Coincide desde el INICIO de palabra ("explica" → "explícame" sí; "log" ya no calza con "catálogo").
   const hasDeepKeyword = DEEP_KEYWORDS.some((kw) =>
-    normalized.includes(kw)
+    new RegExp(`(?<![\\p{L}\\p{N}])${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u").test(normalized)
   );
   if (hasDeepKeyword) return "deep";
 

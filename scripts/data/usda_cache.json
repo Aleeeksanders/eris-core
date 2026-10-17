@@ -1,0 +1,3692 @@
+{
+ "sr|Bread, french or vienna (includes sourdough)": {
+  "fdcId": 172675,
+  "description": "Bread, french or vienna (includes sourdough)",
+  "per100": {
+   "kcal": 272,
+   "protein": 10.8,
+   "carbs": 51.9,
+   "fat": 2.42,
+   "fiber": 2.2,
+   "sugar": 4.62,
+   "sodium": 602,
+   "satFat": 0.529
+  },
+  "score": 1
+ },
+ "sr|Rolls, dinner, plain, commercially prepared (includes brown-and-serve)": {
+  "fdcId": 172793,
+  "description": "Rolls, dinner, plain, commercially prepared (includes brown-and-serve)",
+  "per100": {
+   "kcal": 310,
+   "protein": 10.9,
+   "carbs": 52,
+   "fat": 6.47,
+   "fiber": 2,
+   "sugar": 5.55,
+   "sodium": 467,
+   "satFat": 1.38
+  },
+  "score": 1
+ },
+ "sr|Bread, white, commercially prepared (includes soft bread crumbs)": {
+  "fdcId": 174924,
+  "description": "Bread, white, commercially prepared (includes soft bread crumbs)",
+  "per100": {
+   "kcal": 266,
+   "protein": 8.85,
+   "carbs": 49.4,
+   "fat": 3.33,
+   "fiber": 2.7,
+   "sugar": 5.67,
+   "sodium": 490,
+   "satFat": 0.698
+  },
+  "score": 1
+ },
+ "sr|Bread, whole-wheat, commercially prepared": {
+  "fdcId": 172688,
+  "description": "Bread, whole-wheat, commercially prepared",
+  "per100": {
+   "kcal": 252,
+   "protein": 12.4,
+   "carbs": 42.7,
+   "fat": 3.5,
+   "fiber": 6,
+   "sugar": 4.34,
+   "sodium": 455,
+   "satFat": 0.722
+  },
+  "score": 1
+ },
+ "sr|Bread, pita, white, enriched": {
+  "fdcId": 174915,
+  "description": "Bread, pita, white, enriched",
+  "per100": {
+   "kcal": 275,
+   "protein": 9.1,
+   "carbs": 55.7,
+   "fat": 1.2,
+   "fiber": 2.2,
+   "sugar": 1.3,
+   "sodium": 536,
+   "satFat": 0.166
+  },
+  "score": 1
+ },
+ "sr|Rice, white, long-grain, regular, enriched, cooked": {
+  "fdcId": 168878,
+  "description": "Rice, white, long-grain, regular, enriched, cooked",
+  "per100": {
+   "kcal": 130,
+   "protein": 2.69,
+   "carbs": 28.2,
+   "fat": 0.28,
+   "fiber": 0.4,
+   "sugar": 0.05,
+   "sodium": 1,
+   "satFat": 0.077
+  },
+  "score": 1
+ },
+ "sr|Rice, brown, long-grain, cooked": {
+  "fdcId": 169704,
+  "description": "Rice, brown, long-grain, cooked (Includes foods for USDA's Food Distribution Program)",
+  "per100": {
+   "kcal": 123,
+   "protein": 2.74,
+   "carbs": 25.6,
+   "fat": 0.97,
+   "fiber": 1.6,
+   "sugar": 0.24,
+   "sodium": 4,
+   "satFat": 0.26
+  },
+  "score": 1
+ },
+ "sr|Pasta, cooked, enriched, without added salt": {
+  "fdcId": 169737,
+  "description": "Pasta, cooked, enriched, without added salt",
+  "per100": {
+   "kcal": 158,
+   "protein": 5.8,
+   "carbs": 30.9,
+   "fat": 0.93,
+   "fiber": 1.8,
+   "sugar": 0.56,
+   "sodium": 1,
+   "satFat": 0.176
+  },
+  "score": 1
+ },
+ "sr|Cereals, oats, regular and quick, not fortified, dry": {
+  "fdcId": 173904,
+  "description": "Cereals, oats, regular and quick, not fortified, dry",
+  "per100": {
+   "kcal": 379,
+   "protein": 13.2,
+   "carbs": 67.7,
+   "fat": 6.52,
+   "fiber": 10.1,
+   "sugar": 0.99,
+   "sodium": 6,
+   "satFat": 1.11
+  },
+  "score": 1
+ },
+ "sr|Quinoa, cooked": {
+  "fdcId": 168917,
+  "description": "Quinoa, cooked",
+  "per100": {
+   "kcal": 120,
+   "protein": 4.4,
+   "carbs": 21.3,
+   "fat": 1.92,
+   "fiber": 2.8,
+   "sugar": 0.87,
+   "sodium": 7,
+   "satFat": 0.231
+  },
+  "score": 1
+ },
+ "sr|Beans, cranberry (roman), mature seeds, cooked, boiled, without salt": {
+  "fdcId": 173736,
+  "description": "Beans, cranberry (roman), mature seeds, cooked, boiled, without salt",
+  "per100": {
+   "kcal": 136,
+   "protein": 9.34,
+   "carbs": 24.5,
+   "fat": 0.46,
+   "fiber": 8.6,
+   "sugar": 0,
+   "sodium": 1,
+   "satFat": 0.119
+  },
+  "score": 1
+ },
+ "sr|Lentils, mature seeds, cooked, boiled, without salt": {
+  "fdcId": 172421,
+  "description": "Lentils, mature seeds, cooked, boiled, without salt",
+  "per100": {
+   "kcal": 116,
+   "protein": 9.02,
+   "carbs": 20.1,
+   "fat": 0.38,
+   "fiber": 7.9,
+   "sugar": 1.8,
+   "sodium": 2,
+   "satFat": 0.053
+  },
+  "score": 1
+ },
+ "sr|Chickpeas (garbanzo beans, bengal gram), mature seeds, cooked, boiled, without salt": {
+  "fdcId": 173757,
+  "description": "Chickpeas (garbanzo beans, bengal gram), mature seeds, cooked, boiled, without salt",
+  "per100": {
+   "kcal": 164,
+   "protein": 8.86,
+   "carbs": 27.4,
+   "fat": 2.59,
+   "fiber": 7.6,
+   "sugar": 4.8,
+   "sodium": 7,
+   "satFat": 0.269
+  },
+  "score": 1
+ },
+ "sr|Peas, green, cooked, boiled, drained, without salt": {
+  "fdcId": 170420,
+  "description": "Peas, green, cooked, boiled, drained, without salt",
+  "per100": {
+   "kcal": 84,
+   "protein": 5.36,
+   "carbs": 15.6,
+   "fat": 0.22,
+   "fiber": 5.5,
+   "sugar": 5.93,
+   "sodium": 3,
+   "satFat": 0.039
+  },
+  "score": 1
+ },
+ "sr|Potatoes, boiled, cooked without skin, flesh, without salt": {
+  "fdcId": 170440,
+  "description": "Potatoes, boiled, cooked without skin, flesh, without salt",
+  "per100": {
+   "kcal": 86,
+   "protein": 1.71,
+   "carbs": 20,
+   "fat": 0.1,
+   "fiber": 1.8,
+   "sugar": 0.89,
+   "sodium": 5,
+   "satFat": 0.026
+  },
+  "score": 1
+ },
+ "sr|Sweet potato, cooked, boiled, without skin": {
+  "fdcId": 168484,
+  "description": "Sweet potato, cooked, boiled, without skin",
+  "per100": {
+   "kcal": 76,
+   "protein": 1.37,
+   "carbs": 17.7,
+   "fat": 0.14,
+   "fiber": 2.5,
+   "sugar": 5.74,
+   "sodium": 27,
+   "satFat": 0.031
+  },
+  "score": 1
+ },
+ "sr|Tomatoes, red, ripe, raw, year round average": {
+  "fdcId": 170457,
+  "description": "Tomatoes, red, ripe, raw, year round average",
+  "per100": {
+   "kcal": 18,
+   "protein": 0.88,
+   "carbs": 3.89,
+   "fat": 0.2,
+   "fiber": 1.2,
+   "sugar": 2.63,
+   "sodium": 5,
+   "satFat": 0.028
+  },
+  "score": 1
+ },
+ "sr|Carrots, raw": {
+  "fdcId": 170393,
+  "description": "Carrots, raw",
+  "per100": {
+   "kcal": 41,
+   "protein": 0.93,
+   "carbs": 9.58,
+   "fat": 0.24,
+   "fiber": 2.8,
+   "sugar": 4.74,
+   "sodium": 69,
+   "satFat": 0.032
+  },
+  "score": 1
+ },
+ "sr|Avocados, raw, all commercial varieties": {
+  "fdcId": 171705,
+  "description": "Avocados, raw, all commercial varieties",
+  "per100": {
+   "kcal": 160,
+   "protein": 2,
+   "carbs": 8.53,
+   "fat": 14.7,
+   "fiber": 6.7,
+   "sugar": 0.66,
+   "sodium": 7,
+   "satFat": 2.13
+  },
+  "score": 1
+ },
+ "sr|Cucumber, with peel, raw": {
+  "fdcId": 168409,
+  "description": "Cucumber, with peel, raw",
+  "per100": {
+   "kcal": 15,
+   "protein": 0.65,
+   "carbs": 3.63,
+   "fat": 0.11,
+   "fiber": 0.5,
+   "sugar": 1.67,
+   "sodium": 2,
+   "satFat": 0.037
+  },
+  "score": 1
+ },
+ "sr|Onions, raw": {
+  "fdcId": 170000,
+  "description": "Onions, raw",
+  "per100": {
+   "kcal": 40,
+   "protein": 1.1,
+   "carbs": 9.34,
+   "fat": 0.1,
+   "fiber": 1.7,
+   "sugar": 4.24,
+   "sodium": 4,
+   "satFat": 0.042
+  },
+  "score": 1
+ },
+ "sr|Peppers, sweet, red, raw": {
+  "fdcId": 170108,
+  "description": "Peppers, sweet, red, raw",
+  "per100": {
+   "kcal": 26,
+   "protein": 0.99,
+   "carbs": 6.03,
+   "fat": 0.3,
+   "fiber": 2.1,
+   "sugar": 4.2,
+   "sodium": 4,
+   "satFat": 0.059
+  },
+  "score": 1
+ },
+ "sr|Broccoli, raw": {
+  "fdcId": 170379,
+  "description": "Broccoli, raw",
+  "per100": {
+   "kcal": 34,
+   "protein": 2.82,
+   "carbs": 6.64,
+   "fat": 0.37,
+   "fiber": 2.6,
+   "sugar": 1.7,
+   "sodium": 33,
+   "satFat": 0.114
+  },
+  "score": 1
+ },
+ "sr|Spinach, cooked, boiled, drained, without salt": {
+  "fdcId": 168463,
+  "description": "Spinach, cooked, boiled, drained, without salt",
+  "per100": {
+   "kcal": 23,
+   "protein": 2.97,
+   "carbs": 3.75,
+   "fat": 0.26,
+   "fiber": 2.4,
+   "sugar": 0.43,
+   "sodium": 70,
+   "satFat": 0.043
+  },
+  "score": 1
+ },
+ "sr|Chard, swiss, cooked, boiled, drained, without salt": {
+  "fdcId": 170401,
+  "description": "Chard, swiss, cooked, boiled, drained, without salt",
+  "per100": {
+   "kcal": 20,
+   "protein": 1.88,
+   "carbs": 4.13,
+   "fat": 0.08,
+   "fiber": 2.1,
+   "sugar": 1.1,
+   "sodium": 179,
+   "satFat": 0.012
+  },
+  "score": 1
+ },
+ "sr|Squash, winter, butternut, cooked, baked, without salt": {
+  "fdcId": 169296,
+  "description": "Squash, winter, butternut, cooked, baked, without salt",
+  "per100": {
+   "kcal": 40,
+   "protein": 0.9,
+   "carbs": 10.5,
+   "fat": 0.09,
+   "fiber": 3.2,
+   "sugar": 1.97,
+   "sodium": 4,
+   "satFat": 0.019
+  },
+  "score": 1
+ },
+ "sr|Corn, sweet, yellow, cooked, boiled, drained, without salt": {
+  "fdcId": 169999,
+  "description": "Corn, sweet, yellow, cooked, boiled, drained, without salt",
+  "per100": {
+   "kcal": 96,
+   "protein": 3.41,
+   "carbs": 21,
+   "fat": 1.5,
+   "fiber": 2.4,
+   "sugar": 4.54,
+   "sodium": 1,
+   "satFat": 0.197
+  },
+  "score": 1
+ },
+ "sr|Lettuce, cos or romaine, raw": {
+  "fdcId": 169247,
+  "description": "Lettuce, cos or romaine, raw",
+  "per100": {
+   "kcal": 17,
+   "protein": 1.23,
+   "carbs": 3.29,
+   "fat": 0.3,
+   "fiber": 2.1,
+   "sugar": 1.19,
+   "sodium": 8,
+   "satFat": 0.039
+  },
+  "score": 1
+ },
+ "sr|Garlic, raw": {
+  "fdcId": 169230,
+  "description": "Garlic, raw",
+  "per100": {
+   "kcal": 149,
+   "protein": 6.36,
+   "carbs": 33.1,
+   "fat": 0.5,
+   "fiber": 2.1,
+   "sugar": 1,
+   "sodium": 17,
+   "satFat": 0.089
+  },
+  "score": 1
+ },
+ "sr|Apples, raw, with skin (Includes foods for USDA's Food Distribution Program)": {
+  "fdcId": 171688,
+  "description": "Apples, raw, with skin (Includes foods for USDA's Food Distribution Program)",
+  "per100": {
+   "kcal": 52,
+   "protein": 0.26,
+   "carbs": 13.8,
+   "fat": 0.17,
+   "fiber": 2.4,
+   "sugar": 10.4,
+   "sodium": 1,
+   "satFat": 0.028
+  },
+  "score": 1
+ },
+ "sr|Bananas, raw": {
+  "fdcId": 173944,
+  "description": "Bananas, raw",
+  "per100": {
+   "kcal": 89,
+   "protein": 1.09,
+   "carbs": 22.8,
+   "fat": 0.33,
+   "fiber": 2.6,
+   "sugar": 12.2,
+   "sodium": 1,
+   "satFat": 0.112
+  },
+  "score": 1
+ },
+ "sr|Oranges, raw, all commercial varieties": {
+  "fdcId": 169097,
+  "description": "Oranges, raw, all commercial varieties",
+  "per100": {
+   "kcal": 47,
+   "protein": 0.94,
+   "carbs": 11.8,
+   "fat": 0.12,
+   "fiber": 2.4,
+   "sugar": 9.35,
+   "sodium": 0,
+   "satFat": 0.015
+  },
+  "score": 1
+ },
+ "sr|Pears, raw": {
+  "fdcId": 169118,
+  "description": "Pears, raw",
+  "per100": {
+   "kcal": 57,
+   "protein": 0.36,
+   "carbs": 15.2,
+   "fat": 0.14,
+   "fiber": 3.1,
+   "sugar": 9.75,
+   "sodium": 1,
+   "satFat": 0.022
+  },
+  "score": 1
+ },
+ "sr|Grapes, red or green (European type, such as Thompson seedless), raw": {
+  "fdcId": 174683,
+  "description": "Grapes, red or green (European type, such as Thompson seedless), raw",
+  "per100": {
+   "kcal": 69,
+   "protein": 0.72,
+   "carbs": 18.1,
+   "fat": 0.16,
+   "fiber": 0.9,
+   "sugar": 15.5,
+   "sodium": 2,
+   "satFat": 0.054
+  },
+  "score": 1
+ },
+ "sr|Watermelon, raw": {
+  "fdcId": 167765,
+  "description": "Watermelon, raw",
+  "per100": {
+   "kcal": 30,
+   "protein": 0.61,
+   "carbs": 7.55,
+   "fat": 0.15,
+   "fiber": 0.4,
+   "sugar": 6.2,
+   "sodium": 1,
+   "satFat": 0.016
+  },
+  "score": 1
+ },
+ "sr|Strawberries, raw": {
+  "fdcId": 167762,
+  "description": "Strawberries, raw",
+  "per100": {
+   "kcal": 32,
+   "protein": 0.67,
+   "carbs": 7.68,
+   "fat": 0.3,
+   "fiber": 2,
+   "sugar": 4.89,
+   "sodium": 1,
+   "satFat": 0.015
+  },
+  "score": 1
+ },
+ "sr|Kiwifruit, green, raw": {
+  "fdcId": 168153,
+  "description": "Kiwifruit, green, raw",
+  "per100": {
+   "kcal": 61,
+   "protein": 1.14,
+   "carbs": 14.7,
+   "fat": 0.52,
+   "fiber": 3,
+   "sugar": 8.99,
+   "sodium": 3,
+   "satFat": 0.029
+  },
+  "score": 1
+ },
+ "sr|Peaches, yellow, raw": {
+  "fdcId": 169928,
+  "description": "Peaches, yellow, raw",
+  "per100": {
+   "kcal": 39,
+   "protein": 0.91,
+   "carbs": 9.54,
+   "fat": 0.25,
+   "fiber": 1.5,
+   "sugar": 8.39,
+   "sodium": 0,
+   "satFat": 0.019
+  },
+  "score": 1
+ },
+ "sr|Cherimoya, raw": {
+  "fdcId": 173953,
+  "description": "Cherimoya, raw",
+  "per100": {
+   "kcal": 75,
+   "protein": 1.57,
+   "carbs": 17.7,
+   "fat": 0.68,
+   "fiber": 3,
+   "sugar": 12.9,
+   "sodium": 7,
+   "satFat": 0.233
+  },
+  "score": 1
+ },
+ "sr|Lemons, raw, without peel": {
+  "fdcId": 167746,
+  "description": "Lemons, raw, without peel",
+  "per100": {
+   "kcal": 29,
+   "protein": 1.1,
+   "carbs": 9.32,
+   "fat": 0.3,
+   "fiber": 2.8,
+   "sugar": 2.5,
+   "sodium": 2,
+   "satFat": 0.039
+  },
+  "score": 1
+ },
+ "sr|Chicken, broilers or fryers, breast, meat only, cooked, roasted": {
+  "fdcId": 171477,
+  "description": "Chicken, broilers or fryers, breast, meat only, cooked, roasted",
+  "per100": {
+   "kcal": 165,
+   "protein": 31,
+   "carbs": 0,
+   "fat": 3.57,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 74,
+   "satFat": 1.01
+  },
+  "score": 1
+ },
+ "sr|Chicken, broilers or fryers, thigh, meat and skin, cooked, roasted": {
+  "fdcId": 173625,
+  "description": "Chicken, broilers or fryers, thigh, meat and skin, cooked, roasted",
+  "per100": {
+   "kcal": 232,
+   "protein": 23.3,
+   "carbs": 0,
+   "fat": 14.7,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 102,
+   "satFat": 4.11
+  },
+  "score": 1
+ },
+ "sr|Beef, ground, 80% lean meat / 20% fat, crumbles, cooked, pan-browned": {
+  "fdcId": 171799,
+  "description": "Beef, ground, 80% lean meat / 20% fat, crumbles, cooked, pan-browned",
+  "per100": {
+   "kcal": 272,
+   "protein": 27,
+   "carbs": 0,
+   "fat": 17.4,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 91,
+   "satFat": 6.55
+  },
+  "score": 1
+ },
+ "sr|Beef, top sirloin, steak, separable lean and fat, trimmed to 1/8\" fat, all grades, cooked, broiled": {
+  "fdcId": 168727,
+  "description": "Beef, top sirloin, steak, separable lean and fat, trimmed to 1/8\" fat, all grades, cooked, broiled",
+  "per100": {
+   "kcal": 243,
+   "protein": 27,
+   "carbs": 0,
+   "fat": 14.2,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 56,
+   "satFat": 5.6
+  },
+  "score": 1
+ },
+ "sr|Fish, whiting, mixed species, cooked, dry heat": {
+  "fdcId": 175161,
+  "description": "Fish, whiting, mixed species, cooked, dry heat",
+  "per100": {
+   "kcal": 116,
+   "protein": 23.5,
+   "carbs": 0,
+   "fat": 1.69,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 132,
+   "satFat": 0.4
+  },
+  "score": 1
+ },
+ "sr|Fish, salmon, Atlantic, farmed, cooked, dry heat": {
+  "fdcId": 175168,
+  "description": "Fish, salmon, Atlantic, farmed, cooked, dry heat",
+  "per100": {
+   "kcal": 206,
+   "protein": 22.1,
+   "carbs": 0,
+   "fat": 12.4,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 61,
+   "satFat": 2.4
+  },
+  "score": 1
+ },
+ "sr|Fish, tuna, light, canned in water, drained solids": {
+  "fdcId": 173709,
+  "description": "Fish, tuna, light, canned in water, drained solids (Includes foods for USDA's Food Distribution Program)",
+  "per100": {
+   "kcal": 86,
+   "protein": 19.4,
+   "carbs": 0,
+   "fat": 0.96,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 247,
+   "satFat": 0.211
+  },
+  "score": 1
+ },
+ "sr|Pork, fresh, loin, whole, separable lean and fat, cooked, roasted": {
+  "fdcId": 167821,
+  "description": "Pork, fresh, loin, whole, separable lean and fat, cooked, roasted",
+  "per100": {
+   "kcal": 248,
+   "protein": 27.1,
+   "carbs": 0,
+   "fat": 14.6,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 59,
+   "satFat": 5.37
+  },
+  "score": 1
+ },
+ "sr|Sausage, pork, fresh, cooked": {
+  "fdcId": 174579,
+  "description": "Sausage, pork and beef, fresh, cooked",
+  "per100": {
+   "kcal": 396,
+   "protein": 13.8,
+   "carbs": 2.7,
+   "fat": 36.2,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 929,
+   "satFat": 13
+  },
+  "score": 0.6666666666666666
+ },
+ "sr|Frankfurter, beef, unheated": {
+  "fdcId": 173862,
+  "description": "Frankfurter, beef, unheated",
+  "per100": {
+   "kcal": 315,
+   "protein": 11.7,
+   "carbs": 2.97,
+   "fat": 28.1,
+   "fiber": 0,
+   "sugar": 1.17,
+   "sodium": 865,
+   "satFat": 11.5
+  },
+  "score": 1
+ },
+ "sr|Ham, sliced, regular (approximately 11% fat)": {
+  "fdcId": 173864,
+  "description": "Ham, sliced, regular (approximately 11% fat)",
+  "per100": {
+   "kcal": 164,
+   "protein": 16.6,
+   "carbs": 3.63,
+   "fat": 8.8,
+   "fiber": 1.3,
+   "sugar": 1,
+   "sodium": 814,
+   "satFat": 0.5
+  },
+  "score": 1
+ },
+ "sr|Milk, whole, 3.25% milkfat, with added vitamin D": {
+  "fdcId": 171265,
+  "description": "Milk, whole, 3.25% milkfat, with added vitamin D",
+  "per100": {
+   "kcal": 61,
+   "protein": 3.15,
+   "carbs": 4.8,
+   "fat": 3.25,
+   "fiber": 0,
+   "sugar": 5.05,
+   "sodium": 43,
+   "satFat": 1.86
+  },
+  "score": 1
+ },
+ "sr|Milk, nonfat, fluid, with added vitamin A and vitamin D (fat free or skim)": {
+  "fdcId": 171269,
+  "description": "Milk, nonfat, fluid, with added vitamin A and vitamin D (fat free or skim)",
+  "per100": {
+   "kcal": 34,
+   "protein": 3.37,
+   "carbs": 4.96,
+   "fat": 0.08,
+   "fiber": 0,
+   "sugar": 5.09,
+   "sodium": 42,
+   "satFat": 0.056
+  },
+  "score": 1
+ },
+ "sr|Yogurt, plain, whole milk": {
+  "fdcId": 171284,
+  "description": "Yogurt, plain, whole milk",
+  "per100": {
+   "kcal": 61,
+   "protein": 3.47,
+   "carbs": 4.66,
+   "fat": 3.25,
+   "fiber": 0,
+   "sugar": 4.66,
+   "sodium": 46,
+   "satFat": 2.1
+  },
+  "score": 1
+ },
+ "sr|Cheese, ricotta, part skim milk": {
+  "fdcId": 171248,
+  "description": "Cheese, ricotta, part skim milk",
+  "per100": {
+   "kcal": 138,
+   "protein": 11.4,
+   "carbs": 5.14,
+   "fat": 7.91,
+   "fiber": 0,
+   "sugar": 0.31,
+   "sodium": 99,
+   "satFat": 4.93
+  },
+  "score": 1
+ },
+ "sr|Cheese, gouda": {
+  "fdcId": 171241,
+  "description": "Cheese, gouda",
+  "per100": {
+   "kcal": 356,
+   "protein": 24.9,
+   "carbs": 2.22,
+   "fat": 27.4,
+   "fiber": 0,
+   "sugar": 2.22,
+   "sodium": 819,
+   "satFat": 17.6
+  },
+  "score": 1
+ },
+ "sr|Butter, salted": {
+  "fdcId": 173410,
+  "description": "Butter, salted",
+  "per100": {
+   "kcal": 717,
+   "protein": 0.85,
+   "carbs": 0.06,
+   "fat": 81.1,
+   "fiber": 0,
+   "sugar": 0.06,
+   "sodium": 643,
+   "satFat": 51.4
+  },
+  "score": 1
+ },
+ "sr|Egg, whole, raw, fresh": {
+  "fdcId": 171287,
+  "description": "Egg, whole, raw, fresh",
+  "per100": {
+   "kcal": 143,
+   "protein": 12.6,
+   "carbs": 0.72,
+   "fat": 9.51,
+   "fiber": 0,
+   "sugar": 0.37,
+   "sodium": 142,
+   "satFat": 3.13
+  },
+  "score": 1
+ },
+ "sr|Egg, white, raw, fresh": {
+  "fdcId": 172183,
+  "description": "Egg, white, raw, fresh",
+  "per100": {
+   "kcal": 52,
+   "protein": 10.9,
+   "carbs": 0.73,
+   "fat": 0.17,
+   "fiber": 0,
+   "sugar": 0.71,
+   "sodium": 166,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Potatoes, mashed, home-prepared, whole milk and butter added": {
+  "fdcId": 168555,
+  "description": "Potatoes, mashed, home-prepared, whole milk and butter added",
+  "per100": {
+   "kcal": 113,
+   "protein": 1.86,
+   "carbs": 16.8,
+   "fat": 4.22,
+   "fiber": 1.5,
+   "sugar": 1.43,
+   "sodium": 317,
+   "satFat": 2.61
+  },
+  "score": 1
+ },
+ "sr|Oil, olive, salad or cooking": {
+  "fdcId": 171413,
+  "description": "Oil, olive, salad or cooking",
+  "per100": {
+   "kcal": 884,
+   "protein": 0,
+   "carbs": 0,
+   "fat": 100,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 2,
+   "satFat": 13.8
+  },
+  "score": 1
+ },
+ "sr|Oil, vegetable, sunflower, linoleic, (approx. 65%)": {
+  "fdcId": 171025,
+  "description": "Oil, sunflower, linoleic, (approx. 65%)",
+  "per100": {
+   "kcal": 884,
+   "protein": 0,
+   "carbs": 0,
+   "fat": 100,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 0,
+   "satFat": 10.3
+  },
+  "score": 0.8333333333333334
+ },
+ "sr|Salad dressing, mayonnaise, regular": {
+  "fdcId": 171009,
+  "description": "Salad dressing, mayonnaise, regular",
+  "per100": {
+   "kcal": 680,
+   "protein": 0.96,
+   "carbs": 0.57,
+   "fat": 74.8,
+   "fiber": 0,
+   "sugar": 0.57,
+   "sodium": 635,
+   "satFat": 11.7
+  },
+  "score": 1
+ },
+ "sr|Catsup": {
+  "fdcId": 168556,
+  "description": "Catsup",
+  "per100": {
+   "kcal": 101,
+   "protein": 1.04,
+   "carbs": 27.4,
+   "fat": 0.1,
+   "fiber": 0.3,
+   "sugar": 21.3,
+   "sodium": 907,
+   "satFat": 0.014
+  },
+  "score": 1
+ },
+ "sr|Mustard, prepared, yellow": {
+  "fdcId": 172234,
+  "description": "Mustard, prepared, yellow",
+  "per100": {
+   "kcal": 60,
+   "protein": 3.74,
+   "carbs": 5.83,
+   "fat": 3.34,
+   "fiber": 4,
+   "sugar": 0.92,
+   "sodium": 1100,
+   "satFat": 0.214
+  },
+  "score": 1
+ },
+ "sr|Sugars, granulated": {
+  "fdcId": 169655,
+  "description": "Sugars, granulated",
+  "per100": {
+   "kcal": 387,
+   "protein": 0,
+   "carbs": 100,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 99.8,
+   "sodium": 1,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Honey": {
+  "fdcId": 169640,
+  "description": "Honey",
+  "per100": {
+   "kcal": 304,
+   "protein": 0.3,
+   "carbs": 82.4,
+   "fat": 0,
+   "fiber": 0.2,
+   "sugar": 82.1,
+   "sodium": 4,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Orange juice, raw": {
+  "fdcId": 169098,
+  "description": "Orange juice, raw (Includes foods for USDA's Food Distribution Program)",
+  "per100": {
+   "kcal": 45,
+   "protein": 0.7,
+   "carbs": 10.4,
+   "fat": 0.2,
+   "fiber": 0.2,
+   "sugar": 8.4,
+   "sodium": 1,
+   "satFat": 0.024
+  },
+  "score": 1
+ },
+ "sr|Beverages, carbonated, cola, regular": {
+  "fdcId": 174852,
+  "description": "Beverages, carbonated, cola, regular",
+  "per100": {
+   "kcal": 42,
+   "protein": 0,
+   "carbs": 10.4,
+   "fat": 0.25,
+   "fiber": 0,
+   "sugar": 9.94,
+   "sodium": 3,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Beverages, carbonated, cola, without caffeine, sugar-free": {
+  "fdcId": 174851,
+  "description": "Beverages, carbonated, cola, without caffeine",
+  "per100": {
+   "kcal": 41,
+   "protein": 0,
+   "carbs": 10.6,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 10.6,
+   "sodium": 4,
+   "satFat": 0
+  },
+  "score": 0.7142857142857143
+ },
+ "sr|Beverages, coffee, brewed, prepared with tap water": {
+  "fdcId": 171890,
+  "description": "Beverages, coffee, brewed, prepared with tap water",
+  "per100": {
+   "kcal": 1,
+   "protein": 0.12,
+   "carbs": 0,
+   "fat": 0.02,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 2,
+   "satFat": 0.002
+  },
+  "score": 1
+ },
+ "sr|Beverages, tea, black, brewed, prepared with tap water": {
+  "fdcId": 173227,
+  "description": "Beverages, tea, black, brewed, prepared with tap water",
+  "per100": {
+   "kcal": 1,
+   "protein": 0,
+   "carbs": 0.3,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 3,
+   "satFat": 0.002
+  },
+  "score": 1
+ },
+ "sr|Fast foods, potato, french fried in vegetable oil": {
+  "fdcId": 170698,
+  "description": "Fast foods, potato, french fried in vegetable oil",
+  "per100": {
+   "kcal": 312,
+   "protein": 3.43,
+   "carbs": 41.4,
+   "fat": 14.7,
+   "fiber": 3.8,
+   "sugar": 0.3,
+   "sodium": 210,
+   "satFat": 2.34
+  },
+  "score": 1
+ },
+ "sr|Cereals ready-to-eat, granola, homemade": {
+  "fdcId": 171646,
+  "description": "Cereals ready-to-eat, granola, homemade",
+  "per100": {
+   "kcal": 489,
+   "protein": 13.7,
+   "carbs": 53.9,
+   "fat": 24.3,
+   "fiber": 8.9,
+   "sugar": 19.8,
+   "sodium": 26,
+   "satFat": 3.96
+  },
+  "score": 1
+ },
+ "sr|Nuts, walnuts, english": {
+  "fdcId": 170187,
+  "description": "Nuts, walnuts, english",
+  "per100": {
+   "kcal": 654,
+   "protein": 15.2,
+   "carbs": 13.7,
+   "fat": 65.2,
+   "fiber": 6.7,
+   "sugar": 2.61,
+   "sodium": 2,
+   "satFat": 6.13
+  },
+  "score": 1
+ },
+ "sr|Nuts, almonds": {
+  "fdcId": 170567,
+  "description": "Nuts, almonds",
+  "per100": {
+   "kcal": 579,
+   "protein": 21.2,
+   "carbs": 21.6,
+   "fat": 49.9,
+   "fiber": 12.5,
+   "sugar": 4.35,
+   "sodium": 1,
+   "satFat": 3.8
+  },
+  "score": 1
+ },
+ "sr|Peanuts, all types, raw": {
+  "fdcId": 172430,
+  "description": "Peanuts, all types, raw",
+  "per100": {
+   "kcal": 567,
+   "protein": 25.8,
+   "carbs": 16.1,
+   "fat": 49.2,
+   "fiber": 8.5,
+   "sugar": 4.72,
+   "sodium": 18,
+   "satFat": 6.28
+  },
+  "score": 1
+ },
+ "sr|Chocolate, dark, 70-85% cacao solids": {
+  "fdcId": 170273,
+  "description": "Chocolate, dark, 70-85% cacao solids",
+  "per100": {
+   "kcal": 598,
+   "protein": 7.79,
+   "carbs": 45.9,
+   "fat": 42.6,
+   "fiber": 10.9,
+   "sugar": 24,
+   "sodium": 20,
+   "satFat": 24.5
+  },
+  "score": 1
+ },
+ "sr|Rolls, hamburger or hotdog, plain": {
+  "fdcId": 172796,
+  "description": "Rolls, hamburger or hotdog, plain",
+  "per100": {
+   "kcal": 279,
+   "protein": 9.77,
+   "carbs": 50.1,
+   "fat": 3.91,
+   "fiber": 1.8,
+   "sugar": 7.28,
+   "sodium": 494,
+   "satFat": 0.842
+  },
+  "score": 1
+ },
+ "sr|Tortillas, ready-to-bake or -fry, flour, refrigerated": {
+  "fdcId": 171579,
+  "description": "Sauce, pesto, ready-to-serve, refrigerated",
+  "per100": {
+   "kcal": 418,
+   "protein": 9.83,
+   "carbs": 10.1,
+   "fat": 37.6,
+   "fiber": 1.8,
+   "sugar": 6.33,
+   "sodium": 603,
+   "satFat": 7.07
+  },
+  "score": 0.2727272727272727
+ },
+ "sr|Bread, rye": {
+  "fdcId": 172684,
+  "description": "Bread, rye",
+  "per100": {
+   "kcal": 259,
+   "protein": 8.5,
+   "carbs": 48.3,
+   "fat": 3.3,
+   "fiber": 5.8,
+   "sugar": 3.85,
+   "sodium": 603,
+   "satFat": 0.626
+  },
+  "score": 1
+ },
+ "sr|Crackers, saltines (includes oyster, soda, soup)": {
+  "fdcId": 172746,
+  "description": "Crackers, saltines (includes oyster, soda, soup)",
+  "per100": {
+   "kcal": 418,
+   "protein": 9.46,
+   "carbs": 74,
+   "fat": 8.64,
+   "fiber": 2.8,
+   "sugar": 1.29,
+   "sodium": 941,
+   "satFat": 1.65
+  },
+  "score": 1
+ },
+ "sr|Bread, white, commercially prepared, toasted": {
+  "fdcId": 174925,
+  "description": "Bread, white, commercially prepared, toasted",
+  "per100": {
+   "kcal": 290,
+   "protein": 9,
+   "carbs": 54.5,
+   "fat": 4,
+   "fiber": 2.9,
+   "sugar": 6.2,
+   "sodium": 537,
+   "satFat": 0.764
+  },
+  "score": 1
+ },
+ "sr|Bulgur, cooked": {
+  "fdcId": 170287,
+  "description": "Bulgur, cooked",
+  "per100": {
+   "kcal": 83,
+   "protein": 3.08,
+   "carbs": 18.6,
+   "fat": 0.24,
+   "fiber": 4.5,
+   "sugar": 0.1,
+   "sodium": 5,
+   "satFat": 0.042
+  },
+  "score": 1
+ },
+ "sr|Couscous, cooked": {
+  "fdcId": 169700,
+  "description": "Couscous, cooked",
+  "per100": {
+   "kcal": 112,
+   "protein": 3.79,
+   "carbs": 23.2,
+   "fat": 0.16,
+   "fiber": 1.4,
+   "sugar": 0.1,
+   "sodium": 5,
+   "satFat": 0.029
+  },
+  "score": 1
+ },
+ "sr|Cereals, corn grits, white, regular and quick, enriched, cooked with water, without salt": {
+  "fdcId": 171655,
+  "description": "Cereals, corn grits, white, regular and quick, enriched, cooked with water, without salt",
+  "per100": {
+   "kcal": 71,
+   "protein": 1.71,
+   "carbs": 14.8,
+   "fat": 0.46,
+   "fiber": 0.8,
+   "sugar": 0.12,
+   "sodium": 2,
+   "satFat": 0.066
+  },
+  "score": 1
+ },
+ "sr|Pasta, whole-wheat, cooked": {
+  "fdcId": 168910,
+  "description": "Pasta, whole-wheat, cooked (Includes foods for USDA's Food Distribution Program)",
+  "per100": {
+   "kcal": 149,
+   "protein": 5.99,
+   "carbs": 30.1,
+   "fat": 1.71,
+   "fiber": 3.9,
+   "sugar": 0.75,
+   "sodium": 4,
+   "satFat": 0.243
+  },
+  "score": 1
+ },
+ "sr|Cereals ready-to-eat, KELLOGG, KELLOGG'S FROSTED FLAKES": {
+  "fdcId": 172990,
+  "description": "Cereals ready-to-eat, MALT-O-MEAL, Frosted Flakes",
+  "per100": {
+   "kcal": 389,
+   "protein": 4.25,
+   "carbs": 90.2,
+   "fat": 0.87,
+   "fiber": 1.2,
+   "sugar": 39.3,
+   "sodium": 451,
+   "satFat": 0.107
+  },
+  "score": 0.5454545454545454
+ },
+ "sr|Cereals ready-to-eat, KELLOGG, KELLOGG'S CORN FLAKES": {
+  "fdcId": 174648,
+  "description": "Cereals ready-to-eat, RALSTON Corn Flakes",
+  "per100": {
+   "kcal": 384,
+   "protein": 5.9,
+   "carbs": 88,
+   "fat": 0.91,
+   "fiber": 2.7,
+   "sugar": 7.84,
+   "sodium": 571,
+   "satFat": 0.227
+  },
+  "score": 0.6666666666666666
+ },
+ "sr|Wheat flour, whole-grain (Includes foods for USDA's Food Distribution Program)": {
+  "fdcId": 168893,
+  "description": "Wheat flour, whole-grain (Includes foods for USDA's Food Distribution Program)",
+  "per100": {
+   "kcal": 340,
+   "protein": 13.2,
+   "carbs": 72,
+   "fat": 2.5,
+   "fiber": 10.7,
+   "sugar": 0.41,
+   "sodium": 2,
+   "satFat": 0.43
+  },
+  "score": 1
+ },
+ "sr|Snacks, granola bars, soft, uncoated, plain": {
+  "fdcId": 167954,
+  "description": "Snacks, granola bars, soft, uncoated, plain",
+  "per100": {
+   "kcal": 443,
+   "protein": 7.4,
+   "carbs": 67.3,
+   "fat": 17.2,
+   "fiber": 4.6,
+   "sugar": 0,
+   "sodium": 278,
+   "satFat": 7.25
+  },
+  "score": 1
+ },
+ "sr|Beans, black, mature seeds, cooked, boiled, without salt": {
+  "fdcId": 173735,
+  "description": "Beans, black, mature seeds, cooked, boiled, without salt",
+  "per100": {
+   "kcal": 132,
+   "protein": 8.86,
+   "carbs": 23.7,
+   "fat": 0.54,
+   "fiber": 8.7,
+   "sugar": 0.32,
+   "sodium": 1,
+   "satFat": 0.139
+  },
+  "score": 1
+ },
+ "sr|Broadbeans (fava beans), mature seeds, cooked, boiled, without salt": {
+  "fdcId": 173753,
+  "description": "Broadbeans (fava beans), mature seeds, cooked, boiled, without salt",
+  "per100": {
+   "kcal": 110,
+   "protein": 7.6,
+   "carbs": 19.6,
+   "fat": 0.4,
+   "fiber": 5.4,
+   "sugar": 1.82,
+   "sodium": 5,
+   "satFat": 0.066
+  },
+  "score": 1
+ },
+ "sr|Tofu, raw, firm, prepared with calcium sulfate": {
+  "fdcId": 172475,
+  "description": "Tofu, raw, firm, prepared with calcium sulfate",
+  "per100": {
+   "kcal": 144,
+   "protein": 17.3,
+   "carbs": 2.78,
+   "fat": 8.72,
+   "fiber": 2.3,
+   "sugar": 0,
+   "sodium": 14,
+   "satFat": 1.26
+  },
+  "score": 1
+ },
+ "sr|Hummus, commercial": {
+  "fdcId": 174289,
+  "description": "Hummus, commercial",
+  "per100": {
+   "kcal": 237,
+   "protein": 7.78,
+   "carbs": 15,
+   "fat": 17.8,
+   "fiber": 5.5,
+   "sugar": 0.62,
+   "sodium": 426,
+   "satFat": 2.56
+  },
+  "score": 1
+ },
+ "sr|Beans, snap, green, cooked, boiled, drained, without salt": {
+  "fdcId": 169141,
+  "description": "Beans, snap, green, cooked, boiled, drained, without salt",
+  "per100": {
+   "kcal": 35,
+   "protein": 1.89,
+   "carbs": 7.88,
+   "fat": 0.28,
+   "fiber": 3.2,
+   "sugar": 3.63,
+   "sodium": 1,
+   "satFat": 0.064
+  },
+  "score": 1
+ },
+ "sr|Cauliflower, cooked, boiled, drained, without salt": {
+  "fdcId": 170397,
+  "description": "Cauliflower, cooked, boiled, drained, without salt",
+  "per100": {
+   "kcal": 23,
+   "protein": 1.84,
+   "carbs": 4.11,
+   "fat": 0.45,
+   "fiber": 2.3,
+   "sugar": 2.08,
+   "sodium": 15,
+   "satFat": 0.07
+  },
+  "score": 1
+ },
+ "sr|Cabbage, raw": {
+  "fdcId": 169975,
+  "description": "Cabbage, raw",
+  "per100": {
+   "kcal": 25,
+   "protein": 1.28,
+   "carbs": 5.8,
+   "fat": 0.1,
+   "fiber": 2.5,
+   "sugar": 3.2,
+   "sodium": 18,
+   "satFat": 0.034
+  },
+  "score": 1
+ },
+ "sr|Beets, cooked, boiled, drained": {
+  "fdcId": 169146,
+  "description": "Beets, cooked, boiled, drained",
+  "per100": {
+   "kcal": 44,
+   "protein": 1.68,
+   "carbs": 9.96,
+   "fat": 0.18,
+   "fiber": 2,
+   "sugar": 7.96,
+   "sodium": 77,
+   "satFat": 0.028
+  },
+  "score": 1
+ },
+ "sr|Squash, summer, zucchini, includes skin, raw": {
+  "fdcId": 169291,
+  "description": "Squash, summer, zucchini, includes skin, raw",
+  "per100": {
+   "kcal": 17,
+   "protein": 1.21,
+   "carbs": 3.11,
+   "fat": 0.32,
+   "fiber": 1,
+   "sugar": 2.5,
+   "sodium": 8,
+   "satFat": 0.084
+  },
+  "score": 1
+ },
+ "sr|Mushrooms, white, raw": {
+  "fdcId": 169251,
+  "description": "Mushrooms, white, raw",
+  "per100": {
+   "kcal": 22,
+   "protein": 3.09,
+   "carbs": 3.26,
+   "fat": 0.34,
+   "fiber": 1,
+   "sugar": 1.98,
+   "sodium": 5,
+   "satFat": 0.05
+  },
+  "score": 1
+ },
+ "sr|Celery, raw": {
+  "fdcId": 169988,
+  "description": "Celery, raw",
+  "per100": {
+   "kcal": 14,
+   "protein": 0.69,
+   "carbs": 2.97,
+   "fat": 0.17,
+   "fiber": 1.6,
+   "sugar": 1.34,
+   "sodium": 80,
+   "satFat": 0.042
+  },
+  "score": 1
+ },
+ "sr|Eggplant, raw": {
+  "fdcId": 169228,
+  "description": "Eggplant, raw",
+  "per100": {
+   "kcal": 25,
+   "protein": 0.98,
+   "carbs": 5.88,
+   "fat": 0.18,
+   "fiber": 3,
+   "sugar": 3.53,
+   "sodium": 2,
+   "satFat": 0.034
+  },
+  "score": 1
+ },
+ "sr|Asparagus, cooked, boiled, drained": {
+  "fdcId": 168390,
+  "description": "Asparagus, cooked, boiled, drained",
+  "per100": {
+   "kcal": 22,
+   "protein": 2.4,
+   "carbs": 4.11,
+   "fat": 0.22,
+   "fiber": 2,
+   "sugar": 1.3,
+   "sodium": 14,
+   "satFat": 0.048
+  },
+  "score": 1
+ },
+ "sr|Artichokes, (globe or french), cooked, boiled, drained, without salt": {
+  "fdcId": 168386,
+  "description": "Artichokes, (globe or french), cooked, boiled, drained, without salt",
+  "per100": {
+   "kcal": 53,
+   "protein": 2.89,
+   "carbs": 12,
+   "fat": 0.34,
+   "fiber": 5.7,
+   "sugar": 0.99,
+   "sodium": 60,
+   "satFat": 0.079
+  },
+  "score": 1
+ },
+ "sr|Radishes, raw": {
+  "fdcId": 169276,
+  "description": "Radishes, raw",
+  "per100": {
+   "kcal": 16,
+   "protein": 0.68,
+   "carbs": 3.4,
+   "fat": 0.1,
+   "fiber": 1.6,
+   "sugar": 1.86,
+   "sodium": 39,
+   "satFat": 0.032
+  },
+  "score": 1
+ },
+ "sr|Lemon juice, raw": {
+  "fdcId": 167747,
+  "description": "Lemon juice, raw",
+  "per100": {
+   "kcal": 22,
+   "protein": 0.35,
+   "carbs": 6.9,
+   "fat": 0.24,
+   "fiber": 0.3,
+   "sugar": 2.52,
+   "sodium": 1,
+   "satFat": 0.04
+  },
+  "score": 1
+ },
+ "sr|Cream, fluid, heavy whipping": {
+  "fdcId": 170859,
+  "description": "Cream, fluid, heavy whipping",
+  "per100": {
+   "kcal": 340,
+   "protein": 2.84,
+   "carbs": 2.84,
+   "fat": 36.1,
+   "fiber": 0,
+   "sugar": 2.92,
+   "sodium": 27,
+   "satFat": 23
+  },
+  "score": 1
+ },
+ "sr|Tangerines, (mandarin oranges), raw": {
+  "fdcId": 169105,
+  "description": "Tangerines, (mandarin oranges), raw",
+  "per100": {
+   "kcal": 53,
+   "protein": 0.81,
+   "carbs": 13.3,
+   "fat": 0.31,
+   "fiber": 1.8,
+   "sugar": 10.6,
+   "sodium": 2,
+   "satFat": 0.039
+  },
+  "score": 1
+ },
+ "sr|Melons, honeydew, raw": {
+  "fdcId": 169911,
+  "description": "Melons, honeydew, raw",
+  "per100": {
+   "kcal": 36,
+   "protein": 0.54,
+   "carbs": 9.09,
+   "fat": 0.14,
+   "fiber": 0.8,
+   "sugar": 8.12,
+   "sodium": 18,
+   "satFat": 0.038
+  },
+  "score": 1
+ },
+ "sr|Pineapple, raw, all varieties": {
+  "fdcId": 169124,
+  "description": "Pineapple, raw, all varieties",
+  "per100": {
+   "kcal": 50,
+   "protein": 0.54,
+   "carbs": 13.1,
+   "fat": 0.12,
+   "fiber": 1.4,
+   "sugar": 9.85,
+   "sodium": 1,
+   "satFat": 0.009
+  },
+  "score": 1
+ },
+ "sr|Mangos, raw": {
+  "fdcId": 169910,
+  "description": "Mangos, raw",
+  "per100": {
+   "kcal": 60,
+   "protein": 0.82,
+   "carbs": 15,
+   "fat": 0.38,
+   "fiber": 1.6,
+   "sugar": 13.7,
+   "sodium": 1,
+   "satFat": 0.092
+  },
+  "score": 1
+ },
+ "sr|Cherries, sweet, raw": {
+  "fdcId": 171719,
+  "description": "Cherries, sweet, raw",
+  "per100": {
+   "kcal": 63,
+   "protein": 1.06,
+   "carbs": 16,
+   "fat": 0.2,
+   "fiber": 2.1,
+   "sugar": 12.8,
+   "sodium": 0,
+   "satFat": 0.038
+  },
+  "score": 1
+ },
+ "sr|Blueberries, raw": {
+  "fdcId": 171711,
+  "description": "Blueberries, raw",
+  "per100": {
+   "kcal": 57,
+   "protein": 0.74,
+   "carbs": 14.5,
+   "fat": 0.33,
+   "fiber": 2.4,
+   "sugar": 9.96,
+   "sodium": 1,
+   "satFat": 0.028
+  },
+  "score": 1
+ },
+ "sr|Raspberries, raw": {
+  "fdcId": 167755,
+  "description": "Raspberries, raw",
+  "per100": {
+   "kcal": 52,
+   "protein": 1.2,
+   "carbs": 11.9,
+   "fat": 0.65,
+   "fiber": 6.5,
+   "sugar": 4.42,
+   "sodium": 1,
+   "satFat": 0.019
+  },
+  "score": 1
+ },
+ "sr|Plums, raw": {
+  "fdcId": 169949,
+  "description": "Plums, raw",
+  "per100": {
+   "kcal": 46,
+   "protein": 0.7,
+   "carbs": 11.4,
+   "fat": 0.28,
+   "fiber": 1.4,
+   "sugar": 9.92,
+   "sodium": 0,
+   "satFat": 0.017
+  },
+  "score": 1
+ },
+ "sr|Apricots, raw": {
+  "fdcId": 171697,
+  "description": "Apricots, raw",
+  "per100": {
+   "kcal": 48,
+   "protein": 1.4,
+   "carbs": 11.1,
+   "fat": 0.39,
+   "fiber": 2,
+   "sugar": 9.24,
+   "sodium": 1,
+   "satFat": 0.027
+  },
+  "score": 1
+ },
+ "sr|Figs, raw": {
+  "fdcId": 173021,
+  "description": "Figs, raw",
+  "per100": {
+   "kcal": 74,
+   "protein": 0.75,
+   "carbs": 19.2,
+   "fat": 0.3,
+   "fiber": 2.9,
+   "sugar": 16.3,
+   "sodium": 1,
+   "satFat": 0.06
+  },
+  "score": 1
+ },
+ "sr|Quinces, raw": {
+  "fdcId": 168163,
+  "description": "Quinces, raw",
+  "per100": {
+   "kcal": 57,
+   "protein": 0.4,
+   "carbs": 15.3,
+   "fat": 0.1,
+   "fiber": 1.9,
+   "sugar": 0,
+   "sodium": 4,
+   "satFat": 0.01
+  },
+  "score": 1
+ },
+ "sr|Grapefruit, raw, pink and red, all areas": {
+  "fdcId": 174673,
+  "description": "Grapefruit, raw, pink and red, all areas",
+  "per100": {
+   "kcal": 42,
+   "protein": 0.77,
+   "carbs": 10.7,
+   "fat": 0.14,
+   "fiber": 1.6,
+   "sugar": 6.89,
+   "sodium": 0,
+   "satFat": 0.021
+  },
+  "score": 1
+ },
+ "sr|Passion-fruit, (granadilla), purple, raw": {
+  "fdcId": 169108,
+  "description": "Passion-fruit, (granadilla), purple, raw",
+  "per100": {
+   "kcal": 97,
+   "protein": 2.2,
+   "carbs": 23.4,
+   "fat": 0.7,
+   "fiber": 10.4,
+   "sugar": 11.2,
+   "sodium": 28,
+   "satFat": 0.059
+  },
+  "score": 1
+ },
+ "sr|Raisins, dark, seedless (Includes foods for USDA's Food Distribution Program)": {
+  "fdcId": 168165,
+  "description": "Raisins, dark, seedless (Includes foods for USDA's Food Distribution Program)",
+  "per100": {
+   "kcal": 299,
+   "protein": 3.3,
+   "carbs": 79.3,
+   "fat": 0.25,
+   "fiber": 4.5,
+   "sugar": 65.2,
+   "sodium": 26,
+   "satFat": 0.094
+  },
+  "score": 1
+ },
+ "sr|Plums, dried (prunes), uncooked": {
+  "fdcId": 168162,
+  "description": "Plums, dried (prunes), uncooked",
+  "per100": {
+   "kcal": 240,
+   "protein": 2.18,
+   "carbs": 63.9,
+   "fat": 0.38,
+   "fiber": 7.1,
+   "sugar": 38.1,
+   "sodium": 2,
+   "satFat": 0.088
+  },
+  "score": 1
+ },
+ "sr|Peaches, canned, heavy syrup pack, solids and liquids": {
+  "fdcId": 169112,
+  "description": "Peaches, canned, heavy syrup pack, solids and liquids",
+  "per100": {
+   "kcal": 74,
+   "protein": 0.45,
+   "carbs": 19.9,
+   "fat": 0.1,
+   "fiber": 1.3,
+   "sugar": 18.6,
+   "sodium": 6,
+   "satFat": 0.01
+  },
+  "score": 1
+ },
+ "sr|Chicken, broilers or fryers, meat and skin, cooked, roasted": {
+  "fdcId": 171450,
+  "description": "Chicken, broilers or fryers, meat and skin, cooked, roasted",
+  "per100": {
+   "kcal": 239,
+   "protein": 27.3,
+   "carbs": 0,
+   "fat": 13.6,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 82,
+   "satFat": 3.79
+  },
+  "score": 1
+ },
+ "sr|Chicken, broilers or fryers, wing, meat and skin, cooked, roasted": {
+  "fdcId": 173630,
+  "description": "Chicken, broilers or fryers, wing, meat and skin, cooked, roasted",
+  "per100": {
+   "kcal": 254,
+   "protein": 23.8,
+   "carbs": 0,
+   "fat": 16.9,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 98,
+   "satFat": 4.98
+  },
+  "score": 1
+ },
+ "sr|Turkey, retail parts, breast, meat only, cooked, roasted": {
+  "fdcId": 174516,
+  "description": "Turkey, retail parts, breast, meat only, cooked, roasted",
+  "per100": {
+   "kcal": 136,
+   "protein": 29.5,
+   "carbs": 0,
+   "fat": 1.97,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 114,
+   "satFat": 0.66
+  },
+  "score": 1
+ },
+ "sr|Turkey breast, sliced, prepackaged": {
+  "fdcId": 172941,
+  "description": "Turkey breast, sliced, prepackaged",
+  "per100": {
+   "kcal": 106,
+   "protein": 14.8,
+   "carbs": 2.2,
+   "fat": 3.77,
+   "fiber": 0,
+   "sugar": 0.91,
+   "sodium": 898,
+   "satFat": 0.906
+  },
+  "score": 1
+ },
+ "sr|Beef, round, top round, separable lean and fat, trimmed to 1/8\" fat, select, cooked, braised": {
+  "fdcId": 168713,
+  "description": "Beef, round, top round, separable lean and fat, trimmed to 1/8\" fat, select, cooked, braised",
+  "per100": {
+   "kcal": 225,
+   "protein": 34.6,
+   "carbs": 0,
+   "fat": 8.54,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 45,
+   "satFat": 3.2
+  },
+  "score": 1
+ },
+ "sr|Beef, rib eye steak, boneless, lip off, separable lean and fat, trimmed to 0\" fat, choice, cooked, grilled": {
+  "fdcId": 172165,
+  "description": "Beef, rib eye steak, boneless, lip off, separable lean and fat, trimmed to 0\" fat, choice, cooked, grilled",
+  "per100": {
+   "kcal": 285,
+   "protein": 23.9,
+   "carbs": 0,
+   "fat": 21.1,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 58,
+   "satFat": 9.24
+  },
+  "score": 1
+ },
+ "sr|Beef, chuck, blade roast, separable lean and fat, trimmed to 0\" fat, all grades, cooked, braised": {
+  "fdcId": 170617,
+  "description": "Beef, chuck, blade roast, separable lean and fat, trimmed to 0\" fat, all grades, cooked, braised",
+  "per100": {
+   "kcal": 334,
+   "protein": 27.2,
+   "carbs": 0,
+   "fat": 24.1,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 65,
+   "satFat": 9.59
+  },
+  "score": 1
+ },
+ "sr|Beef, rib, shortribs, separable lean and fat, choice, cooked, braised": {
+  "fdcId": 168613,
+  "description": "Beef, rib, shortribs, separable lean and fat, choice, cooked, braised",
+  "per100": {
+   "kcal": 471,
+   "protein": 21.6,
+   "carbs": 0,
+   "fat": 42,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 50,
+   "satFat": 17.8
+  },
+  "score": 1
+ },
+ "sr|Pork, fresh, spareribs, separable lean and fat, cooked, braised": {
+  "fdcId": 167854,
+  "description": "Pork, fresh, spareribs, separable lean and fat, cooked, braised",
+  "per100": {
+   "kcal": 397,
+   "protein": 29.1,
+   "carbs": 0,
+   "fat": 30.3,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 93,
+   "satFat": 11.1
+  },
+  "score": 1
+ },
+ "sr|Pork, fresh, loin, center rib (chops), bone-in, separable lean and fat, cooked, pan-fried": {
+  "fdcId": 168293,
+  "description": "Pork, fresh, loin, center rib (chops), bone-in, separable lean and fat, cooked, pan-fried",
+  "per100": {
+   "kcal": 256,
+   "protein": 26.8,
+   "carbs": 0,
+   "fat": 15.7,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 84,
+   "satFat": 5.06
+  },
+  "score": 1
+ },
+ "sr|Lamb, domestic, leg, whole (shank and sirloin), separable lean and fat, trimmed to 1/4\" fat, choice, cooked, roasted": {
+  "fdcId": 174312,
+  "description": "Lamb, leg, whole (shank and sirloin), separable lean and fat, trimmed to 1/4\" fat, choice, cooked, roasted",
+  "per100": {
+   "kcal": 258,
+   "protein": 25.6,
+   "carbs": 0,
+   "fat": 16.5,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 66,
+   "satFat": 6.89
+  },
+  "score": 0.9375
+ },
+ "sr|Beef, variety meats and by-products, liver, cooked, pan-fried": {
+  "fdcId": 168627,
+  "description": "Beef, variety meats and by-products, liver, cooked, pan-fried",
+  "per100": {
+   "kcal": 175,
+   "protein": 26.5,
+   "carbs": 5.16,
+   "fat": 4.68,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 77,
+   "satFat": 2.53
+  },
+  "score": 1
+ },
+ "sr|Beef, ground, 80% lean meat / 20% fat, patty, cooked, pan-broiled": {
+  "fdcId": 171798,
+  "description": "Beef, ground, 80% lean meat / 20% fat, patty, cooked, pan-broiled",
+  "per100": {
+   "kcal": 246,
+   "protein": 24,
+   "carbs": 0,
+   "fat": 15.9,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 83,
+   "satFat": 6.03
+  },
+  "score": 1
+ },
+ "sr|Blood sausage": {
+  "fdcId": 171618,
+  "description": "Blood sausage",
+  "per100": {
+   "kcal": 379,
+   "protein": 14.6,
+   "carbs": 1.29,
+   "fat": 34.5,
+   "fiber": 0,
+   "sugar": 1.29,
+   "sodium": 680,
+   "satFat": 13.4
+  },
+  "score": 1
+ },
+ "sr|Chorizo, pork and beef": {
+  "fdcId": 172961,
+  "description": "Beerwurst, pork and beef",
+  "per100": {
+   "kcal": 276,
+   "protein": 14,
+   "carbs": 4.27,
+   "fat": 22.5,
+   "fiber": 0.9,
+   "sugar": 0,
+   "sodium": 732,
+   "satFat": 8.44
+  },
+  "score": 0.6
+ },
+ "sr|Salami, Italian, pork": {
+  "fdcId": 174603,
+  "description": "Salami, Italian, pork",
+  "per100": {
+   "kcal": 425,
+   "protein": 21.7,
+   "carbs": 1.2,
+   "fat": 37,
+   "fiber": 0,
+   "sugar": 1.2,
+   "sodium": 1890,
+   "satFat": 13.1
+  },
+  "score": 1
+ },
+ "sr|Mortadella, beef, pork": {
+  "fdcId": 174573,
+  "description": "Mortadella, beef, pork",
+  "per100": {
+   "kcal": 311,
+   "protein": 16.4,
+   "carbs": 3.05,
+   "fat": 25.4,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 1250,
+   "satFat": 9.51
+  },
+  "score": 1
+ },
+ "sr|Pork, cured, bacon, cooked, pan-fried": {
+  "fdcId": 168322,
+  "description": "Pork, cured, bacon, pre-sliced, cooked, pan-fried",
+  "per100": {
+   "kcal": 468,
+   "protein": 33.9,
+   "carbs": 1.7,
+   "fat": 35.1,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 1680,
+   "satFat": 12
+  },
+  "score": 0.75
+ },
+ "sr|Snacks, beef jerky, chopped and formed": {
+  "fdcId": 167536,
+  "description": "Snacks, beef jerky, chopped and formed",
+  "per100": {
+   "kcal": 410,
+   "protein": 33.2,
+   "carbs": 11,
+   "fat": 25.6,
+   "fiber": 1.8,
+   "sugar": 9,
+   "sodium": 1780,
+   "satFat": 10.8
+  },
+  "score": 1
+ },
+ "sr|Fish, cod, Atlantic, cooked, dry heat": {
+  "fdcId": 171956,
+  "description": "Fish, cod, Atlantic, cooked, dry heat",
+  "per100": {
+   "kcal": 105,
+   "protein": 22.8,
+   "carbs": 0,
+   "fat": 0.86,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 78,
+   "satFat": 0.168
+  },
+  "score": 1
+ },
+ "sr|Fish, cusk, cooked, dry heat": {
+  "fdcId": 171991,
+  "description": "Fish, cusk, cooked, dry heat",
+  "per100": {
+   "kcal": 112,
+   "protein": 24.4,
+   "carbs": 0,
+   "fat": 0.88,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 40,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Fish, mackerel, jack, canned, drained solids": {
+  "fdcId": 175121,
+  "description": "Fish, mackerel, jack, canned, drained solids",
+  "per100": {
+   "kcal": 156,
+   "protein": 23.2,
+   "carbs": 0,
+   "fat": 6.3,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 379,
+   "satFat": 1.86
+  },
+  "score": 1
+ },
+ "sr|Fish, sardine, Atlantic, canned in oil, drained solids with bone": {
+  "fdcId": 175139,
+  "description": "Fish, sardine, Atlantic, canned in oil, drained solids with bone",
+  "per100": {
+   "kcal": 208,
+   "protein": 24.6,
+   "carbs": 0,
+   "fat": 11.4,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 307,
+   "satFat": 1.53
+  },
+  "score": 1
+ },
+ "sr|Fish, tuna, light, canned in oil, drained solids": {
+  "fdcId": 173708,
+  "description": "Fish, tuna, light, canned in oil, drained solids",
+  "per100": {
+   "kcal": 198,
+   "protein": 29.1,
+   "carbs": 0,
+   "fat": 8.21,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 416,
+   "satFat": 1.53
+  },
+  "score": 1
+ },
+ "sr|Crustaceans, shrimp, mixed species, cooked, moist heat": {
+  "fdcId": 175170,
+  "description": "Crustaceans, crayfish, mixed species, farmed, cooked, moist heat",
+  "per100": {
+   "kcal": 87,
+   "protein": 17.5,
+   "carbs": 0,
+   "fat": 1.3,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 97,
+   "satFat": 0.216
+  },
+  "score": 0.6666666666666666
+ },
+ "sr|Mollusks, mussel, blue, cooked, moist heat": {
+  "fdcId": 174217,
+  "description": "Mollusks, mussel, blue, cooked, moist heat",
+  "per100": {
+   "kcal": 172,
+   "protein": 23.8,
+   "carbs": 7.39,
+   "fat": 4.48,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 369,
+   "satFat": 0.85
+  },
+  "score": 1
+ },
+ "sr|Mollusks, clam, mixed species, cooked, moist heat": {
+  "fdcId": 171975,
+  "description": "Mollusks, clam, mixed species, cooked, moist heat",
+  "per100": {
+   "kcal": 148,
+   "protein": 25.6,
+   "carbs": 5.13,
+   "fat": 1.95,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 1200,
+   "satFat": 0.188
+  },
+  "score": 1
+ },
+ "sr|Crustaceans, crab, blue, cooked, moist heat": {
+  "fdcId": 174205,
+  "description": "Crustaceans, crab, blue, cooked, moist heat",
+  "per100": {
+   "kcal": 83,
+   "protein": 17.9,
+   "carbs": 0,
+   "fat": 0.74,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 395,
+   "satFat": 0.201
+  },
+  "score": 1
+ },
+ "sr|Mollusks, octopus, common, cooked, moist heat": {
+  "fdcId": 174249,
+  "description": "Mollusks, octopus, common, cooked, moist heat",
+  "per100": {
+   "kcal": 164,
+   "protein": 29.8,
+   "carbs": 4.4,
+   "fat": 2.08,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 460,
+   "satFat": 0.453
+  },
+  "score": 1
+ },
+ "sr|Mollusks, squid, mixed species, raw": {
+  "fdcId": 174223,
+  "description": "Mollusks, squid, mixed species, raw",
+  "per100": {
+   "kcal": 92,
+   "protein": 15.6,
+   "carbs": 3.08,
+   "fat": 1.38,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 44,
+   "satFat": 0.358
+  },
+  "score": 1
+ },
+ "sr|Surimi": {
+  "fdcId": 173702,
+  "description": "Fish, surimi",
+  "per100": {
+   "kcal": 99,
+   "protein": 15.2,
+   "carbs": 6.85,
+   "fat": 0.9,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 143,
+   "satFat": 0.191
+  },
+  "score": 0.5
+ },
+ "sr|Fish, cod, Atlantic, raw": {
+  "fdcId": 171955,
+  "description": "Fish, cod, Atlantic, raw",
+  "per100": {
+   "kcal": 82,
+   "protein": 17.8,
+   "carbs": 0,
+   "fat": 0.67,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 54,
+   "satFat": 0.131
+  },
+  "score": 1
+ },
+ "sr|Wheat flour, white, all-purpose, enriched, bleached": {
+  "fdcId": 168894,
+  "description": "Wheat flour, white, all-purpose, enriched, bleached",
+  "per100": {
+   "kcal": 364,
+   "protein": 10.3,
+   "carbs": 76.3,
+   "fat": 0.98,
+   "fiber": 2.7,
+   "sugar": 0.27,
+   "sodium": 2,
+   "satFat": 0.155
+  },
+  "score": 1
+ },
+ "sr|Milk, reduced fat, fluid, 2% milkfat, with added vitamin A and vitamin D": {
+  "fdcId": 171267,
+  "description": "Milk, reduced fat, fluid, 2% milkfat, with added vitamin A and vitamin D",
+  "per100": {
+   "kcal": 50,
+   "protein": 3.3,
+   "carbs": 4.8,
+   "fat": 1.98,
+   "fiber": 0,
+   "sugar": 5.06,
+   "sodium": 47,
+   "satFat": 1.26
+  },
+  "score": 1
+ },
+ "sr|Milk, chocolate, fluid, commercial, reduced fat, with added vitamin A and vitamin D": {
+  "fdcId": 170880,
+  "description": "Milk, chocolate, fluid, commercial, reduced fat, with added vitamin A and vitamin D",
+  "per100": {
+   "kcal": 76,
+   "protein": 2.99,
+   "carbs": 12.1,
+   "fat": 1.9,
+   "fiber": 0.7,
+   "sugar": 9.55,
+   "sodium": 66,
+   "satFat": 1.18
+  },
+  "score": 1
+ },
+ "sr|Yogurt, fruit, low fat, 9 grams protein per 8 ounce": {
+  "fdcId": 171285,
+  "description": "Yogurt, fruit, low fat, 10 grams protein per 8 ounce",
+  "per100": {
+   "kcal": 102,
+   "protein": 4.37,
+   "carbs": 19,
+   "fat": 1.08,
+   "fiber": 0,
+   "sugar": 19,
+   "sodium": 58,
+   "satFat": 0.697
+  },
+  "score": 0.8181818181818182
+ },
+ "sr|Yogurt, Greek, plain, nonfat": {
+  "fdcId": 170894,
+  "description": "Yogurt, Greek, plain, nonfat (Includes foods for USDA's Food Distribution Program)",
+  "per100": {
+   "kcal": 59,
+   "protein": 10.2,
+   "carbs": 3.6,
+   "fat": 0.39,
+   "fiber": 0,
+   "sugar": 3.24,
+   "sodium": 36,
+   "satFat": 0.117
+  },
+  "score": 1
+ },
+ "sr|Cheese, queso fresco": {
+  "fdcId": 172223,
+  "description": "Cheese, fresh, queso fresco",
+  "per100": {
+   "kcal": 299,
+   "protein": 18.1,
+   "carbs": 2.98,
+   "fat": 23.8,
+   "fiber": 0,
+   "sugar": 2.32,
+   "sodium": 751,
+   "satFat": 12.9
+  },
+  "score": 0.75
+ },
+ "sr|Cheese, cream": {
+  "fdcId": 173418,
+  "description": "Cheese, cream",
+  "per100": {
+   "kcal": 350,
+   "protein": 6.15,
+   "carbs": 5.52,
+   "fat": 34.4,
+   "fiber": 0,
+   "sugar": 3.76,
+   "sodium": 314,
+   "satFat": 20.2
+  },
+  "score": 1
+ },
+ "sr|Cheese, parmesan, grated": {
+  "fdcId": 171247,
+  "description": "Cheese, parmesan, grated",
+  "per100": {
+   "kcal": 420,
+   "protein": 28.4,
+   "carbs": 13.9,
+   "fat": 27.8,
+   "fiber": 0,
+   "sugar": 0.07,
+   "sodium": 1800,
+   "satFat": 15.4
+  },
+  "score": 1
+ },
+ "sr|Cheese, muenster": {
+  "fdcId": 171245,
+  "description": "Cheese, muenster",
+  "per100": {
+   "kcal": 368,
+   "protein": 23.4,
+   "carbs": 1.12,
+   "fat": 30,
+   "fiber": 0,
+   "sugar": 1.12,
+   "sodium": 628,
+   "satFat": 19.1
+  },
+  "score": 1
+ },
+ "sr|Milk, canned, condensed, sweetened": {
+  "fdcId": 171275,
+  "description": "Milk, canned, condensed, sweetened",
+  "per100": {
+   "kcal": 321,
+   "protein": 7.91,
+   "carbs": 54.4,
+   "fat": 8.7,
+   "fiber": 0,
+   "sugar": 54.4,
+   "sodium": 127,
+   "satFat": 5.49
+  },
+  "score": 1
+ },
+ "sr|Dulce de Leche": {
+  "fdcId": 173461,
+  "description": "Dulce de Leche",
+  "per100": {
+   "kcal": 315,
+   "protein": 6.84,
+   "carbs": 55.4,
+   "fat": 7.35,
+   "fiber": 0,
+   "sugar": 49.7,
+   "sodium": 129,
+   "satFat": 4.53
+  },
+  "score": 1
+ },
+ "sr|Egg, whole, cooked, fried": {
+  "fdcId": 173423,
+  "description": "Egg, whole, cooked, fried",
+  "per100": {
+   "kcal": 196,
+   "protein": 13.6,
+   "carbs": 0.83,
+   "fat": 14.8,
+   "fiber": 0,
+   "sugar": 0.4,
+   "sodium": 207,
+   "satFat": 4.32
+  },
+  "score": 1
+ },
+ "sr|Egg, whole, cooked, scrambled": {
+  "fdcId": 172187,
+  "description": "Egg, whole, cooked, scrambled",
+  "per100": {
+   "kcal": 149,
+   "protein": 9.99,
+   "carbs": 1.61,
+   "fat": 11,
+   "fiber": 0,
+   "sugar": 1.39,
+   "sodium": 145,
+   "satFat": 3.33
+  },
+  "score": 1
+ },
+ "sr|Egg, whole, cooked, hard-boiled": {
+  "fdcId": 173424,
+  "description": "Egg, whole, cooked, hard-boiled",
+  "per100": {
+   "kcal": 155,
+   "protein": 12.6,
+   "carbs": 1.12,
+   "fat": 10.6,
+   "fiber": 0,
+   "sugar": 1.12,
+   "sodium": 124,
+   "satFat": 3.27
+  },
+  "score": 1
+ },
+ "sr|Margarine, regular, 80% fat, composite, stick, with salt": {
+  "fdcId": 172346,
+  "description": "Margarine, regular, 80% fat, composite, stick, with salt",
+  "per100": {
+   "kcal": 717,
+   "protein": 0.16,
+   "carbs": 0.7,
+   "fat": 80.7,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 751,
+   "satFat": 15.2
+  },
+  "score": 1
+ },
+ "sr|Sauce, pasta, spaghetti/marinara, ready-to-serve": {
+  "fdcId": 171192,
+  "description": "Sauce, pasta, spaghetti/marinara, ready-to-serve",
+  "per100": {
+   "kcal": 50,
+   "protein": 1.39,
+   "carbs": 7.43,
+   "fat": 1.61,
+   "fiber": 1.8,
+   "sugar": 4.91,
+   "sodium": 437,
+   "satFat": 0.218
+  },
+  "score": 1
+ },
+ "sr|Soy sauce made from soy and wheat (shoyu)": {
+  "fdcId": 174277,
+  "description": "Soy sauce made from soy and wheat (shoyu)",
+  "per100": {
+   "kcal": 53,
+   "protein": 8.14,
+   "carbs": 4.93,
+   "fat": 0.57,
+   "fiber": 0.8,
+   "sugar": 0.4,
+   "sodium": 5490,
+   "satFat": 0.073
+  },
+  "score": 1
+ },
+ "sr|Peanut butter, smooth style, with salt": {
+  "fdcId": 174266,
+  "description": "Peanut butter, smooth style, with salt (Includes foods for USDA's Food Distribution Program)",
+  "per100": {
+   "kcal": 598,
+   "protein": 22.2,
+   "carbs": 22.3,
+   "fat": 51.4,
+   "fiber": 5,
+   "sugar": 10.5,
+   "sodium": 426,
+   "satFat": 10.3
+  },
+  "score": 1
+ },
+ "sr|Peanuts, all types, oil-roasted, with salt": {
+  "fdcId": 174261,
+  "description": "Peanuts, all types, oil-roasted, with salt",
+  "per100": {
+   "kcal": 599,
+   "protein": 28,
+   "carbs": 15.3,
+   "fat": 52.5,
+   "fiber": 9.4,
+   "sugar": 4.18,
+   "sodium": 320,
+   "satFat": 8.66
+  },
+  "score": 1
+ },
+ "sr|Nuts, pistachio nuts, dry roasted, with salt added": {
+  "fdcId": 169426,
+  "description": "Nuts, pistachio nuts, dry roasted, with salt added",
+  "per100": {
+   "kcal": 569,
+   "protein": 21,
+   "carbs": 27.6,
+   "fat": 45.8,
+   "fiber": 10.3,
+   "sugar": 7.74,
+   "sodium": 428,
+   "satFat": 5.64
+  },
+  "score": 1
+ },
+ "sr|Seeds, chia seeds, dried": {
+  "fdcId": 170554,
+  "description": "Seeds, chia seeds, dried",
+  "per100": {
+   "kcal": 486,
+   "protein": 16.5,
+   "carbs": 42.1,
+   "fat": 30.7,
+   "fiber": 34.4,
+   "sugar": 0,
+   "sodium": 16,
+   "satFat": 3.33
+  },
+  "score": 1
+ },
+ "sr|Seeds, flaxseed": {
+  "fdcId": 169414,
+  "description": "Seeds, flaxseed",
+  "per100": {
+   "kcal": 534,
+   "protein": 18.3,
+   "carbs": 28.9,
+   "fat": 42.2,
+   "fiber": 27.3,
+   "sugar": 1.55,
+   "sodium": 30,
+   "satFat": 3.66
+  },
+  "score": 1
+ },
+ "sr|Seeds, sunflower seed kernels, dry roasted, with salt added": {
+  "fdcId": 169418,
+  "description": "Seeds, sunflower seed kernels, dry roasted, with salt added",
+  "per100": {
+   "kcal": 582,
+   "protein": 19.3,
+   "carbs": 24.1,
+   "fat": 49.8,
+   "fiber": 9,
+   "sugar": 2.73,
+   "sodium": 655,
+   "satFat": 5.22
+  },
+  "score": 1
+ },
+ "sr|Nuts, mixed nuts, dry roasted, with peanuts, salt added": {
+  "fdcId": 168599,
+  "description": "Nuts, mixed nuts, dry roasted, with peanuts, with salt added",
+  "per100": {
+   "kcal": 594,
+   "protein": 17.3,
+   "carbs": 25.4,
+   "fat": 51.4,
+   "fiber": 9,
+   "sugar": 4.8,
+   "sodium": 345,
+   "satFat": 6.5
+  },
+  "score": 1
+ },
+ "sr|Snacks, potato chips, plain, salted": {
+  "fdcId": 169677,
+  "description": "Snacks, potato chips, plain, salted",
+  "per100": {
+   "kcal": 532,
+   "protein": 6.39,
+   "carbs": 53.8,
+   "fat": 34,
+   "fiber": 3.1,
+   "sugar": 0.33,
+   "sodium": 527,
+   "satFat": 3.4
+  },
+  "score": 1
+ },
+ "sr|Snacks, pretzels, hard, plain, salted": {
+  "fdcId": 167555,
+  "description": "Snacks, pretzels, hard, plain, salted",
+  "per100": {
+   "kcal": 384,
+   "protein": 10,
+   "carbs": 80.4,
+   "fat": 2.93,
+   "fiber": 3.4,
+   "sugar": 2.21,
+   "sodium": 1240,
+   "satFat": 0.391
+  },
+  "score": 1
+ },
+ "sr|Snacks, cheese puffs and twists, corn based, baked, low fat": {
+  "fdcId": 168860,
+  "description": "Cheese puffs and twists, corn based, baked, low fat",
+  "per100": {
+   "kcal": 432,
+   "protein": 8.5,
+   "carbs": 72.4,
+   "fat": 12.1,
+   "fiber": 3.6,
+   "sugar": 7.29,
+   "sodium": 842,
+   "satFat": 2.1
+  },
+  "score": 0.9
+ },
+ "sr|Snacks, tortilla chips, nacho cheese": {
+  "fdcId": 167559,
+  "description": "Snacks, tortilla chips, nacho cheese",
+  "per100": {
+   "kcal": 519,
+   "protein": 7.36,
+   "carbs": 60.8,
+   "fat": 27.4,
+   "fiber": 5.1,
+   "sugar": 2.59,
+   "sodium": 691,
+   "satFat": 3.88
+  },
+  "score": 1
+ },
+ "sr|Snacks, popcorn, microwave, regular (butter) flavor, made with palm oil": {
+  "fdcId": 173141,
+  "description": "Popcorn, microwave, regular (butter) flavor, made with palm oil",
+  "per100": {
+   "kcal": 535,
+   "protein": 8.38,
+   "carbs": 57.3,
+   "fat": 30.2,
+   "fiber": 10,
+   "sugar": 0.3,
+   "sodium": 763,
+   "satFat": 14.6
+  },
+  "score": 0.9
+ },
+ "sr|Cookies, chocolate sandwich, with creme filling, regular": {
+  "fdcId": 172718,
+  "description": "Cookies, chocolate sandwich, with creme filling, regular",
+  "per100": {
+   "kcal": 464,
+   "protein": 5.21,
+   "carbs": 71,
+   "fat": 19.1,
+   "fiber": 2.9,
+   "sugar": 40.7,
+   "sodium": 388,
+   "satFat": 5.65
+  },
+  "score": 1
+ },
+ "sr|Cookies, butter, commercially prepared, enriched": {
+  "fdcId": 174950,
+  "description": "Cookies, butter, commercially prepared, enriched",
+  "per100": {
+   "kcal": 467,
+   "protein": 6.1,
+   "carbs": 68.9,
+   "fat": 18.8,
+   "fiber": 0.8,
+   "sugar": 20.2,
+   "sodium": 282,
+   "satFat": 11.1
+  },
+  "score": 1
+ },
+ "sr|Cookies, chocolate sandwich, with extra creme filling": {
+  "fdcId": 172720,
+  "description": "Cookies, chocolate sandwich, with extra creme filling",
+  "per100": {
+   "kcal": 497,
+   "protein": 4.33,
+   "carbs": 68.2,
+   "fat": 24.5,
+   "fiber": 2.7,
+   "sugar": 46,
+   "sodium": 351,
+   "satFat": 5.45
+  },
+  "score": 1
+ },
+ "sr|Candies, milk chocolate": {
+  "fdcId": 167587,
+  "description": "Candies, milk chocolate",
+  "per100": {
+   "kcal": 535,
+   "protein": 7.65,
+   "carbs": 59.4,
+   "fat": 29.7,
+   "fiber": 3.4,
+   "sugar": 51.5,
+   "sodium": 79,
+   "satFat": 18.5
+  },
+  "score": 1
+ },
+ "sr|Candies, gumdrops, starch jelly pieces": {
+  "fdcId": 167989,
+  "description": "Candies, gumdrops, starch jelly pieces",
+  "per100": {
+   "kcal": 396,
+   "protein": 0,
+   "carbs": 98.9,
+   "fat": 0,
+   "fiber": 0.1,
+   "sugar": 59,
+   "sodium": 44,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Candies, hard": {
+  "fdcId": 167990,
+  "description": "Candies, hard",
+  "per100": {
+   "kcal": 394,
+   "protein": 0,
+   "carbs": 98,
+   "fat": 0.2,
+   "fiber": 0,
+   "sugar": 62.9,
+   "sodium": 38,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Ice creams, vanilla": {
+  "fdcId": 167575,
+  "description": "Ice creams, vanilla",
+  "per100": {
+   "kcal": 207,
+   "protein": 3.5,
+   "carbs": 23.6,
+   "fat": 11,
+   "fiber": 0.7,
+   "sugar": 21.2,
+   "sodium": 80,
+   "satFat": 6.79
+  },
+  "score": 1
+ },
+ "sr|Frozen novelties, ice type, pop": {
+  "fdcId": 168813,
+  "description": "Frozen novelties, ice type, pop",
+  "per100": {
+   "kcal": 79,
+   "protein": 0,
+   "carbs": 19.2,
+   "fat": 0.24,
+   "fiber": 0,
+   "sugar": 13.7,
+   "sodium": 7,
+   "satFat": 0.013
+  },
+  "score": 1
+ },
+ "sr|Desserts, flan, caramel custard, prepared-from-recipe": {
+  "fdcId": 167574,
+  "description": "Desserts, flan, caramel custard, prepared-from-recipe",
+  "per100": {
+   "kcal": 145,
+   "protein": 4.53,
+   "carbs": 22.8,
+   "fat": 4.03,
+   "fiber": 0,
+   "sugar": 22.8,
+   "sodium": 53,
+   "satFat": 1.8
+  },
+  "score": 1
+ },
+ "sr|Gelatin desserts, dry mix, prepared with water": {
+  "fdcId": 169596,
+  "description": "Gelatin desserts, dry mix, prepared with water",
+  "per100": {
+   "kcal": 60,
+   "protein": 1.22,
+   "carbs": 14.2,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 13.5,
+   "sodium": 75,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Jams and preserves": {
+  "fdcId": 169641,
+  "description": "Jams and preserves",
+  "per100": {
+   "kcal": 278,
+   "protein": 0.37,
+   "carbs": 68.9,
+   "fat": 0.07,
+   "fiber": 1.1,
+   "sugar": 48.5,
+   "sodium": 32,
+   "satFat": 0.01
+  },
+  "score": 1
+ },
+ "sr|Pie, apple, commercially prepared, enriched flour": {
+  "fdcId": 175011,
+  "description": "Pie, apple, commercially prepared, enriched flour",
+  "per100": {
+   "kcal": 237,
+   "protein": 1.9,
+   "carbs": 34,
+   "fat": 11,
+   "fiber": 1.6,
+   "sugar": 15.6,
+   "sodium": 201,
+   "satFat": 3.8
+  },
+  "score": 1
+ },
+ "sr|Cake, chocolate, commercially prepared with chocolate frosting, in-store bakery": {
+  "fdcId": 174934,
+  "description": "Cake, chocolate, commercially prepared with chocolate frosting, in-store bakery",
+  "per100": {
+   "kcal": 389,
+   "protein": 3.48,
+   "carbs": 52.8,
+   "fat": 20,
+   "fiber": 2.2,
+   "sugar": 40,
+   "sodium": 348,
+   "satFat": 5.92
+  },
+  "score": 1
+ },
+ "sr|Cake, pound, commercially prepared, butter (includes fresh and frozen)": {
+  "fdcId": 172704,
+  "description": "Cake, pound, commercially prepared, butter (includes fresh and frozen)",
+  "per100": {
+   "kcal": 353,
+   "protein": 5,
+   "carbs": 53.6,
+   "fat": 14,
+   "fiber": 0.6,
+   "sugar": 33.4,
+   "sodium": 377,
+   "satFat": 4.81
+  },
+  "score": 1
+ },
+ "sr|Doughnuts, yeast-leavened, with creme filling": {
+  "fdcId": 172757,
+  "description": "Doughnuts, yeast-leavened, with creme filling",
+  "per100": {
+   "kcal": 361,
+   "protein": 6.4,
+   "carbs": 30,
+   "fat": 24.5,
+   "fiber": 0.8,
+   "sugar": 14.6,
+   "sodium": 309,
+   "satFat": 5.43
+  },
+  "score": 1
+ },
+ "sr|Doughnuts, yeast-leavened, glazed, enriched (includes honey buns)": {
+  "fdcId": 172758,
+  "description": "Doughnuts, yeast-leavened, glazed, enriched (includes honey buns)",
+  "per100": {
+   "kcal": 421,
+   "protein": 6.14,
+   "carbs": 47.9,
+   "fat": 22.7,
+   "fiber": 2.1,
+   "sugar": 22.8,
+   "sodium": 316,
+   "satFat": 9.45
+  },
+  "score": 1
+ },
+ "sr|Croissants, butter": {
+  "fdcId": 174987,
+  "description": "Croissants, butter",
+  "per100": {
+   "kcal": 406,
+   "protein": 8.2,
+   "carbs": 45.8,
+   "fat": 21,
+   "fiber": 2.6,
+   "sugar": 11.3,
+   "sodium": 384,
+   "satFat": 11.7
+  },
+  "score": 1
+ },
+ "sr|Pie, lemon meringue, commercially prepared": {
+  "fdcId": 172785,
+  "description": "Pie, lemon meringue, commercially prepared",
+  "per100": {
+   "kcal": 268,
+   "protein": 1.5,
+   "carbs": 47.2,
+   "fat": 8.7,
+   "fiber": 1.2,
+   "sugar": 23.9,
+   "sodium": 172,
+   "satFat": 1.77
+  },
+  "score": 1
+ },
+ "sr|Cake, fruitcake, commercially prepared": {
+  "fdcId": 174939,
+  "description": "Cake, fruitcake, commercially prepared",
+  "per100": {
+   "kcal": 324,
+   "protein": 2.9,
+   "carbs": 61.6,
+   "fat": 9.1,
+   "fiber": 3.7,
+   "sugar": 27.4,
+   "sodium": 101,
+   "satFat": 1.05
+  },
+  "score": 1
+ },
+ "sr|Sugars, brown": {
+  "fdcId": 168833,
+  "description": "Sugars, brown",
+  "per100": {
+   "kcal": 380,
+   "protein": 0.12,
+   "carbs": 98.1,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 97,
+   "sodium": 28,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Semolina, enriched": {
+  "fdcId": 169715,
+  "description": "Semolina, enriched",
+  "per100": {
+   "kcal": 360,
+   "protein": 12.7,
+   "carbs": 72.8,
+   "fat": 1.05,
+   "fiber": 3.9,
+   "sugar": 0,
+   "sodium": 1,
+   "satFat": 0.15
+  },
+  "score": 1
+ },
+ "sr|Peaches, dried, sulfured, uncooked": {
+  "fdcId": 169934,
+  "description": "Peaches, dried, sulfured, uncooked",
+  "per100": {
+   "kcal": 239,
+   "protein": 3.61,
+   "carbs": 61.3,
+   "fat": 0.76,
+   "fiber": 8.2,
+   "sugar": 41.7,
+   "sodium": 7,
+   "satFat": 0.082
+  },
+  "score": 1
+ },
+ "sr|Beverages, carbonated, orange": {
+  "fdcId": 174854,
+  "description": "Beverages, carbonated, orange",
+  "per100": {
+   "kcal": 48,
+   "protein": 0,
+   "carbs": 12.3,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 12,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Beverages, fruit-flavored drink, powder, with high vitamin C with other added vitamins, low calorie": {
+  "fdcId": 167707,
+  "description": "Beverages, fruit-flavored drink, powder, with high vitamin C with other added vitamins, low calorie",
+  "per100": {
+   "kcal": 227,
+   "protein": 0.25,
+   "carbs": 91,
+   "fat": 0.16,
+   "fiber": 2.2,
+   "sugar": 0,
+   "sodium": 14,
+   "satFat": 0.01
+  },
+  "score": 1
+ },
+ "sr|Peach nectar, canned, with sugar, without added ascorbic acid": {
+  "fdcId": 169117,
+  "description": "Peach nectar, canned, with sucralose, without added ascorbic acid",
+  "per100": {
+   "kcal": 49,
+   "protein": 0.1,
+   "carbs": 11.6,
+   "fat": 0.57,
+   "fiber": 0.1,
+   "sugar": 12.1,
+   "sodium": 11,
+   "satFat": 0.037
+  },
+  "score": 0.8
+ },
+ "sr|Beverages, Energy drink, RED BULL": {
+  "fdcId": 173210,
+  "description": "Beverages, Energy drink, RED BULL",
+  "per100": {
+   "kcal": 43,
+   "protein": 0.46,
+   "carbs": 10.2,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 10.2,
+   "sodium": 39,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Beverages, The COCA-COLA company, Powerade, lemon-lime flavored, ready-to-drink": {
+  "fdcId": 175108,
+  "description": "Beverages, COCA-COLA, POWERADE, lemon-lime flavored, ready-to-drink",
+  "per100": {
+   "kcal": 32,
+   "protein": 0,
+   "carbs": 7.84,
+   "fat": 0.05,
+   "fiber": 0,
+   "sugar": 6.11,
+   "sodium": 42,
+   "satFat": 0.008
+  },
+  "score": 0.8333333333333334
+ },
+ "sr|Cocoa mix, powder": {
+  "fdcId": 174122,
+  "description": "Beverages, Cocoa mix, powder",
+  "per100": {
+   "kcal": 398,
+   "protein": 6.67,
+   "carbs": 83.7,
+   "fat": 4,
+   "fiber": 3.7,
+   "sugar": 65.6,
+   "sodium": 504,
+   "satFat": 2.38
+  },
+  "score": 0.75
+ },
+ "sr|Beverages, almond milk, unsweetened, shelf stable": {
+  "fdcId": 174832,
+  "description": "Beverages, almond milk, unsweetened, shelf stable",
+  "per100": {
+   "kcal": 15,
+   "protein": 0.4,
+   "carbs": 1.31,
+   "fat": 0.96,
+   "fiber": 0.2,
+   "sugar": 0.81,
+   "sodium": 72,
+   "satFat": 0.08
+  },
+  "score": 1
+ },
+ "sr|Alcoholic beverage, beer, regular, all": {
+  "fdcId": 168746,
+  "description": "Alcoholic beverage, beer, regular, all",
+  "per100": {
+   "kcal": 43,
+   "protein": 0.46,
+   "carbs": 3.55,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 4,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Alcoholic beverage, wine, table, red": {
+  "fdcId": 173190,
+  "description": "Alcoholic beverage, wine, table, red",
+  "per100": {
+   "kcal": 85,
+   "protein": 0.07,
+   "carbs": 2.61,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 0.62,
+   "sodium": 4,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Alcoholic beverage, wine, table, white": {
+  "fdcId": 174837,
+  "description": "Alcoholic beverage, wine, table, white",
+  "per100": {
+   "kcal": 82,
+   "protein": 0.07,
+   "carbs": 2.6,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 0.96,
+   "sodium": 5,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Alcoholic beverage, distilled, all (gin, rum, vodka, whiskey) 80 proof": {
+  "fdcId": 174815,
+  "description": "Alcoholic beverage, distilled, all (gin, rum, vodka, whiskey) 80 proof",
+  "per100": {
+   "kcal": 231,
+   "protein": 0,
+   "carbs": 0,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 1,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Sherbet, orange": {
+  "fdcId": 167577,
+  "description": "Sherbet, orange",
+  "per100": {
+   "kcal": 144,
+   "protein": 1.1,
+   "carbs": 30.4,
+   "fat": 2,
+   "fiber": 1.3,
+   "sugar": 24.3,
+   "sodium": 46,
+   "satFat": 1.16
+  },
+  "score": 1
+ },
+ "sr|Fast foods, pizza chain, 14\" pizza, pepperoni topping, regular crust": {
+  "fdcId": 173295,
+  "description": "Fast Food, Pizza Chain, 14\" pizza, pepperoni topping, regular crust",
+  "per100": {
+   "kcal": 282,
+   "protein": 11.7,
+   "carbs": 32,
+   "fat": 11.9,
+   "fiber": 2.3,
+   "sugar": 3.26,
+   "sodium": 685,
+   "satFat": 5.09
+  },
+  "score": 0.8
+ },
+ "sr|McDONALD'S, BIG MAC": {
+  "fdcId": 170720,
+  "description": "McDONALD'S, BIG MAC",
+  "per100": {
+   "kcal": 257,
+   "protein": 11.8,
+   "carbs": 20.1,
+   "fat": 15,
+   "fiber": 1.6,
+   "sugar": 3.97,
+   "sodium": 460,
+   "satFat": 3.8
+  },
+  "score": 1
+ },
+ "sr|KFC, Fried Chicken, ORIGINAL RECIPE, Breast, meat and skin with breading": {
+  "fdcId": 170744,
+  "description": "KFC, Fried Chicken, ORIGINAL RECIPE, Breast, meat and skin with breading",
+  "per100": {
+   "kcal": 231,
+   "protein": 21.9,
+   "carbs": 6.28,
+   "fat": 13.1,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 606,
+   "satFat": 2.98
+  },
+  "score": 1
+ },
+ "sr|Fast foods, chicken tenders": {
+  "fdcId": 173321,
+  "description": "Fast foods, chicken tenders",
+  "per100": {
+   "kcal": 271,
+   "protein": 19.2,
+   "carbs": 17.2,
+   "fat": 14,
+   "fiber": 1.2,
+   "sugar": 0.4,
+   "sodium": 769,
+   "satFat": 2.49
+  },
+  "score": 1
+ },
+ "sr|Soup, ramen noodle, any flavor, dry": {
+  "fdcId": 171177,
+  "description": "Soup, ramen noodle, any flavor, dry",
+  "per100": {
+   "kcal": 440,
+   "protein": 10.2,
+   "carbs": 60.3,
+   "fat": 17.6,
+   "fiber": 2.9,
+   "sugar": 1.98,
+   "sodium": 1860,
+   "satFat": 8.12
+  },
+  "score": 1
+ },
+ "sr|Sauerkraut, canned, solids and liquids": {
+  "fdcId": 169279,
+  "description": "Sauerkraut, canned, solids and liquids",
+  "per100": {
+   "kcal": 19,
+   "protein": 0.91,
+   "carbs": 4.28,
+   "fat": 0.14,
+   "fiber": 2.9,
+   "sugar": 1.78,
+   "sodium": 661,
+   "satFat": 0.034
+  },
+  "score": 1
+ },
+ "sr|Chicken, broilers or fryers, thigh, meat only, cooked, roasted": {
+  "fdcId": 172388,
+  "description": "Chicken, broilers or fryers, thigh, meat only, cooked, roasted",
+  "per100": {
+   "kcal": 179,
+   "protein": 24.8,
+   "carbs": 0,
+   "fat": 8.15,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 106,
+   "satFat": 2.31
+  },
+  "score": 1
+ },
+ "sr|Rice, white, short-grain, enriched, cooked": {
+  "fdcId": 168882,
+  "description": "Rice, white, short-grain, enriched, cooked",
+  "per100": {
+   "kcal": 130,
+   "protein": 2.36,
+   "carbs": 28.7,
+   "fat": 0.19,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 0,
+   "satFat": 0.051
+  },
+  "score": 1
+ },
+ "sr|Fish, salmon, Atlantic, farmed, raw": {
+  "fdcId": 175167,
+  "description": "Fish, salmon, Atlantic, farmed, raw",
+  "per100": {
+   "kcal": 208,
+   "protein": 20.4,
+   "carbs": 0,
+   "fat": 13.4,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 59,
+   "satFat": 3.05
+  },
+  "score": 1
+ },
+ "sr|Seaweed, laver, raw": {
+  "fdcId": 168458,
+  "description": "Seaweed, laver, raw",
+  "per100": {
+   "kcal": 35,
+   "protein": 5.81,
+   "carbs": 5.11,
+   "fat": 0.28,
+   "fiber": 0.3,
+   "sugar": 0.49,
+   "sodium": 48,
+   "satFat": 0.061
+  },
+  "score": 1
+ },
+ "sr|Vinegar, distilled": {
+  "fdcId": 172237,
+  "description": "Vinegar, distilled",
+  "per100": {
+   "kcal": 18,
+   "protein": 0,
+   "carbs": 0.04,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 0.04,
+   "sodium": 2,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|Fish, cusk, raw": {
+  "fdcId": 171958,
+  "description": "Fish, cusk, raw",
+  "per100": {
+   "kcal": 87,
+   "protein": 19,
+   "carbs": 0,
+   "fat": 0.69,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 31,
+   "satFat": 0.13
+  },
+  "score": 1
+ },
+ "sr|Chicken, broilers or fryers, thigh, meat only, cooked, stewed": {
+  "fdcId": 172389,
+  "description": "Chicken, broilers or fryers, thigh, meat only, cooked, stewed",
+  "per100": {
+   "kcal": 195,
+   "protein": 25,
+   "carbs": 0,
+   "fat": 9.79,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 75,
+   "satFat": 2.71
+  },
+  "score": 1
+ },
+ "sr|Beef, tenderloin, steak, separable lean and fat, trimmed to 1/8\" fat, all grades, cooked, broiled": {
+  "fdcId": 169543,
+  "description": "Beef, tenderloin, steak, separable lean and fat, trimmed to 1/8\" fat, all grades, cooked, broiled",
+  "per100": {
+   "kcal": 267,
+   "protein": 26.5,
+   "carbs": 0,
+   "fat": 17.1,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 54,
+   "satFat": 6.74
+  },
+  "score": 1
+ },
+ "sr|Onions, spring or scallions (includes tops and bulb), raw": {
+  "fdcId": 170005,
+  "description": "Onions, spring or scallions (includes tops and bulb), raw",
+  "per100": {
+   "kcal": 32,
+   "protein": 1.83,
+   "carbs": 7.34,
+   "fat": 0.19,
+   "fiber": 2.6,
+   "sugar": 2.33,
+   "sodium": 16,
+   "satFat": 0.032
+  },
+  "score": 1
+ },
+ "sr|Lasagna with meat & sauce, frozen entree": {
+  "fdcId": 173334,
+  "description": "Lasagna with meat & sauce, frozen entree",
+  "per100": {
+   "kcal": 124,
+   "protein": 6.63,
+   "carbs": 14.4,
+   "fat": 4.42,
+   "fiber": 1.4,
+   "sugar": 2.96,
+   "sodium": 347,
+   "satFat": 2.07
+  },
+  "score": 1
+ },
+ "sr|Soup, chicken broth, ready-to-serve": {
+  "fdcId": 174536,
+  "description": "Soup, chicken broth, ready-to-serve",
+  "per100": {
+   "kcal": 6,
+   "protein": 0.64,
+   "carbs": 0.44,
+   "fat": 0.21,
+   "fiber": 0,
+   "sugar": 0.43,
+   "sodium": 371,
+   "satFat": 0.013
+  },
+  "score": 1
+ },
+ "sr|Soup, chicken noodle, dry, mix, prepared with water": {
+  "fdcId": 172925,
+  "description": "Soup, chicken noodle, dry, mix, prepared with water",
+  "per100": {
+   "kcal": 23,
+   "protein": 0.84,
+   "carbs": 3.67,
+   "fat": 0.55,
+   "fiber": 0.1,
+   "sugar": 0.31,
+   "sodium": 229,
+   "satFat": 0.122
+  },
+  "score": 1
+ },
+ "sr|174826": {
+  "fdcId": 174826,
+  "description": "Beverages, ZEVIA, cola, caffeine free",
+  "per100": {
+   "kcal": 0,
+   "protein": 0,
+   "carbs": 1.13,
+   "fat": 0,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 6,
+   "satFat": 0
+  },
+  "score": 1
+ },
+ "sr|167535": {
+  "fdcId": 167535,
+  "description": "Tortillas, ready-to-bake or -fry, flour, shelf stable",
+  "per100": {
+   "kcal": 297,
+   "protein": 8.01,
+   "carbs": 49.27,
+   "fat": 7.58,
+   "fiber": 2.4,
+   "sugar": 2.66,
+   "sodium": 742,
+   "satFat": 1.225
+  },
+  "score": 1
+ },
+ "sr|173859": {
+  "fdcId": 173859,
+  "description": "Sausage, pork, chorizo, link or ground, raw",
+  "per100": {
+   "kcal": 296,
+   "protein": 13.63,
+   "carbs": 3.78,
+   "fat": 25.1,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 788,
+   "satFat": 8.595
+  },
+  "score": 1
+ },
+ "sr|175180": {
+  "fdcId": 175180,
+  "description": "Crustaceans, shrimp, cooked",
+  "per100": {
+   "kcal": 99,
+   "protein": 23.98,
+   "carbs": 0.2,
+   "fat": 0.28,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 111,
+   "satFat": 0.056
+  },
+  "score": 1
+ },
+ "sr|175115": {
+  "fdcId": 175115,
+  "description": "Beverages, fruit punch-flavor drink, powder, without added sodium, prepared with water",
+  "per100": {
+   "kcal": 37,
+   "protein": 0,
+   "carbs": 9.47,
+   "fat": 0.01,
+   "fiber": 0,
+   "sugar": 9.23,
+   "sodium": 7,
+   "satFat": 0.006
+  },
+  "score": 1
+ },
+ "sr|168185": {
+  "fdcId": 168185,
+  "description": "Peach nectar, canned, with added ascorbic acid",
+  "per100": {
+   "kcal": 50,
+   "protein": 0.21,
+   "carbs": 11.93,
+   "fat": 0.51,
+   "fiber": 0.1,
+   "sugar": 11.16,
+   "sodium": 8,
+   "satFat": 0.224
+  },
+  "score": 1
+ },
+ "sr|Cabbage, common, cooked, boiled, drained, without salt": {
+  "fdcId": 169976,
+  "description": "Cabbage, cooked, boiled, drained, without salt",
+  "per100": {
+   "kcal": 23,
+   "protein": 1.27,
+   "carbs": 5.51,
+   "fat": 0.06,
+   "fiber": 1.9,
+   "sugar": 2.79,
+   "sodium": 8,
+   "satFat": 0
+  },
+  "score": 0.8571428571428571
+ },
+ "sr|Eggplant, cooked, boiled, drained, without salt": {
+  "fdcId": 169229,
+  "description": "Eggplant, cooked, boiled, drained, without salt",
+  "per100": {
+   "kcal": 35,
+   "protein": 0.83,
+   "carbs": 8.73,
+   "fat": 0.23,
+   "fiber": 2.5,
+   "sugar": 3.2,
+   "sodium": 1,
+   "satFat": 0.044
+  },
+  "score": 1
+ },
+ "sr|Pork, fresh, leg (ham), whole, separable lean and fat, cooked, roasted": {
+  "fdcId": 168223,
+  "description": "Pork, fresh, leg (ham), whole, separable lean and fat, cooked, roasted",
+  "per100": {
+   "kcal": 273,
+   "protein": 26.8,
+   "carbs": 0,
+   "fat": 17.6,
+   "fiber": 0,
+   "sugar": 0,
+   "sodium": 60,
+   "satFat": 6.47
+  },
+  "score": 1
+ }
+}

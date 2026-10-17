@@ -42,8 +42,15 @@ export const ROLES: Record<Role, RoleDefinition> = {
     description: 'Perfil público/masivo. Sin acceso a AXS ni al sistema. Solo herramientas de salud y búsqueda web.',
     allowedTools: [
       'web_search',  // búsqueda web general
-      'gluco',       // seguimiento de glucosa
-      'nutrition',   // seguimiento nutricional
+      'gluco_tracker',       // seguimiento de glucosa
+      'nutrition_tracker',   // seguimiento nutricional
+      'carb_options',        // convierte gramos de carbos en alimentos concretos
+      'metabolic_advisor',   // análisis metabólico + qué comer (respeta restricciones)
+      'symptom_guide',       // orientación ante síntomas, según el perfil médico (detecta emergencias)
+      'finance_tracker',     // anota gastos/préstamos/giros en SU Finanzas (vive en su teléfono) y resume saldos
+      'manage_user_profile', // Control total de perfil de usuario
+      'sleep_log',           // horas dormidas de una noche (cuando el reloj no las midió)
+      'lab_results',         // exámenes que cuenta el usuario (HbA1c, colesterol…), con fecha
       // AXS explícitamente excluido: knowledge_search, log_management,
       // vault_audit, vault_healer, executive_report, crystallize,
       // file_read, file_write, bash, system_info, open

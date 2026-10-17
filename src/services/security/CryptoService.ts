@@ -71,6 +71,11 @@ export class CryptoService {
 
   // --- Funciones para cifrar DATOS usando la Master Key ---
 
+  /** ¿Hay llave maestra? Sin ella, `encrypt` devuelve el texto tal cual (por compatibilidad): quien cifra en reposo lo revisa antes. */
+  isUnlocked(): boolean {
+    return !!this.masterKey;
+  }
+
   encrypt(text: string): string {
     if (!this.masterKey) return text; 
     const iv = randomBytes(12);

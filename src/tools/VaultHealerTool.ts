@@ -4,9 +4,10 @@
 // ============================================================
 
 import { z } from "zod";
-import { Tool, type ToolExecutionResult } from "../Tool.js";
+import { Tool, type ToolExecutionResult, type PreflightResult } from "../Tool.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import { VaultService } from "../services/vault/VaultService.js";
 
 const VaultHealerInputSchema = z.object({
@@ -18,21 +19,58 @@ type VaultHealerInput = z.infer<typeof VaultHealerInputSchema>;
 
 export class VaultHealerTool extends Tool<VaultHealerInput> {
   readonly name = "vault_healer";
+  readonly dangerous = true;
   readonly description =
     "Herramienta ejecutiva para el mantenimiento masivo de AXS. " +
     "Repara enlaces, inyecta metadatos corporativos y crea archivos de proyecto faltantes de forma autónoma.";
   readonly inputSchema = VaultHealerInputSchema;
+  readonly requiresConfirmation = true;
 
   private vaultService: VaultService;
+  /** Carpeta donde se guarda una copia exacta de cada archivo ANTES de modificarlo (una por ejecución). */
+  private backupDir: string | null = null;
 
   constructor() {
     super();
     this.vaultService = new VaultService();
   }
 
+  preflight(input: VaultHealerInput): PreflightResult {
+    const what: Record<string, string> = {
+      auto_heal: "reparar enlaces, completar metadatos y crear los archivos que falten",
+      fix_links: "reparar enlaces rotos",
+      inject_metadata: "agregar metadatos (owner/tier/status) a las notas",
+    };
+    return {
+      ok: true,
+      approval: {
+        title: "Reparar la bóveda AXS",
+        detail:
+          `Acción: ${input.action} — ${what[input.action] ?? input.action}.\n` +
+          `Bóveda: ${this.vaultService.getVaultPath()}\n\n` +
+          `Puede modificar muchas notas a la vez. Antes de tocar cada una se guarda una copia exacta en ~/.eris/vault_backups.`,
+        risk: "normal",
+        flags: ["modifica muchos archivos"],
+      },
+    };
+  }
+
+  /** Copia el archivo tal cual está a la carpeta de respaldo de esta ejecución. Si no se puede respaldar, NO se modifica. */
+  private async backup(filePath: string, vaultRoot: string): Promise<void> {
+    if (!this.backupDir) {
+      this.backupDir = path.join(os.homedir(), ".eris", "vault_backups", new Date().toISOString().replace(/[:.]/g, "-"));
+    }
+    const rel = path.relative(vaultRoot, filePath);
+    const dest = path.join(this.backupDir, rel);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.copyFile(filePath, dest);
+  }
+
   async execute(input: VaultHealerInput): Promise<ToolExecutionResult> {
     const { action } = input;
-    
+    this.backupDir = null;
+    let backedUp = 0;
+
     try {
       const vaultRoot = this.vaultService.getVaultPath();
       const allFiles = await this.vaultService.getAllFiles();
@@ -78,7 +116,7 @@ export class VaultHealerTool extends Tool<VaultHealerInput> {
                    createdFiles.push(missingLink);
                    // Actualizar mapa para siguientes archivos
                    baseMap.set(missingLink.toLowerCase(), missingLink);
-                   relPaths.add(`20-29 r&d (the forge)/${missingLink.toLowerCase()}.md`);
+                   relPaths.add(`20-29 r&d (the forge)/25 laboratorio e i+d/${missingLink.toLowerCase()}.md`);
                  }
                }
              }
@@ -86,13 +124,20 @@ export class VaultHealerTool extends Tool<VaultHealerInput> {
         }
 
         if (content !== originalContent) {
+          await this.backup(filePath, vaultRoot); // si falla, se corta antes de modificar
+          backedUp++;
           await this.vaultService.writeVaultFile(filePath, content);
           healedCount++;
         }
       }
 
+      if (this.backupDir && createdFiles.length > 0) {
+        await fs.writeFile(path.join(this.backupDir, "_creados.txt"), createdFiles.map((f) => `${f}.md`).join("\n"), "utf-8").catch(() => {});
+      }
+
       let summary = `# ✅ Protocolo de Sanación Completado\n\n`;
       summary += `- **Archivos curados:** ${healedCount}\n`;
+      if (backedUp > 0 && this.backupDir) summary += `- **Respaldo previo:** ${backedUp} archivos copiados en \`${this.backupDir}\`\n`;
       summary += `- **Enlaces reparados:** ${linksRepaired}\n`;
       if (createdFiles.length > 0) {
         summary += `- **Nuevos placeholders creados:** ${createdFiles.join(", ")}\n`;
@@ -162,7 +207,8 @@ export class VaultHealerTool extends Tool<VaultHealerInput> {
   }
 
   private async createPlaceholder(name: string, vaultRoot: string): Promise<boolean> {
-    const targetDir = path.join(vaultRoot, "20-29 R&D (The Forge)");
+    // Desde el 2026-10-12 nada va suelto en la raíz de 20-29: lo nuevo y sin clasificar va al laboratorio
+    const targetDir = path.join(vaultRoot, "20-29 R&D (The Forge)", "25 Laboratorio e I+D");
     const filePath = path.join(targetDir, `${name}.md`);
 
     try {

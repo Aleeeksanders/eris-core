@@ -18,6 +18,7 @@ type WebSearchInput = z.infer<typeof WebSearchInputSchema>;
 
 export class WebSearchTool extends Tool<WebSearchInput> {
   readonly name = "web_search";
+  readonly untrustedOutput = true;
   readonly description =
     "Busca información en la web usando DuckDuckGo. " +
     "Retorna títulos, URLs y fragmentos de los resultados.";

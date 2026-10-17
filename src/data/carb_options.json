@@ -1,0 +1,579 @@
+{
+ "version": 1,
+ "description": "Alimentos concretos con carbohidratos por unidad, para convertir 'X g de carbos' en algo que el usuario reconoce. Valores de consenso/conservadores: OFF (Open Food Facts) es crowdsourced y varía entre listados, por eso las bebidas usan un valor típico y no una sola fila. speed: rapida = azúcares simples sin grasa/fibra (suben rápido, sirven para bajones); media = fruta/lácteo (fibra, lactosa); lenta = con grasa (chocolate, galletas, pan) — la grasa retrasa la absorción, NO son la primera opción ante una hipoglucemia.",
+ "items": [
+  {
+   "id": "azucar",
+   "name": "Azúcar",
+   "aliases": [
+    "azucar",
+    "azúcar"
+   ],
+   "speed": "rapida",
+   "unit": "cucharadita",
+   "unitPlural": "cucharaditas",
+   "unitDetail": "5 g",
+   "carbsPerUnit": 5,
+   "step": 1,
+   "source": "chilean-foods.json (cl:azucar)",
+   "allergens": [],
+   "traces": [],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "gluten",
+    "higado",
+    "huevo",
+    "lactosa",
+    "mani",
+    "mariscos",
+    "pescado",
+    "soya"
+   ],
+   "meat": false,
+   "animal": false,
+   "landMeat": false
+  },
+  {
+   "id": "miel",
+   "name": "Miel",
+   "aliases": [
+    "miel"
+   ],
+   "speed": "rapida",
+   "unit": "cucharada",
+   "unitPlural": "cucharadas",
+   "unitDetail": "~17 g",
+   "carbsPerUnit": 17,
+   "step": 1,
+   "source": "chilean-foods.json (cl:miel)",
+   "allergens": [],
+   "traces": [],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "gluten",
+    "higado",
+    "huevo",
+    "lactosa",
+    "mani",
+    "mariscos",
+    "pescado",
+    "soya"
+   ],
+   "meat": false,
+   "animal": true,
+   "landMeat": false
+  },
+  {
+   "id": "jugo",
+   "name": "Jugo de fruta o néctar (no light)",
+   "aliases": [
+    "jugo",
+    "néctar",
+    "nectar",
+    "watts",
+    "andina",
+    "del valle"
+   ],
+   "speed": "rapida",
+   "unit": "vaso chico",
+   "unitPlural": "vasos chicos",
+   "unitDetail": "150 ml",
+   "carbsPerUnit": 15,
+   "step": 1,
+   "source": "OFF consenso ~10 g/100 ml (Watts 10.2, Líder 9.3, Watt's 10)",
+   "allergens": [],
+   "traces": [],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "gluten",
+    "higado",
+    "huevo",
+    "lactosa",
+    "mani",
+    "mariscos",
+    "pescado",
+    "soya"
+   ],
+   "meat": false,
+   "animal": false,
+   "landMeat": false
+  },
+  {
+   "id": "bebida",
+   "name": "Coca-Cola, Bilz, Pap o Fanta (normal, no light ni zero)",
+   "aliases": [
+    "coca",
+    "cola",
+    "coca-cola",
+    "bilz",
+    "pap",
+    "fanta",
+    "sprite",
+    "gaseosa"
+   ],
+   "speed": "rapida",
+   "unit": "vaso chico",
+   "unitPlural": "vasos chicos",
+   "unitDetail": "150 ml",
+   "carbsPerUnit": 15.8,
+   "step": 1,
+   "source": "~10,5 g/100 ml (Coca-Cola 10,6 · Bilz 9,7 · chilean-foods.json 39 g/355 ml)",
+   "allergens": [],
+   "traces": [],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "gluten",
+    "higado",
+    "huevo",
+    "lactosa",
+    "mani",
+    "mariscos",
+    "pescado",
+    "soya"
+   ],
+   "meat": false,
+   "animal": false,
+   "landMeat": false
+  },
+  {
+   "id": "gatorade",
+   "name": "Gatorade",
+   "aliases": [
+    "gatorade",
+    "isotonica",
+    "isotónica",
+    "powerade"
+   ],
+   "speed": "rapida",
+   "unit": "vaso",
+   "unitPlural": "vasos",
+   "unitDetail": "250 ml",
+   "carbsPerUnit": 15,
+   "step": 1,
+   "source": "OFF Gatorade 6 g/100 ml (7801620002961)",
+   "allergens": [],
+   "traces": [],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "higado",
+    "huevo",
+    "lactosa",
+    "mani",
+    "mariscos",
+    "pescado",
+    "soya"
+   ],
+   "meat": false,
+   "animal": false,
+   "landMeat": false
+  },
+  {
+   "id": "gomitas",
+   "name": "Gomitas Ambrosoli",
+   "aliases": [
+    "gomita",
+    "gomitas",
+    "ambrosoli",
+    "flippy",
+    "frugele",
+    "amberries"
+   ],
+   "speed": "rapida",
+   "unit": "porción de 5 gomitas",
+   "unitPlural": "porciones de 5 gomitas",
+   "unitDetail": "18 g",
+   "carbsPerUnit": 14.5,
+   "step": 1,
+   "source": "OFF Ambrosoli Flippy 81 g/100 g, 7 unidades = 25 g (7802200134751)",
+   "allergens": [
+    "gelatina"
+   ],
+   "traces": [],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "crudo_ahumado",
+    "gelatina",
+    "higado"
+   ],
+   "meat": false,
+   "animal": true,
+   "landMeat": false
+  },
+  {
+   "id": "platano",
+   "name": "Plátano",
+   "aliases": [
+    "platano",
+    "plátano",
+    "banana",
+    "banano"
+   ],
+   "speed": "media",
+   "unit": "plátano mediano",
+   "unitPlural": "plátanos medianos",
+   "unitDetail": "120 g",
+   "carbsPerUnit": 27,
+   "step": 0.5,
+   "source": "chilean-foods.json (cl:platano)",
+   "allergens": [],
+   "traces": [],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "gluten",
+    "higado",
+    "huevo",
+    "lactosa",
+    "mani",
+    "mariscos",
+    "pescado",
+    "soya"
+   ],
+   "meat": false,
+   "animal": false,
+   "landMeat": false
+  },
+  {
+   "id": "uva",
+   "name": "Uvas",
+   "aliases": [
+    "uva",
+    "uvas"
+   ],
+   "speed": "media",
+   "unit": "taza",
+   "unitPlural": "tazas",
+   "unitDetail": "150 g",
+   "carbsPerUnit": 27.2,
+   "step": 0.5,
+   "source": "chilean-foods.json (cl:uva)",
+   "allergens": [],
+   "traces": [],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "gluten",
+    "higado",
+    "huevo",
+    "lactosa",
+    "mani",
+    "mariscos",
+    "pescado",
+    "soya"
+   ],
+   "meat": false,
+   "animal": false,
+   "landMeat": false
+  },
+  {
+   "id": "yogur",
+   "name": "Yogur natural",
+   "aliases": [
+    "yogur",
+    "yogurt"
+   ],
+   "speed": "media",
+   "unit": "pote",
+   "unitPlural": "potes",
+   "unitDetail": "175 g",
+   "carbsPerUnit": 14,
+   "step": 1,
+   "source": "chilean-foods.json (cl:yogur_natural)",
+   "allergens": [
+    "lactosa"
+   ],
+   "traces": [],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "higado",
+    "huevo",
+    "lactosa",
+    "mani",
+    "mariscos",
+    "pescado",
+    "soya"
+   ],
+   "meat": false,
+   "animal": true,
+   "landMeat": false
+  },
+  {
+   "id": "leche",
+   "name": "Leche descremada",
+   "aliases": [
+    "leche"
+   ],
+   "speed": "media",
+   "unit": "vaso",
+   "unitPlural": "vasos",
+   "unitDetail": "250 ml",
+   "carbsPerUnit": 12,
+   "step": 1,
+   "source": "chilean-foods.json (cl:leche_descremada)",
+   "allergens": [
+    "lactosa"
+   ],
+   "traces": [],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "gluten",
+    "higado",
+    "huevo",
+    "lactosa",
+    "mani",
+    "mariscos",
+    "pescado",
+    "soya"
+   ],
+   "meat": false,
+   "animal": true,
+   "landMeat": false
+  },
+  {
+   "id": "chocman",
+   "name": "Chocman",
+   "aliases": [
+    "chocman"
+   ],
+   "speed": "lenta",
+   "unit": "Chocman",
+   "unitPlural": "Chocman",
+   "unitDetail": "33 g",
+   "carbsPerUnit": 21.9,
+   "step": 1,
+   "source": "OFF Carozzi Chocman 66,4 g/100 g, 1 unidad = 33 g (7802215303401)",
+   "allergens": [
+    "gluten",
+    "huevo",
+    "lactosa",
+    "soya"
+   ],
+   "traces": [
+    "gluten",
+    "huevo",
+    "lactosa",
+    "frutos_secos",
+    "mani",
+    "soya"
+   ],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "gluten",
+    "higado",
+    "huevo",
+    "lactosa",
+    "mani",
+    "mariscos",
+    "pescado",
+    "soya"
+   ],
+   "meat": false,
+   "animal": true,
+   "landMeat": false
+  },
+  {
+   "id": "triton",
+   "name": "Tritón",
+   "aliases": [
+    "triton",
+    "tritón"
+   ],
+   "speed": "lenta",
+   "unit": "porción de Tritón",
+   "unitPlural": "porciones de Tritón",
+   "unitDetail": "34 g",
+   "carbsPerUnit": 23.7,
+   "step": 1,
+   "source": "OFF McKay Tritón 69,7 g/100 g, porción 34 g (7802230086952; otros listados 72-74)",
+   "allergens": [
+    "gluten",
+    "soya"
+   ],
+   "traces": [
+    "huevo",
+    "lactosa"
+   ],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "gluten",
+    "higado",
+    "huevo",
+    "lactosa",
+    "mani",
+    "mariscos",
+    "pescado",
+    "soya"
+   ],
+   "meat": false,
+   "animal": true,
+   "landMeat": false
+  },
+  {
+   "id": "super8",
+   "name": "Super 8",
+   "aliases": [
+    "super 8",
+    "super8"
+   ],
+   "speed": "lenta",
+   "unit": "Super 8",
+   "unitPlural": "Super 8",
+   "unitDetail": "29 g",
+   "carbsPerUnit": 19.5,
+   "step": 1,
+   "source": "OFF Nestlé Super 8 67,3 g/100 g, 1 unidad = 29 g (7613030612339)",
+   "allergens": [
+    "gluten",
+    "lactosa",
+    "soya"
+   ],
+   "traces": [
+    "huevo",
+    "frutos_secos",
+    "mani"
+   ],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "gluten",
+    "higado",
+    "huevo",
+    "lactosa",
+    "mani",
+    "mariscos",
+    "pescado",
+    "soya"
+   ],
+   "meat": false,
+   "animal": true,
+   "landMeat": false
+  },
+  {
+   "id": "hallulla",
+   "name": "Hallulla",
+   "aliases": [
+    "hallulla"
+   ],
+   "speed": "lenta",
+   "unit": "hallulla",
+   "unitPlural": "hallullas",
+   "unitDetail": "70 g",
+   "carbsPerUnit": 39.8,
+   "step": 0.5,
+   "source": "chilean-foods.json (cl:hallulla)",
+   "allergens": [
+    "gluten"
+   ],
+   "traces": [],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "gluten",
+    "higado",
+    "mani",
+    "mariscos",
+    "pescado"
+   ],
+   "meat": false,
+   "animal": true,
+   "landMeat": false
+  },
+  {
+   "id": "marraqueta",
+   "name": "Marraqueta",
+   "aliases": [
+    "marraqueta",
+    "pan"
+   ],
+   "speed": "lenta",
+   "unit": "marraqueta",
+   "unitPlural": "marraquetas",
+   "unitDetail": "85 g",
+   "carbsPerUnit": 46.2,
+   "step": 0.5,
+   "source": "chilean-foods.json (cl:marraqueta)",
+   "allergens": [
+    "gluten"
+   ],
+   "traces": [],
+   "verifiedFor": [
+    "alcohol",
+    "alto_mercurio",
+    "cerdo",
+    "crudo_ahumado",
+    "frutos_secos",
+    "gelatina",
+    "gluten",
+    "higado",
+    "mani",
+    "mariscos",
+    "pescado"
+   ],
+   "meat": false,
+   "animal": true,
+   "landMeat": false
+  }
+ ]
+}

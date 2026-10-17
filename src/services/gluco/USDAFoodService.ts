@@ -4,6 +4,8 @@
 // Docs: https://fdc.nal.usda.gov/api-guide
 // ============================================================
 
+import type { FoodSafety } from "../DietaryRestrictions.js";
+
 export interface FoodServing {
   id: string;
   description: string;
@@ -24,10 +26,13 @@ export interface FoodItem {
   type: string;
   servings: FoodServing[];
   defaultServing: FoodServing;
+  /** Alérgenos conocidos (catálogo de Eris o producto envasado de OFF). Ausente = no hay datos: NO significa "seguro". */
+  safety?: FoodSafety;
+  ingredients?: string;
 }
 
 export interface FoodSearchResult {
-  items: Array<{ id: string; name: string; brandName?: string; description: string }>;
+  items: Array<{ id: string; name: string; brandName?: string; description: string; safety?: FoodSafety }>;
   totalResults: number;
   page: number;
 }

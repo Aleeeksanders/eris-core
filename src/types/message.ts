@@ -27,6 +27,12 @@ export interface Message {
   toolResults?: ToolResult[];
   thinking?: string;
   isStreaming?: boolean;
+  /**
+   * Rastro de la respuesta, para revisar después qué hizo Eris (2026-10-16): qué herramientas llamó, cuáles fallaron, si
+   * salió al instante y cuánto tardó. Solo nombres y errores, nunca lo que devolvieron (eso tiene datos de la persona).
+   * Antes no quedaba nada y no se podía distinguir un «✅ anotado» real de uno inventado.
+   */
+  trace?: { tools: string[]; errors?: string[]; quick?: boolean; ms?: number };
 }
 
 export interface ConversationContext {

@@ -59,12 +59,15 @@ export class ContextCompressor {
         { role: "user", content: prompt },
       ];
 
+      // Sin razonamiento: con él, los 256 tokens se iban en "pensar" y el resumen volvía VACÍO (medido: 21,5 s y "") —
+      // y ese vacío reemplazaba al resumen anterior. Sin él: ~7 s y un resumen real.
       const response = await this.provider.generate(llmMessages, undefined, {
         temperature: 0.3,
         maxTokens: 256,
+        enableThinking: false,
       });
 
-      return response.content.trim();
+      return response.content.trim() || existingSummary || "";
     } catch (err) {
       console.error("Error comprimiendo contexto:", err);
       return existingSummary || "";

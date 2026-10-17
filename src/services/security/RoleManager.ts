@@ -52,7 +52,13 @@ class RoleManager {
   async getRole(profileId: string): Promise<Role> {
     if (profileId === 'ikaros') return 'ikaros';
     const map = await this.load();
-    return map.assignments[profileId] || 'eris';
+    const assigned = map.assignments[profileId];
+    // Fail-closed: un rol que no existe (p. ej. "hestia", que quedó en roles.json de una versión anterior) NO da privilegios.
+    if (assigned !== 'ikaros' && assigned !== 'eris') {
+      if (assigned) console.warn(`[Seguridad] Rol desconocido "${assigned}" para "${profileId}": se usa 'eris' (mínimo privilegio).`);
+      return 'eris';
+    }
+    return assigned;
   }
 
   /**
@@ -89,6 +95,12 @@ class RoleManager {
     const map = await this.load();
     delete map.assignments[profileId];
     await this.save(map);
+  }
+
+  /** ¿Ese id ya tiene un rol asignado? (para que nadie reclame con Google un id que ya trae privilegios) */
+  async hasAssignment(profileId: string): Promise<boolean> {
+    const map = await this.load();
+    return Object.prototype.hasOwnProperty.call(map.assignments, profileId);
   }
 
   /**

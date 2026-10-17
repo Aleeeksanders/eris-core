@@ -6,18 +6,25 @@
 // ============================================================
 
 import type { FoodItem, FoodServing } from "./USDAFoodService.js";
+import { getByCode, learnFromOff, packagedToFoodItem } from "../PackagedFoods.js";
 
 export class OpenFoodFactsService {
   private readonly BASE = "https://world.openfoodfacts.org/api/v2";
 
   async findByBarcode(barcode: string): Promise<FoodItem | null> {
+    // Base local primero (sin red, con alérgenos ya interpretados)
+    const local = getByCode(barcode);
+    if (local) return packagedToFoodItem(local);
     try {
-      const res = await fetch(`${this.BASE}/product/${barcode}.json?fields=product_name,brands,nutriments,serving_size,serving_quantity`, {
+      const res = await fetch(`${this.BASE}/product/${barcode}.json?fields=code,product_name,product_name_es,brands,nutriments,serving_size,serving_quantity,allergens_tags,traces_tags,ingredients_text,ingredients_text_es,states_tags,labels_tags,nova_group,ingredients_analysis_tags`, {
         headers: { "User-Agent": "Eris-Health-App/1.0 (contact@axs-eris.app)" },
       });
       if (!res.ok) return null;
       const data = await res.json() as any;
       if (data.status === 0 || !data.product) return null;
+      // Aprender el producto (con sus alérgenos) para la próxima vez y para las advertencias del perfil
+      const learned = learnFromOff({ ...data.product, code: data.product.code || barcode });
+      if (learned) return packagedToFoodItem(learned);
       return this.normalize(data.product, barcode);
     } catch {
       return null;

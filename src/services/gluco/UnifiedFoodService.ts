@@ -8,7 +8,10 @@
 
 import { USDAFoodService, type FoodItem, type FoodServing, type FoodSearchResult } from "./USDAFoodService.js";
 import { OpenFoodFactsService } from "./OpenFoodFactsService.js";
-import { createRequire } from "node:module";
+import { searchPackagedHits, packagedIndex, getByCode, packagedToFoodItem, packagedSafety } from "../PackagedFoods.js";
+import { FoodIndex, nameKeys, normText, correctText, type FoodKey, type SearchOpts } from "../FoodText.js";
+import type { FoodSafety } from "../DietaryRestrictions.js";
+import catalogData from "../../data/food_catalog.json";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -49,6 +52,48 @@ function loadLocalDB(): LocalFood[] {
   }
 }
 
+/**
+ * Por qué textos se busca cada alimento: nombre (cada sinónimo de "Palta / Aguacate" por separado), alias y, con poco
+ * peso, la categoría. El orden lo da FoodText: nombre o alias idéntico > todas las palabras > con errores de tipeo.
+ * Antes ganaba el primero del archivo ("galletas" caía en "Galletas de agua" en vez de las galletas dulces).
+ */
+const localKeys = (f: { name: string; aliases?: string[]; category?: string }): FoodKey[] => [
+  ...nameKeys(f.name),
+  ...(f.aliases ?? []).map((a) => ({ text: a })),
+  ...(f.category ? [{ text: f.category, weight: 0.4 }] : []),
+];
+
+// ─── Catálogo de Eris (alimentos con alérgenos verificados y nutrientes por porción) ─────
+
+interface CatalogEntry extends FoodSafety {
+  id: string; name: string; aliases: string[]; role: string;
+  portion: string; grams: number; kcal: number; protein: number; carbs: number; fat: number; fiber: number; sugar: number;
+  sodiumMg?: number;
+}
+const CATALOG = (catalogData as { items: CatalogEntry[] }).items;
+const CATALOG_BY_ID = new Map(CATALOG.map((c) => [c.id, c]));
+const CATALOG_INDEX = new FoodIndex(CATALOG, (c) => localKeys({ name: c.name, aliases: c.aliases }));
+
+const catalogSafety = (c: CatalogEntry): FoodSafety => ({
+  allergens: c.allergens, traces: c.traces, verifiedFor: c.verifiedFor, meat: c.meat, animal: c.animal, lactoseG: c.lactoseG,
+  landMeat: c.landMeat, netCarbs100: c.netCarbs100, netCarbsPortion: c.netCarbsPortion,
+});
+
+function catalogToFoodItem(c: CatalogEntry): FoodItem {
+  const per = (id: string, description: string, grams: number): FoodServing => {
+    const f = grams / c.grams;
+    const r1 = (n: number) => Math.round(n * 10) / 10;
+    return {
+      id, description, metricServingAmount: grams,
+      calories: Math.round(c.kcal * f), protein: r1(c.protein * f), carbs: r1(c.carbs * f), fat: r1(c.fat * f),
+      fiber: r1(c.fiber * f), sugar: r1(c.sugar * f), sodium: c.sodiumMg !== undefined ? Math.round(c.sodiumMg * f) : undefined,
+    };
+  };
+  const servings = [per(`cat_${c.id}_portion`, c.portion, c.grams)];
+  if (c.grams !== 100) servings.push(per(`cat_${c.id}_100g`, "100g", 100));
+  return { id: `cat:${c.id}`, name: c.name, type: "Generic", servings, defaultServing: servings[0], safety: catalogSafety(c) };
+}
+
 // ─── Conversión local → FoodItem ─────────────────────────────
 
 function localToFoodItem(lf: LocalFood): FoodItem {
@@ -66,12 +111,16 @@ function localToFoodItem(lf: LocalFood): FoodItem {
 
   const servings = [toServing(lf.serving), ...(lf.alt ?? []).map(toServing)];
 
+  // Los platos/alimentos chilenos comparten id con el catálogo (sin el prefijo cl:) → heredan sus alérgenos verificados
+  const cat = CATALOG_BY_ID.get(lf.id.replace(/^cl:/, ""));
+
   return {
     id: lf.id,
     name: lf.name,
     type: "Generic",
     servings,
     defaultServing: servings[0],
+    safety: cat ? catalogSafety(cat) : undefined,
   };
 }
 
@@ -81,6 +130,7 @@ export class UnifiedFoodService {
   private usda: USDAFoodService;
   private off:  OpenFoodFactsService;
   private localDB: LocalFood[];
+  private localIx: FoodIndex<LocalFood> | null = null;
 
   constructor(usdaApiKey: string) {
     this.usda    = new USDAFoodService(usdaApiKey);
@@ -88,43 +138,125 @@ export class UnifiedFoodService {
     this.localDB = loadLocalDB();
   }
 
+  /** Índice de la base chilena (se rehace si se le agrega un alimento). */
+  private localIndex(): FoodIndex<LocalFood> {
+    if (!this.localIx) this.localIx = new FoodIndex(this.localDB, localKeys);
+    return this.localIx;
+  }
+
+  /**
+   * El nombre con sus palabras mal escritas corregidas contra TODAS las bases locales (chilena, catálogo, envasados):
+   * "chocapig" → "chocapic", "empanda de pino" → "empanada de pino". null si no había nada que corregir o si la
+   * corrección no es única (dos palabras igual de cerca: no se adivina).
+   */
+  /** Base chilena y catálogo (sin los 4.500 envasados: tanta marca suelta haría "corregir" palabras comunes). */
+  vocabularyIndexes(): Array<FoodIndex<unknown>> {
+    return [this.localIndex(), CATALOG_INDEX] as Array<FoodIndex<unknown>>;
+  }
+
+  correctQuery(query: string): string | null {
+    return correctText(query, [this.localIndex(), CATALOG_INDEX, packagedIndex()] as Array<FoodIndex<unknown>>);
+  }
+
+  /**
+   * Solo la base local (chilena + catálogo), sin internet, con la porción de cada alimento. La usa el reconocimiento
+   * por código de "registra 2 marraquetas" (services/FoodParse.ts), que corre antes del modelo en cada mensaje con un
+   * verbo de registro: no puede esperar a USDA ni a Open Food Facts.
+   */
+  searchLocal(query: string, max = 12): Array<{ name: string; aliases?: string[]; servingDescription: string; servingGrams: number }> {
+    if (!normText(query)) return [];
+    // Sin la categoría: "registra 2 panes" tiene que ser un pan, no cualquier cosa de la categoría "Panes"
+    const opts: SearchOpts = { limit: max };
+    const hits = [
+      ...this.localIndex().search(query, opts).filter((h) => !this.onlyCategory(h.item, query))
+        .map((h) => ({ score: h.score, src: 0, name: h.item.name, aliases: h.item.aliases, servingDescription: h.item.serving.description, servingGrams: h.item.serving.grams })),
+      ...CATALOG_INDEX.search(query, opts)
+        .map((h) => ({ score: h.score, src: 1, name: h.item.name, aliases: h.item.aliases, servingDescription: h.item.portion, servingGrams: h.item.grams })),
+    ].sort((a, b) => b.score - a.score || a.src - b.src);
+    const seen = new Set<string>();
+    const out: Array<{ name: string; aliases?: string[]; servingDescription: string; servingGrams: number }> = [];
+    for (const { score: _s, src: _o, ...h } of hits) {
+      const k = normText(h.name);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(h);
+    }
+    return out.slice(0, max);
+  }
+
+  /** ¿Este alimento calzó SOLO por su categoría (no por su nombre ni alias)? */
+  private onlyCategory(f: LocalFood, query: string): boolean {
+    return !new FoodIndex([f], (x) => localKeys({ name: x.name, aliases: x.aliases })).search(query, { limit: 1 }).length;
+  }
+
   // ─── Búsqueda: Local + USDA, fusionados ──────────────────────
 
   async searchFoods(query: string, page = 0, maxResults = 20): Promise<FoodSearchResult> {
-    const q = query.toLowerCase().trim();
+    // 1. Bases locales (sin latencia), todas con la misma normalización (FoodText): tildes, mayúsculas, símbolos,
+    //    espacios, orden de las palabras, cómo suena ("sucaritas" ~ "zucaritas") y errores de tipeo ("chocapig").
+    //    Se mezclan por qué tan bien calzan; a igual calce, primero la base chilena, después el catálogo y los envasados.
+    // exact: calzaron todas las palabras sin errores de tipeo (ver FoodText)
+    type Ranked = { score: number; src: number; exact: boolean; item: FoodSearchResult["items"][number] };
+    const ranked: Ranked[] = [];
 
-    // 1. Resultados locales (prioridad — sin latencia)
-    const localMatches = this.localDB.filter(food => {
-      const inName    = food.name.toLowerCase().includes(q);
-      const inAliases = food.aliases?.some(a => a.toLowerCase().includes(q));
-      const inCat     = food.category.toLowerCase().includes(q);
-      return inName || inAliases || inCat;
-    });
+    const localHits = this.localIndex().search(query, { limit: 8 });
+    for (const { item: f, score, exact } of localHits) {
+      const cat = CATALOG_BY_ID.get(f.id.replace(/^cl:/, ""));
+      ranked.push({ score, src: 0, exact, item: {
+        id:          f.id,
+        name:        f.name,
+        brandName:   undefined as undefined,
+        description: `${f.serving.description} — ${f.serving.calories} kcal | Prot: ${f.serving.protein}g | Grasa: ${f.serving.fat}g | Carbs: ${f.serving.carbs}g`,
+        safety:      cat ? catalogSafety(cat) : undefined,
+      } });
+    }
 
-    const localItems = localMatches.slice(0, 8).map(f => ({
-      id:          f.id,
-      name:        f.name,
-      brandName:   undefined as undefined,
-      description: `${f.serving.description} — ${f.serving.calories} kcal | Prot: ${f.serving.protein}g | Grasa: ${f.serving.fat}g | Carbs: ${f.serving.carbs}g`,
-    }));
+    // 1b. Catálogo de Eris (alimentos que no están en la DB chilena: pescados, mariscos, legumbres, frutas, etc.)
+    const localIds = new Set(localHits.map(h => h.item.id.replace(/^cl:/, "")));
+    for (const { item: c, score, exact } of CATALOG_INDEX.search(query, { limit: 6 })) {
+      if (localIds.has(c.id)) continue;
+      ranked.push({ score, src: 1, exact, item: {
+        id: `cat:${c.id}`, name: c.name, brandName: undefined as undefined,
+        description: `${c.portion} — ${c.kcal} kcal | Prot: ${c.protein}g | Grasa: ${c.fat}g | Carbs: ${c.carbs}g`,
+        safety: catalogSafety(c),
+      } });
+    }
+
+    // 1c. Productos envasados chilenos (base local con alérgenos; no depende de la búsqueda de texto de OFF)
+    for (const { item: p, score, exact } of searchPackagedHits(query, 6)) {
+      ranked.push({ score, src: 2, exact, item: {
+        id: `off:${p.code}`, name: p.name, brandName: p.brand,
+        description: `Por 100g — ${p.per100.kcal} kcal | Prot: ${p.per100.protein}g | Grasa: ${p.per100.fat}g | Carbs: ${p.per100.carbs}g`,
+        safety: packagedSafety(p),
+      } });
+    }
+    // Lo que calza entero va primero y, entre eso, la base chilena y el catálogo antes que los envasados: "arroz" es el
+    // arroz cocido de la base (porción de plato), no el paquete de arroz CRUDO de OFF que se llama "arroz" a secas
+    // (2026-10-10: 230 g de arroz quedaban en 777 kcal en vez de ~300). Un envasado gana si se nombra su marca o si lo
+    // de la base solo calza con errores de tipeo.
+    const knownLocal: FoodSearchResult["items"] = ranked
+      .sort((a, b) => Number(b.exact) - Number(a.exact) || a.src - b.src || b.score - a.score)
+      .map((r) => r.item);
 
     // 2. Resultados USDA y OFF en paralelo
-    const externalNeeded = Math.max(0, maxResults - localItems.length);
+    const externalNeeded = Math.max(0, maxResults - knownLocal.length);
     let externalItems: FoodSearchResult["items"] = [];
-    let total = localItems.length;
+    let total = knownLocal.length;
 
     if (externalNeeded > 0) {
       try {
+        // A las APIs va el texto estándar, con las palabras mal escritas ya corregidas contra las bases locales
+        const apiQuery = this.correctQuery(query) ?? normText(query);
         const [usdaRes, offRes] = await Promise.all([
-          this.usda.searchFoods(query, page, externalNeeded),
-          this.off.searchFoods(query, "cl", externalNeeded)
+          this.usda.searchFoods(apiQuery, page, externalNeeded),
+          this.off.searchFoods(apiQuery, "cl", externalNeeded)
         ]);
         
         const combined = [...offRes, ...usdaRes.items];
         
         // Deduplicar contra locales por nombre similar
         externalItems = combined.filter(u =>
-          !localItems.some(l => this.similar(l.name, u.name))
+          !knownLocal.some(l => l.id === u.id || this.similar(l.name, u.name))
         ).slice(0, externalNeeded);
         
         total += usdaRes.totalResults + offRes.length;
@@ -134,7 +266,7 @@ export class UnifiedFoodService {
     }
 
     return {
-      items: [...localItems, ...externalItems],
+      items: [...knownLocal, ...externalItems],
       totalResults: total,
       page,
     };
@@ -149,6 +281,12 @@ export class UnifiedFoodService {
       return localToFoodItem(local);
     }
 
+    if (id.startsWith("cat:")) {
+      const c = CATALOG_BY_ID.get(id.slice(4));
+      if (!c) throw new Error(`Alimento del catálogo no encontrado: ${id}`);
+      return catalogToFoodItem(c);
+    }
+
     if (id.startsWith("usda:")) {
       const fdcId = id.replace("usda:", "");
       return this.usda.getFoodById(fdcId);
@@ -156,6 +294,8 @@ export class UnifiedFoodService {
 
     if (id.startsWith("off:")) {
       const barcode = id.replace("off:", "");
+      const known = getByCode(barcode);
+      if (known) return packagedToFoodItem(known);
       const item = await this.off.findByBarcode(barcode);
       if (!item) throw new Error(`Producto OFF no encontrado: ${barcode}`);
       return item;
@@ -204,6 +344,7 @@ export class UnifiedFoodService {
     };
 
     this.localDB.push(newLocal);
+    this.localIx = null;
     
     try {
       const __filename = fileURLToPath(import.meta.url);
@@ -219,8 +360,7 @@ export class UnifiedFoodService {
   // ─── Utilidad: similitud de nombre simple ─────────────────────
 
   private similar(a: string, b: string): boolean {
-    const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
-    const na = norm(a), nb = norm(b);
+    const na = normText(a), nb = normText(b);
     if (na === nb) return true;
     // Si uno contiene al otro y son cortos → misma cosa
     if (na.length < 20 && nb.length < 20) return na.includes(nb) || nb.includes(na);

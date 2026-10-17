@@ -11,6 +11,14 @@ import type {
   StreamCallback,
 } from "./LLMProvider.js";
 import type { ToolDefinition } from "../../types/message.js";
+import { plannerFor, parseKeepAlive } from "./ContextPlanner.js";
+
+/**
+ * Cuánto tiempo Ollama mantiene el modelo cargado tras el último uso (ERIS_KEEP_ALIVE, por defecto 30m). Con 5m el modelo se
+ * descargaba a los 5 minutos y el primer mensaje siguiente pagaba la recarga (~5 s + leer de nuevo el prompt, ~10-30 s en total).
+ * Mantenerlo cargado ocupa ~3,5 GB de VRAM: si necesitas la GPU para otra cosa (juegos), usa ERIS_KEEP_ALIVE=5m.
+ */
+export const KEEP_ALIVE = process.env.ERIS_KEEP_ALIVE || "30m";
 
 class ThinkingLoopError extends Error {
   constructor() { super("thinking_loop_detected"); }
@@ -19,7 +27,7 @@ class ThinkingLoopError extends Error {
 // Patrones que indican bucle de razonamiento (aparecen repetidos)
 const LOOP_PATTERNS = [/\*\*Decisión\*\*/g, /\*\*Refinamiento\*\*/g, /\*\*Plan de respuesta\*\*/g, /\*\*Análisis\*\*/g];
 const LOOP_THRESHOLD = 4; // si algún patrón aparece ≥4 veces, es bucle
-const LOOP_MAX_CHARS  = 4000; // cortar si el thinking supera 4000 chars sin cerrar
+const LOOP_MAX_CHARS  = 32000; // cortar si el thinking supera 4000 chars sin cerrar
 
 export class OllamaProvider implements LLMProvider {
   readonly name = "ollama";
@@ -29,6 +37,50 @@ export class OllamaProvider implements LLMProvider {
   constructor(baseUrl = "http://localhost:11434", model = "qwen3.5:4b") {
     this.baseUrl = baseUrl;
     this.model = model;
+  }
+
+  /**
+   * Carga el modelo en memoria SIN generar nada (petición sin mensajes), para que el primer mensaje real no pague la carga.
+   * Se pide el mismo contexto base que se usará después, así no hace falta recargar. Falla en silencio.
+   */
+  async warmup(model?: string, contextLength = 8192): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: model || this.model, messages: [], keep_alive: KEEP_ALIVE, options: { num_ctx: contextLength } }),
+        signal: AbortSignal.timeout(120000),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Qué fracción del modelo cargado está en la tarjeta de video (1 = entero en GPU, 0 = entero en el procesador), según
+   * `/api/ps` de Ollama. null si no se pudo saber. Ver ContextPlanner.markOffloaded.
+   */
+  /** Descarga el modelo de la memoria (la próxima llamada lo vuelve a cargar, con la tarjeta de video libre). */
+  async unload(model?: string): Promise<void> {
+    try {
+      await fetch(`${this.baseUrl}/api/generate`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: model || this.model, keep_alive: 0 }), signal: AbortSignal.timeout(5000) });
+    } catch { /* si no responde, queda como estaba */ }
+  }
+
+  async gpuFraction(model?: string): Promise<number | null> {
+    try {
+      const res = await fetch(`${this.baseUrl}/api/ps`, { signal: AbortSignal.timeout(2000) });
+      if (!res.ok) return null;
+      const data = await res.json() as { models?: Array<{ name?: string; model?: string; size?: number; size_vram?: number }> };
+      const want = model || this.model;
+      const m = data.models?.find((x) => x.name === want || x.model === want);
+      if (!m || !m.size) return null;
+      return (m.size_vram ?? 0) / m.size;
+    } catch {
+      return null;
+    }
   }
 
   async isAvailable(): Promise<boolean> {
@@ -53,35 +105,66 @@ export class OllamaProvider implements LLMProvider {
       enableThinking?: boolean;
       onToken?: StreamCallback;
       onThinking?: StreamCallback;
+      signal?: AbortSignal;
     }
   ): Promise<LLMResponse> {
-    const processedMessages = this.injectToolInstructions(messages, tools, options?.enableThinking);
     const isStreaming = !!options?.onToken;
     const activeModel = options?.modelOverride || this.model;
 
     const body = {
       model: activeModel,
-      messages: processedMessages.map((m) => ({
-        role: m.role === "tool" ? "user" : m.role,
+      // Antes esto convertía role:"tool" a "user" y descartaba tool_calls/
+      // tool_call_id por completo — Ollama (vía la plantilla de Qwen) espera
+      // el rol "tool" real y el tool_calls del turno assistant que lo
+      // originó para poder re-renderizar correctamente una conversación
+      // multi-turno con tools. Con el shape roto, confirmado con curl
+      // directo, Ollama a veces fallaba al re-renderizar el historial en un
+      // turno POSTERIOR (error interno de parseo de su propia plantilla,
+      // no algo que nosotros generáramos) — el bug era acumulativo, no
+      // aparecía en el turno donde se llamaba la tool sino en el siguiente
+      // mensaje de la misma conversación.
+      messages: messages.map((m) => ({
+        role: m.role,
         content: m.content,
+        ...(m.role === "tool" && m.toolCallId ? { tool_call_id: m.toolCallId } : {}),
+        ...(m.role === "assistant" && m.toolCalls && m.toolCalls.length > 0
+          ? { tool_calls: m.toolCalls.map((tc) => ({ id: tc.id, function: { name: tc.name, arguments: tc.arguments } })) }
+          : {}),
       })),
+      // Tool calling NATIVO de Ollama (/api/chat acepta "tools" y devuelve
+      // message.tool_calls estructurado) — antes esto se simulaba pidiéndole
+      // al modelo por texto que escribiera un bloque ```tool {json}``` y
+      // parseándolo con regex (ver parseToolCalls, que queda solo como
+      // fallback). Era frágil: el modelo respondía en texto normal la mayoría
+      // de las veces en vez de emitir el bloque, así que las tools casi nunca
+      // se ejecutaban de verdad. Confirmado con Ollama real (curl directo a
+      // /api/chat con "tools") que el modelo SÍ soporta tool calling nativo
+      // de forma confiable — este es el camino correcto, no un truco de prompt.
+      tools: tools && tools.length > 0 ? this.formatToolsForOllama(tools) : undefined,
       stream: isStreaming,
       // Parámetro nativo Ollama/Qwen3: false = sin <think>, directo al grano
       think: options?.enableThinking ?? true,
       options: {
         temperature: options?.temperature ?? 0.7,
         num_predict: options?.maxTokens ?? 2048,
-        num_ctx: options?.contextLength ?? 4096,
+        // Sin contexto pedido (resumen del historial, voz, tarjeta del día, reportes…): el MISMO que tiene cargado el chat.
+        // Antes iba 4096 y cambiar num_ctx obliga a Ollama a recargar el modelo: medido 24,8 s para bajar a 4096 y 5,4 s
+        // para volver a 8192 en el mensaje siguiente, que además esperaba en cola detrás de esa recarga.
+        num_ctx: options?.contextLength ?? plannerFor(activeModel, parseKeepAlive(KEEP_ALIVE)).forSideCall(),
       },
-      keep_alive: "5m",
+      keep_alive: KEEP_ALIVE,
     };
 
     try {
+      // Combinar el timeout de siempre con el AbortSignal opcional que pasa el
+      // caller (server.ts, cuando el usuario toca "detener") — así un abort
+      // externo corta este fetch exactamente igual que el timeout ya lo hacía.
+      const timeoutSignal = AbortSignal.timeout(300000);
       const res = await fetch(`${this.baseUrl}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(300000),
+        signal: options?.signal ? AbortSignal.any([timeoutSignal, options.signal]) : timeoutSignal,
       });
 
       if (!res.ok) {
@@ -90,7 +173,7 @@ export class OllamaProvider implements LLMProvider {
       }
 
       if (isStreaming) {
-        return await this.handleStream(res, options!.onToken!, options?.onThinking);
+        return await this.handleStream(res, options!.onToken!, options?.onThinking, options?.signal);
       } else {
         return await this.handleNonStream(res);
       }
@@ -108,8 +191,13 @@ export class OllamaProvider implements LLMProvider {
           onThinking: undefined,
         });
       }
+      // Cancelación explícita del usuario (botón "detener") — no es un error real,
+      // devolvemos una respuesta vacía marcada como "stopped" en vez de throw.
+      if (err instanceof DOMException && err.name === "AbortError" && options?.signal?.aborted) {
+        return { content: "", stopped: true };
+      }
       if (err instanceof DOMException && err.name === "TimeoutError") {
-        throw new Error("Timeout: el modelo tardó demasiado (>2min)");
+        throw new Error("Timeout: el modelo tardó demasiado (>5 min)");
       }
       throw new Error(
         `Error con Ollama: ${err instanceof Error ? err.message : String(err)}`
@@ -125,7 +213,8 @@ export class OllamaProvider implements LLMProvider {
   private async handleStream(
     res: Response,
     onToken: StreamCallback,
-    onThinking?: StreamCallback
+    onThinking?: StreamCallback,
+    signal?: AbortSignal
   ): Promise<LLMResponse> {
     const reader = res.body?.getReader();
     if (!reader) throw new Error("No se pudo obtener el stream");
@@ -135,13 +224,36 @@ export class OllamaProvider implements LLMProvider {
     let nativeThinking = "";
     let promptTokens = 0;
     let completionTokens = 0;
+    const nativeToolCalls: LLMToolCall[] = [];
+    let wasStopped = false;
 
     // Tracking de lo que ya se emitió
     let lastThinkEmitted = 0;
     let lastResponseEmitted = 0;
 
     while (true) {
-      const { done, value } = await reader.read();
+      // Cancelación explícita a mitad de stream (botón "detener"): cortamos el
+      // loop en vez de relanzar, así el código de limpieza de abajo (que arma
+      // cleanContent/finalContent) igual corre y devuelve una respuesta parcial
+      // coherente en vez de perder todo lo ya generado.
+      if (signal?.aborted) {
+        wasStopped = true;
+        await reader.cancel().catch(() => {});
+        break;
+      }
+
+      let done: boolean;
+      let value: Uint8Array | undefined;
+      try {
+        ({ done, value } = await reader.read());
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          wasStopped = true;
+          await reader.cancel().catch(() => {});
+          break;
+        }
+        throw err;
+      }
       if (done) break;
 
       const chunk = decoder.decode(value, { stream: true });
@@ -154,6 +266,18 @@ export class OllamaProvider implements LLMProvider {
           if (data.message?.thinking) {
             nativeThinking += data.message.thinking;
             if (onThinking) onThinking(data.message.thinking);
+          }
+
+          // Tool calling nativo — llega en su propio chunk, separado del texto,
+          // con "arguments" ya como objeto (no hace falta JSON.parse).
+          if (data.message?.tool_calls?.length) {
+            for (const tc of data.message.tool_calls) {
+              nativeToolCalls.push({
+                id: tc.id || `call_${Date.now()}_${nativeToolCalls.length}`,
+                name: tc.function?.name,
+                arguments: tc.function?.arguments || {},
+              });
+            }
           }
 
           if (data.message?.content) {
@@ -251,9 +375,18 @@ export class OllamaProvider implements LLMProvider {
     // Esto ocurre con modelos que no cierran bien el tag o ponen todo dentro.
     const finalDisplayContent = cleanContent || rawThinking || "";
 
-    const toolCalls = this.parseToolCalls(finalDisplayContent);
+    // Preferir tool calls nativos (confiables); el parseo por regex del texto
+    // queda solo como red de seguridad si por algún motivo no llegó ninguno
+    // nativo pero el modelo igual escribió un bloque ```tool``` a mano.
+    // Si se canceló a mitad de stream, un tool call puede haber llegado
+    // incompleto — no lo ejecutamos, solo devolvemos el texto parcial.
+    const toolCalls = wasStopped
+      ? []
+      : nativeToolCalls.length > 0
+        ? nativeToolCalls
+        : this.parseToolCalls(finalDisplayContent);
     const finalContent =
-      toolCalls.length > 0
+      toolCalls.length > 0 && nativeToolCalls.length === 0
         ? this.removeToolCallsFromContent(finalDisplayContent)
         : finalDisplayContent;
 
@@ -261,6 +394,7 @@ export class OllamaProvider implements LLMProvider {
       content: finalContent,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       thinking: rawThinking,
+      stopped: wasStopped,
       tokensUsed: {
         prompt: promptTokens,
         completion: completionTokens,
@@ -304,15 +438,24 @@ export class OllamaProvider implements LLMProvider {
     const data = (await res.json()) as any;
     const content = data.message?.content || "";
 
-    const toolCalls = this.parseToolCalls(content);
+    const nativeToolCalls: LLMToolCall[] = (data.message?.tool_calls || []).map((tc: any, i: number) => ({
+      id: tc.id || `call_${Date.now()}_${i}`,
+      name: tc.function?.name,
+      arguments: tc.function?.arguments || {},
+    }));
+
+    // Preferir tool calls nativos (confiables); el parseo por regex queda solo
+    // como red de seguridad si no llegó ninguno nativo.
+    const toolCalls = nativeToolCalls.length > 0 ? nativeToolCalls : this.parseToolCalls(content);
     const cleanContent =
-      toolCalls.length > 0
+      toolCalls.length > 0 && nativeToolCalls.length === 0
         ? this.removeToolCallsFromContent(content)
         : content;
 
     return {
       content: cleanContent,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      thinking: data.message?.thinking,
       tokensUsed: {
         prompt: data.prompt_eval_count || 0,
         completion: data.eval_count || 0,
@@ -323,64 +466,19 @@ export class OllamaProvider implements LLMProvider {
   }
 
   /**
-   * Inyecta instrucciones de tool calling en el system prompt.
+   * Convierte nuestras ToolDefinition (name/description/inputSchema) al formato
+   * que espera /api/chat de Ollama para tool calling nativo. inputSchema ya
+   * viene en forma de JSON Schema (Tool.ts la genera así), encaja directo.
    */
-  private injectToolInstructions(
-    messages: LLMMessage[],
-    tools?: ToolDefinition[],
-    enableThinking?: boolean
-  ): LLMMessage[] {
-    let systemAppend = "";
-
-    if (tools && tools.length > 0) {
-
-    const toolDescriptions = tools
-      .map((t) => {
-        const params = t.inputSchema as any;
-        const props = params?.properties || {};
-        const paramList = Object.entries(props)
-          .map(
-            ([key, val]: [string, any]) =>
-              `    - "${key}": ${val?.description || val?.type || "string"}`
-          )
-          .join("\n");
-        return `- **${t.name}**: ${t.description}\n  Parámetros:\n${paramList}`;
-      })
-      .join("\n\n");
-
-    systemAppend += `
-
-## Herramientas disponibles
-Para usar una herramienta, escribe un bloque JSON así:
-
-\`\`\`tool
-{"name": "nombre_herramienta", "arguments": {"param1": "valor1"}}
-\`\`\`
-
-HERRAMIENTAS:
-${toolDescriptions}
-
-REGLAS DE USO:
-1. SIEMPRE usa un bloque \`\`\`tool ... \`\`\` cuando necesites ejecutar una herramienta
-2. Puedes escribir texto antes o después del bloque tool
-3. Usa UNA herramienta por bloque
-4. Los argumentos deben ser JSON válido
-5. Si necesitas información del sistema, USA las herramientas, no inventes datos`;
-
-    }
-
-    if (systemAppend) {
-      const result = [...messages];
-      if (result.length > 0 && result[0].role === "system") {
-        result[0] = {
-          ...result[0],
-          content: result[0].content + systemAppend,
-        };
-      }
-      return result;
-    }
-
-    return messages;
+  private formatToolsForOllama(tools: ToolDefinition[]): any[] {
+    return tools.map((t) => ({
+      type: "function",
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.inputSchema,
+      },
+    }));
   }
 
   /**

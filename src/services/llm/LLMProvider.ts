@@ -9,6 +9,12 @@ export interface LLMMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   toolCallId?: string;
+  /** Solo en turnos "assistant" que llamaron una tool — necesario para que
+   * Ollama pueda re-renderizar correctamente el historial multi-turno la
+   * próxima vez que arme el prompt (ver OllamaProvider.ts). Sin esto, el
+   * turno queda representado solo por su texto y Ollama pierde el vínculo
+   * entre la tool call y su resultado en turnos futuros. */
+  toolCalls?: LLMToolCall[];
 }
 
 export interface LLMToolCall {
@@ -26,6 +32,8 @@ export interface LLMResponse {
     completion: number;
     total: number;
   };
+  /** true si la generación fue cancelada a mitad de camino (ver AbortSignal en options) */
+  stopped?: boolean;
 }
 
 /**
@@ -52,6 +60,7 @@ export interface LLMProvider {
       enableThinking?: boolean;
       onToken?: StreamCallback;
       onThinking?: StreamCallback;
+      signal?: AbortSignal;
     }
   ): Promise<LLMResponse>;
 

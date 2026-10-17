@@ -160,15 +160,11 @@ export async function loadSystemPrompt(
     let prompt = await readFile(path, "utf-8");
     const context = await getSystemContext(role);
 
-    // Cargar archivos de memoria dinámica y configuración global SÓLO para Hestia
-    let erisConfig = "";
+    // Memoria Layer 1 (MEMORY.md de la bóveda) SÓLO para Ikaros.
+    // ERIS.md ya NO se inyecta: era documentación de desarrollo desactualizada (citaba modelos inexistentes) y costaba ~1 500 tokens por mensaje.
     let memoryLayer1 = "";
 
     if (role === 'ikaros') {
-      try {
-        erisConfig = await readFile("c:/Proyectos/eris/ERIS.md", "utf-8");
-      } catch { }
-
       try {
         memoryLayer1 = await readFile("c:/Proyectos/AXS/MEMORY.md", "utf-8");
       } catch { }
@@ -184,7 +180,7 @@ export async function loadSystemPrompt(
     // Si la etiqueta antigua sigue ahí, la limpiamos
     prompt = prompt.replace('{{USER_PROFILE_CONTEXT}}', '');
 
-    return `${prompt}\n\n${erisConfig}\n\n${dynamicBoundary}${memoryLayer1}\n\n${profileBlock}\n\n${context}`;
+    return `${prompt}\n\n${dynamicBoundary}${memoryLayer1}\n\n${profileBlock}\n\n${context}`;
   } catch (e) {
     console.error("Error loading prompt:", e);
     const context = await getSystemContext();

@@ -8,7 +8,11 @@ import { z } from "zod";
 import { Tool, type ToolExecutionResult } from "../Tool.js";
 import { GlucoService } from "../services/gluco/GlucoService.js";
 import { UnifiedFoodService } from "../services/gluco/UnifiedFoodService.js";
-import { GlucoPredictorService } from "../services/gluco/GlucoPredictorService.js";
+import { GlucoPredictorService, type FoodEntry } from "../services/gluco/GlucoPredictorService.js";
+import { resolveFood, scaleServing } from "../services/FoodResolve.js";
+import { getFeatures } from "../services/Features.js";
+import { loadAffinity, suggestCarbOptions, formatCarbOptions, blockedFavorites } from "../services/CarbOptions.js";
+import { deriveRestrictions } from "../services/DietaryRestrictions.js";
 
 // ─── Schema de entrada ────────────────────────────────────────────
 
@@ -76,12 +80,20 @@ export class GlucoTool extends Tool<GlucoInput> {
         return { output: "", error: "Contexto de perfil no disponible para inicializar servicios de salud." };
       }
 
+      // Lecturas del sensor solo con el módulo de glucosa aprobado por el administrador. Las estimaciones de una
+      // comida (estimate_food/meal, search_food) no tocan el sensor y siguen disponibles.
+      const readsSensor = ["current", "history", "stats"].includes(input.action);
+      if (readsSensor && !(await getFeatures()).glucose) {
+        return { output: "El módulo de glucosa está desactivado por ahora: no leo el sensor ni tengo tus lecturas. Cuando se active, te avisaré tus niveles y tendencias." };
+      }
+
       // Preferir el servicio cacheado (ya autenticado y con datos recientes)
       // que el servidor mantiene activo via polling.
       let glucoService: GlucoService | null = context?.glucoService || null;
       const foodService: UnifiedFoodService | null = context?.foodService ?? null;
 
-      if (!glucoService) {
+      // Solo se conecta a LibreLinkUp cuando se pide una lectura: antes estimar una comida también iniciaba sesión en el sensor
+      if (!glucoService && readsSensor) {
         const profile = await memory.getProfile();
 
         if (profile?.integrations?.libreView?.email && profile?.integrations?.libreView?.password) {
@@ -90,8 +102,8 @@ export class GlucoTool extends Tool<GlucoInput> {
             email,
             password,
             region: (region as any) || "us",
-            lowThreshold: 70,
-            highThreshold: 180,
+            lowThreshold: profile?.medical?.thresholds?.glucoseLow ?? 70,
+            highThreshold: profile?.medical?.thresholds?.glucoseHigh ?? 180,
           });
           try {
             await glucoService.fetchLatest();
@@ -103,7 +115,7 @@ export class GlucoTool extends Tool<GlucoInput> {
 
       switch (input.action) {
         case "current":
-          return this.handleCurrent(glucoService);
+          return this.handleCurrent(glucoService, await this.lowGlucoseSuggestions(glucoService, memory));
         case "history":
           return this.handleHistory(glucoService, input.hours ?? 24);
         case "stats":
@@ -111,9 +123,9 @@ export class GlucoTool extends Tool<GlucoInput> {
         case "search_food":
           return await this.handleSearchFood(foodService, input.query ?? "");
         case "estimate_food":
-          return this.handleEstimateFood(input.query ?? "", input.grams ?? 100);
+          return this.handleEstimateFood(foodService, input.query ?? "", input.grams ?? 100);
         case "estimate_meal":
-          return this.handleEstimateMeal(input.mealJson ?? "[]");
+          return this.handleEstimateMeal(foodService, input.mealJson ?? "[]");
         default:
           return { output: "", error: "Acción no reconocida" };
       }
@@ -127,7 +139,23 @@ export class GlucoTool extends Tool<GlucoInput> {
 
   // ─── Handlers ─────────────────────────────────────────────────────
 
-  private handleCurrent(glucoService: GlucoService | null): ToolExecutionResult {
+  /** Si el sensor marca bajo, arma opciones CONCRETAS (con lo que el usuario ya come) en vez de un consejo genérico. */
+  private async lowGlucoseSuggestions(glucoService: GlucoService | null, memory: any): Promise<string> {
+    const reading = glucoService?.getCurrent();
+    if (!reading?.isLow) return "";
+    try {
+      const affinity = await loadAffinity(memory);
+      const profile = await memory?.getProfile?.();
+      const restrictions = deriveRestrictions(profile?.medical);
+      return formatCarbOptions(15, "hipoglucemia",
+        suggestCarbOptions({ grams: 15, purpose: "hipoglucemia", affinity, restrictions }),
+        { restrictions, blocked: blockedFavorites(affinity, restrictions) });
+    } catch {
+      return "";
+    }
+  }
+
+  private handleCurrent(glucoService: GlucoService | null, lowSuggestions = ""): ToolExecutionResult {
     if (!glucoService) {
       return {
         output:
@@ -169,9 +197,10 @@ export class GlucoTool extends Tool<GlucoInput> {
     }
 
     if (reading.isLow) {
-      output +=
-        "\n⚠️ **Tu glucosa está baja.** Considera consumir algo con azúcar rápido " +
-        "(jugo, glucosa en tabletas). Consulta a tu médico si persiste.";
+      output += lowSuggestions
+        ? `\n⚠️ **Tu glucosa está baja.**\n\n${lowSuggestions}\n\nPresenta estas opciones tal cual (alimentos y gramos reales), sin reducirlas a "azúcar rápida".`
+        : "\n⚠️ **Tu glucosa está baja.** Considera consumir algo con azúcar rápido " +
+          "(jugo, glucosa en tabletas). Consulta a tu médico si persiste.";
     } else if (reading.isHigh) {
       output +=
         "\n⚠️ **Tu glucosa está elevada.** Evita alimentos con alto índice glucémico. " +
@@ -261,10 +290,31 @@ export class GlucoTool extends Tool<GlucoInput> {
     };
   }
 
-  private handleEstimateFood(foodName: string, grams: number): ToolExecutionResult {
-    if (!foodName) return { output: "", error: "Especifica un alimento" };
+  /**
+   * Un alimento con sus macros REALES (base local Chile → USDA → OFF) para esos gramos. Antes la estimación asumía que
+   * CUALQUIER alimento tenía 50 g (un alimento) o 20 g (en una comida) de carbohidratos por cada 100 g: 200 g de pollo
+   * salían con 40-100 g de carbohidratos y riesgo "alto". Si no está en la base, se usa ese valor genérico y se avisa.
+   */
+  private async entryFor(foodService: UnifiedFoodService | null, name: string, grams: number): Promise<{ entry: FoodEntry; generic: boolean }> {
+    const food = foodService ? await resolveFood(foodService, name).catch(() => null) : null;
+    if (food) {
+      const serving = scaleServing(food.defaultServing, grams);
+      return { entry: { food: { ...food, defaultServing: serving } as any, serving, portionMultiplier: 1 }, generic: false };
+    }
+    const f = grams / 100;
+    const serving = {
+      id: "manual", description: `${grams}g`, metricServingAmount: grams,
+      calories: Math.round((20 * 4 + 5 * 4 + 3 * 9) * f), carbs: Math.round(20 * f), fiber: Math.round(2 * f),
+      protein: Math.round(5 * f), fat: Math.round(3 * f),
+    };
+    return {
+      entry: { food: { id: `manual_${name.replace(/\s/g, "_")}`, name, type: "Generic" as const, servings: [], defaultServing: serving } as any, serving, portionMultiplier: 1 },
+      generic: true,
+    };
+  }
 
-    const estimate = this.predictor.quickEstimate(foodName, grams);
+  private async handleEstimateFood(foodService: UnifiedFoodService | null, foodName: string, grams: number): Promise<ToolExecutionResult> {
+    if (!foodName) return { output: "", error: "Especifica un alimento" };
     const riskLabel: Record<string, string> = {
       low: "🟢 Bajo",
       medium: "🟡 Moderado",
@@ -272,6 +322,24 @@ export class GlucoTool extends Tool<GlucoInput> {
       very_high: "🔴🔴 Muy Alto",
     };
 
+    const { entry, generic } = await this.entryFor(foodService, foodName, grams);
+    if (!generic) {
+      const est = this.predictor.estimateMeal([entry]);
+      const imp = est.impacts[0];
+      const giNote = imp.giSource === "estimated" ? "\n*⚠️ Índice glucémico estimado (este alimento no está en la tabla de IG).*"
+        : imp.giSource === "category_average" ? "\n*ℹ️ Índice glucémico promedio de su categoría.*" : "";
+      return {
+        output:
+          `## 🩺 Estimación Glucémica: ${entry.food.name} (${grams}g)\n\n` +
+          `**Carbohidratos:** ${entry.serving.carbs} g (fibra ${entry.serving.fiber} g)\n` +
+          `**Índice Glucémico (GI):** ${imp.gi}\n` +
+          `**Carga Glucémica (GL):** ${imp.gl} (ajustada por proteína y grasa: ${imp.adjustedGL})\n` +
+          `**Impacto esperado:** ${riskLabel[est.mealRiskLevel]} · pico estimado +${est.estimatedGlucosePeak} mg/dL en ~${est.estimatedTimeToPeakMin} min` +
+          giNote,
+      };
+    }
+
+    const estimate = this.predictor.quickEstimate(foodName, grams);
     const sourceNote =
       estimate.source === "estimated"
         ? "\n*⚠️ GI estimado (alimento no encontrado en base de datos local).*"
@@ -286,11 +354,11 @@ export class GlucoTool extends Tool<GlucoInput> {
         `**Carga Glucémica (GL):** ${estimate.gl}\n` +
         `**Impacto esperado:** ${riskLabel[estimate.risk]}\n` +
         sourceNote +
-        `\n\n*Nota: Para mayor precisión, usa estimate_meal con los datos nutricionales completos de search_food.*`,
+        `\n\n*⚠️ No encontré "${foodName}" en la base de alimentos: asumí la mitad del peso en carbohidratos. Puede estar muy lejos; dime qué es exactamente o búscalo con search_food.*`,
     };
   }
 
-  private handleEstimateMeal(mealJson: string): ToolExecutionResult {
+  private async handleEstimateMeal(foodService: UnifiedFoodService | null, mealJson: string): Promise<ToolExecutionResult> {
     let mealItems: Array<{ name: string; grams: number }>;
 
     try {
@@ -307,53 +375,13 @@ export class GlucoTool extends Tool<GlucoInput> {
       return { output: "No se especificaron alimentos para la comida." };
     }
 
-    // Construir FoodEntry simulados con estimación de macros por 100g
-    const entries = mealItems.map(({ name, grams }) => {
-      const { gi } = this.predictor["lookupGI"](name);
-
-      // Macros estimados base por 100g (promedio genérico)
-      const baseCarbs = 20;
-      const baseFiber = 2;
-      const baseProtein = 5;
-      const baseFat = 3;
-      const baseCalories = baseCarbs * 4 + baseProtein * 4 + baseFat * 9;
-
-      const factor = grams / 100;
-
-      return {
-        food: {
-          id: `manual_${name.replace(/\s/g, "_")}`,
-          name,
-          type: "Generic" as const,
-          servings: [],
-          defaultServing: {
-            id: "manual",
-            description: `${grams}g`,
-            calories: Math.round(baseCalories * factor),
-            carbs: Math.round(baseCarbs * factor),
-            fiber: Math.round(baseFiber * factor),
-            protein: Math.round(baseProtein * factor),
-            fat: Math.round(baseFat * factor),
-          },
-        },
-        serving: {
-          id: "manual",
-          description: `${grams}g`,
-          calories: Math.round(baseCalories * factor),
-          carbs: Math.round(baseCarbs * factor),
-          fiber: Math.round(baseFiber * factor),
-          protein: Math.round(baseProtein * factor),
-          fat: Math.round(baseFat * factor),
-        },
-        portionMultiplier: 1,
-      };
-    });
-
-    const estimation = this.predictor.estimateMeal(entries);
+    const resolved = await Promise.all(mealItems.slice(0, 12).map(({ name, grams }) => this.entryFor(foodService, String(name), Number(grams) || 100)));
+    const estimation = this.predictor.estimateMeal(resolved.map((r) => r.entry));
+    const genericNames = new Set(resolved.filter((r) => r.generic).map((r) => r.entry.food.name));
 
     const impactLines = estimation.impacts.map(
       (imp) =>
-        `  • **${imp.foodName}** — GI: ${imp.gi} · GL: ${imp.gl} · Ajustado: ${imp.adjustedGL}`
+        `  • **${imp.foodName}** — GI: ${imp.gi} · GL: ${imp.gl} · Ajustado: ${imp.adjustedGL}${genericNames.has(imp.foodName) ? " ≈ genérico (no está en la base)" : ""}`
     );
 
     return {
@@ -366,8 +394,8 @@ export class GlucoTool extends Tool<GlucoInput> {
         `Carbs: ${estimation.macros.carbs}g | ` +
         `Proteína: ${estimation.macros.protein}g | ` +
         `Grasa: ${estimation.macros.fat}g | ` +
-        `Fibra: ${estimation.macros.fiber}g\n\n` +
-        `*⚠️ Estimación basada en macros genéricos. Para mayor precisión, usa search_food primero.*`,
+        `Fibra: ${estimation.macros.fiber}g` +
+        (genericNames.size ? `\n\n*⚠️ ${[...genericNames].join(", ")}: no lo encontré en la base, usé valores genéricos (pueden estar lejos).*` : ""),
     };
   }
 

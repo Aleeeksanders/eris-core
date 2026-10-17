@@ -12,6 +12,18 @@ import { FileWriteTool } from "./tools/FileWriteTool.js";
 import { OpenTool } from "./tools/OpenTool.js";
 import { KnowledgeTool } from "./tools/KnowledgeTool.js";
 import { NutritionTool } from "./tools/NutritionTool.js";
+import { TrainingPlanTool } from "./tools/TrainingPlanTool.js";
+import { PersonalBaselineTool } from "./tools/PersonalBaselineTool.js";
+import { UserContextTool } from "./tools/UserContextTool.js";
+import { JournalTool } from "./tools/JournalTool.js";
+import { InsightFeedbackTool } from "./tools/InsightFeedbackTool.js";
+import { LiveContextTool } from "./tools/LiveContextTool.js";
+import { CarbOptionsTool } from "./tools/CarbOptionsTool.js";
+import { MetabolicAdvisorTool } from "./tools/MetabolicAdvisorTool.js";
+import { SymptomGuideTool } from "./tools/SymptomGuideTool.js";
+import { SleepLogTool } from "./tools/SleepLogTool.js";
+import { LabResultsTool } from "./tools/LabResultsTool.js";
+import { FinanceTrackerTool } from "./tools/FinanceTrackerTool.js";
 
 /**
  * Registro centralizado de todas las herramientas de Eris.
@@ -40,7 +52,21 @@ export class ToolRegistry {
       new FileWriteTool(),
       new OpenTool(),
       new KnowledgeTool(),
+      // Antes que nutrición: su preroute reconoce "gasté 5 lucas en almuerzo" (el almuerzo es la descripción, no una comida a registrar)
+      new FinanceTrackerTool(),
       new NutritionTool(),
+      new TrainingPlanTool(),
+      new PersonalBaselineTool(),
+      new UserContextTool(),
+      new JournalTool(),
+      new InsightFeedbackTool(),
+      new LiveContextTool(),
+      new CarbOptionsTool(),
+      new MetabolicAdvisorTool(),
+      new SymptomGuideTool(),
+      // Después de la guía de síntomas: "dormí 4 horas y me duele la cabeza" primero es el síntoma
+      new SleepLogTool(),
+      new LabResultsTool(),
     ];
 
     for (const tool of defaultTools) {

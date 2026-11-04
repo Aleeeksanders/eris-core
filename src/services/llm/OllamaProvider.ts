@@ -199,6 +199,15 @@ export class OllamaProvider implements LLMProvider {
       if (err instanceof DOMException && err.name === "TimeoutError") {
         throw new Error("Timeout: el modelo tardó demasiado (>5 min)");
       }
+      // El proceso del modelo se cayó antes de responder («HTTP 500: EOF»: se quedó sin memoria o se estaba recargando).
+      // Pasa de vez en cuando con la RAM justa; antes la persona recibía un error. Se reintenta UNA vez: el error llega
+      // antes de cualquier texto, así que no se duplica nada (banco de chat 2026-11-04, «v1-cena» dos veces).
+      if (err instanceof Error && /^Ollama HTTP 5\d\d/.test(err.message) && /EOF|runner|terminated|unexpectedly|connection/i.test(err.message)
+        && !(options as any)?._reintento && !options?.signal?.aborted) {
+        console.warn(`[Ollama] ${err.message.slice(0, 80)}: reintento una vez`);
+        await new Promise((r) => setTimeout(r, 1500));
+        return this.generate(messages, tools, { ...options, _reintento: true } as any);
+      }
       throw new Error(
         `Error con Ollama: ${err instanceof Error ? err.message : String(err)}`
       );

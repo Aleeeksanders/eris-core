@@ -57,7 +57,7 @@ export function matchSymptoms(message: string, limit = 2): Symptom[] {
 /** Qué del perfil del usuario es relevante para las cautelas (ids de condiciones, medicamentos activos, embarazo…). */
 export function profileFacts(medical?: MedicalProfile | null) {
   const conditions = new Set((medical?.conditions ?? []).map((c) => c.id as string));
-  const meds = new Set((medical?.medications ?? []).filter((m) => m.active).map((m) => m.type as string));
+  const meds = new Set((medical?.medications ?? []).filter((m) => m.active !== false).map((m) => m.type as string));
   const diet = new Set(((medical as any)?.dietaryRestrictions ?? []) as string[]);
   return { conditions, meds, diet };
 }

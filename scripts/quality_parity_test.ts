@@ -63,5 +63,19 @@ for (const d of days) {
   }
 }
 
+// Calidad v2 (fase I6): con vitaminas y minerales (de la base por el nombre, o los del alimento) y lo de los suplementos
+{
+  console.log("calidad v2 (vitaminas, minerales y suplementos)");
+  const SUP = await import("../src/services/SupplementCore.ts");
+  const items = [facts("Manzana", 150, "desayuno", at(8), { kcal: 52, protein: 0.3, carbs: 14, fat: 0.2, fiber: 2.4, sugar: 10 }),
+    facts("Leche entera", 200, "desayuno", at(8), { kcal: 61, protein: 3.2, carbs: 4.8, fat: 3.3, fiber: 0 }),
+    facts("Producto con micros", 100, "almuerzo", at(13), P.pollo, { micros: { fe: 2, zn: 3, k: 300 } })];
+  const ai = items.map((f) => app.toQualityItem(f)), si = items.map((f) => srv.toQualityItem(f));
+  check(JSON.stringify(ai) === JSON.stringify(si) && ai.every((x: any) => x.micros), "mismos ítems con vitaminas y minerales");
+  const opts = { now: at(14), goals: { kcal: 2200, protein: 120 }, waterLiters: 1, microRef: SUP.microRef({ sex: "h", age: 40 }), supMicros: { vD: 25, mg: 200 } };
+  const a = app.evaluateDay(ai, opts), s = srv.evaluateDay(si, opts);
+  check(JSON.stringify(a) === JSON.stringify(s) && a.parts?.micros != null, `misma nota v2 (${s.letter} ${s.foodScore}, vitaminas ${s.parts?.micros})`);
+}
+
 console.log(fails ? `\n${fails} diferencia(s)` : "\nServidor = app ✓");
 process.exit(fails ? 1 : 0);

@@ -77,6 +77,8 @@ export function removeItem(
 export interface PhoneFoodQ {
   kcal: number; protein: number; carbs: number; fat: number; fiber: number;
   sugar?: number; sodium?: number; satFat?: number; nova?: number; nutriscore?: string; group?: string;
+  /** vitaminas y minerales por 100 g (app 1.60, fase I6): los que trae el envase (Open Food Facts) */
+  micros?: Record<string, number>;
 }
 /** Un alimento del registro del teléfono. */
 export interface PhoneFoodItem { t: string; meal?: string; name: string; grams: number; kcal: number; protein: number; carbs: number; fat: number; fiber?: number; q?: PhoneFoodQ }
@@ -101,6 +103,11 @@ function sanitizeQ(raw: unknown): PhoneFoodQ | undefined {
   if (nova !== null && Number.isInteger(nova) && nova >= 1) out.nova = nova;
   if (typeof q.nutriscore === "string" && /^[a-e]$/i.test(q.nutriscore)) out.nutriscore = q.nutriscore.toLowerCase();
   if (typeof q.group === "string" && /^[a-z_]{2,30}$/.test(q.group)) out.group = q.group;
+  if (q.micros && typeof q.micros === "object") {
+    const m: Record<string, number> = {};
+    for (const [k, v] of Object.entries(q.micros).slice(0, 20)) { const n = num(v, 50000); if (/^[a-z0-9]{1,4}$/i.test(k) && n !== null) m[k] = n; }
+    if (Object.keys(m).length) out.micros = m;
+  }
   return out;
 }
 

@@ -17,7 +17,7 @@ import { normDayHour, isoDayKey, nutritionDayOf, wakeHourFor, type DayCtx } from
 
 const hasCondition = (m: MedicalProfile | null | undefined, id: string) => !!(m as any)?.conditions?.some((c: any) => c.id === id);
 
-type MetricKey = 'hydrationL' | 'sleepHours' | 'proteinG' | 'steps' | 'restingHR' | 'disponible' | 'savingsRate' | 'moodScore';
+type MetricKey = 'hydrationL' | 'sleepHours' | 'proteinG' | 'steps' | 'restingHR' | 'plata' | 'savingsRate' | 'moodScore';
 
 interface MetricSpec {
   key: MetricKey;
@@ -87,8 +87,9 @@ const METRICS: MetricSpec[] = [
     // (condición física, edad, medicación) como para dar un número universal responsable.
   },
   {
-    key: 'disponible', label: 'Saldo disponible en Finanzas (pesos)', unit: ' pesos', cumulative: false, concerningDirection: 'below', trend: false,
-    consequenceHint: 'tu disponible está por debajo de tu patrón habitual este período — puede valer la pena revisar gastos inusuales.',
+    // «Tu plata» (efectivo + débito + ahorro) desde 2026-10-22; antes era el «disponible» del mes (no era plata real)
+    key: 'plata', label: 'Tu plata en Finanzas (cuentas + ahorro, pesos)', unit: ' pesos', cumulative: false, concerningDirection: 'below', trend: false,
+    consequenceHint: 'tu plata (cuentas + ahorro) está por debajo de tu patrón habitual este período — puede valer la pena revisar gastos inusuales.',
     // Sin fallback genérico: es un monto absoluto, no tiene sentido un "genérico" entre usuarios.
   },
   {

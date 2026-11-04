@@ -129,13 +129,15 @@ const MED_NAME_TO_TYPE: Array<[RegExp, string]> = [
   [/gliptin|galvus|januvia|trajenta|onglyza/i, "dpp4"],
   [/glp|semaglutid|liraglutid|ozempic|victoza|wegovy|saxenda|mounjaro|tirzepatid/i, "glp1"],
   [/insulina/i, "insulin_rapid"],
+  // Sulfonilureas: como la insulina, pueden bajar la glucosa de más después de entrenar (ADA 2016)
+  [/glibenclamida|glimepirida|gliclazida|glipizida|daonil|amaryl|diamicron/i, "sulfonylurea"],
 ];
 
 /** Tipos de medicamento activos. La app no puede guardar el `type`, así que también se infiere del nombre. */
 export function medicationTypes(medical: MedicalProfile | null | undefined): Set<string> {
   const out = new Set<string>();
   for (const m of medical?.medications ?? []) {
-    if (!m.active) continue;
+    if (m.active === false) continue; // sin la marca = activo, como en la app (revisión M1)
     if (m.type && m.type !== "other") out.add(m.type);
     for (const [re, t] of MED_NAME_TO_TYPE) if (re.test(m.name || "")) out.add(t);
   }

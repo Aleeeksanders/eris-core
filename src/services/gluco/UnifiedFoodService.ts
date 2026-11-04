@@ -9,7 +9,7 @@
 import { USDAFoodService, type FoodItem, type FoodServing, type FoodSearchResult } from "./USDAFoodService.js";
 import { OpenFoodFactsService } from "./OpenFoodFactsService.js";
 import { searchPackagedHits, packagedIndex, getByCode, packagedToFoodItem, packagedSafety } from "../PackagedFoods.js";
-import { FoodIndex, nameKeys, normText, correctText, type FoodKey, type SearchOpts } from "../FoodText.js";
+import { FoodIndex, nameKeys, normText, correctText, naturalBoost, type FoodKey, type SearchOpts } from "../FoodText.js";
 import type { FoodSafety } from "../DietaryRestrictions.js";
 import catalogData from "../../data/food_catalog.json";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -59,6 +59,10 @@ function loadLocalDB(): LocalFood[] {
  */
 const localKeys = (f: { name: string; aliases?: string[]; category?: string }): FoodKey[] => [
   ...nameKeys(f.name),
+  // «Palta / Aguacate»: cada lado es un nombre, pero también el nombre completo. Sin esto, buscar el alimento por su propio
+  // nombre (lo que hace el chat después de reconocerlo) no lo encontraba y «anota 1 plátano», «200 g de fideos» o «hallulla
+  // con palta» quedaban sin anotar: «no está en mis bases» (revisión 2026-11-04; 38 alimentos distintos entre la base y el catálogo)
+  ...(f.name.includes("/") ? [{ text: f.name.replace(/\s*\/\s*/g, " ") }] : []),
   ...(f.aliases ?? []).map((a) => ({ text: a })),
   ...(f.category ? [{ text: f.category, weight: 0.4 }] : []),
 ];
@@ -172,7 +176,8 @@ export class UnifiedFoodService {
         .map((h) => ({ score: h.score, src: 0, name: h.item.name, aliases: h.item.aliases, servingDescription: h.item.serving.description, servingGrams: h.item.serving.grams })),
       ...CATALOG_INDEX.search(query, opts)
         .map((h) => ({ score: h.score, src: 1, name: h.item.name, aliases: h.item.aliases, servingDescription: h.item.portion, servingGrams: h.item.grams })),
-    ].sort((a, b) => b.score - a.score || a.src - b.src);
+    ].map((h) => ({ ...h, score: h.score + naturalBoost(query, h.name) }))
+      .sort((a, b) => b.score - a.score || a.src - b.src);
     const seen = new Set<string>();
     const out: Array<{ name: string; aliases?: string[]; servingDescription: string; servingGrams: number }> = [];
     for (const { score: _s, src: _o, ...h } of hits) {
@@ -233,9 +238,11 @@ export class UnifiedFoodService {
     // Lo que calza entero va primero y, entre eso, la base chilena y el catálogo antes que los envasados: "arroz" es el
     // arroz cocido de la base (porción de plato), no el paquete de arroz CRUDO de OFF que se llama "arroz" a secas
     // (2026-10-10: 230 g de arroz quedaban en 777 kcal en vez de ~300). Un envasado gana si se nombra su marca o si lo
-    // de la base solo calza con errores de tipeo.
+    // de la base solo calza con errores de tipeo. Entre la base chilena y el catálogo manda el calce, con lo natural primero
+    // (2026-10-23): «pera» es la fruta del catálogo, no el «Jugo de pera» de la base aunque la base vaya antes.
+    const nat = (r: Ranked) => r.score + naturalBoost(query, r.item.name, r.item.brandName);
     const knownLocal: FoodSearchResult["items"] = ranked
-      .sort((a, b) => Number(b.exact) - Number(a.exact) || a.src - b.src || b.score - a.score)
+      .sort((a, b) => Number(b.exact) - Number(a.exact) || Number(a.src === 2) - Number(b.src === 2) || nat(b) - nat(a) || a.src - b.src)
       .map((r) => r.item);
 
     // 2. Resultados USDA y OFF en paralelo

@@ -102,18 +102,62 @@ export function formatFinanceReply(op: FinanceOp, r: FinanceResult, now: Date = 
       break;
     case "ahorro": {
       lines.push(`💰 Ahorro anotado: ${clp(d.monto)}${d.desc && d.desc !== "Ahorro" ? ` para ${d.desc.toLowerCase()}` : ""}. Llevas ${clp(d.ahorroAcum)} ahorrados.`);
-      if (d.tier?.id) lines.push(d.tier.siguiente
-        ? `Rango de ahorro ${d.tier.id}: te faltan ${clp(d.tier.falta)} para subir a ${d.tier.siguiente}.`
-        : `Rango de ahorro ${d.tier.id}: el máximo. 👑`);
+      // Las metas de ahorro, como en Finanzas → Plan (2026-10-22: antes, el «rango de ahorro» por sueldo mínimo, que la
+      // app ya no muestra porque juzgaba por ingreso)
+      for (const m of ((d.metas ?? []) as Array<{ desc: string; target: number; pct: number }>).slice(0, 3)) {
+        lines.push(m.pct >= 100 ? `🏁 Meta «${m.desc}»: ¡cumplida! (${clp(m.target)})` : `🏁 Meta «${m.desc}»: ${m.pct} % (te faltan ${clp(Math.max(0, m.target - d.ahorroAcum))}).`);
+      }
       break;
     }
     case "deshacer":
       lines.push(`↩️ Listo, borré ${d.tipo} «${d.desc}» de ${clp(d.monto)}${d.cuenta ? ` y la plata volvió a ${d.cuenta}` : ""}.`);
       break;
+    // Eris administra (A2): lo anotado contra lo que dice el banco (el teléfono calcula; acá solo se arma el texto)
+    case "saldo_banco":
+    case "cuadre": {
+      const cs: any[] = Array.isArray(d.cuentas) ? d.cuentas : [];
+      if (d.aplicado) lines.push(`🔧 ${String(d.aplicado).replace(/\.$/, "")}.`);
+      const cuando = (h: number | null) => (h == null ? "" : h < 1 ? " (recién)" : h < 48 ? ` (hace ${h} h)` : ` (hace ${Math.round(h / 24)} días)`);
+      for (const c of cs) {
+        if (c.estado === "sin_dato") { lines.push(`${c.nombre}: todavía no sé cuánto dice tu banco. Dímelo («mi ${c.nombre} tiene $…») o sube una captura en Finanzas → Hoy → Cuadrar.`); continue; }
+        if (c.estado === "calza") { lines.push(`✓ ${c.nombre} calza con el banco: ${clp(c.banco)}${cuando(c.horas)}.`); continue; }
+        const creo = c.explicacion ? ` Creo que ${String(c.explicacion).charAt(0).toLowerCase()}${String(c.explicacion).slice(1)}.` : " No encuentro por qué.";
+        lines.push(`⚖ ${c.nombre} no calza: el banco dice ${clp(c.banco)}${cuando(c.horas)} y yo llevaba ${clp(c.libro)} (${clp(Math.abs(c.diff))} de diferencia).${creo}`);
+      }
+      if (!cs.length) lines.push("Todavía no sé cuánto dice tu banco de ninguna cuenta. Dime, por ejemplo, «mi BCI tiene 412 lucas», o sube una captura de tu banco en Finanzas → Hoy → Cuadrar.");
+      for (const a of (Array.isArray(d.alertas) ? d.alertas : []).slice(0, 2)) lines.push(`• ${String(a).replace(/\.$/, "")}.`);
+      const malas = cs.filter((c) => c.estado === "no_calza");
+      if (malas.length && !d.aplicado) lines.push("Lo puedes ver y arreglar en Finanzas → Hoy → Cuadrar.");
+      const opciones = malas.length === 1 && !d.aplicado ? [...(malas[0].arreglable ? [`Arregla mi ${malas[0].nombre}`] : []), `Ajusta mi ${malas[0].nombre} al banco`] : [];
+      return lines.join("\n") + chips(opciones);
+    }
     case "resumen": {
+      // «¿En qué gasté más?» (2026-10-23): las categorías del mes, de mayor a menor, con su presupuesto
+      if (op.foco === "categorias") {
+        const cats = (d.porCat ?? []) as Array<{ cat: string; nombre: string; monto: number; presup: number }>;
+        const sel = op.categoria ? cats.filter((c) => c.cat === op.categoria) : cats;
+        const linea = (c: (typeof cats)[number]) => `· ${c.nombre}: ${clp(c.monto)}${c.presup > 0 ? ` de ${clp(c.presup)} (${c.monto <= c.presup ? `te quedan ${clp(c.presup - c.monto)}` : `te pasaste ${clp(c.monto - c.presup)}`})` : ""}`;
+        if (!cats.length) { lines.push(`📊 ${d.mes}: todavía no hay gastos anotados este mes.`); break; }
+        if (op.categoria && !sel.length) { lines.push(`📊 ${d.mes}: no hay gastos en esa categoría este mes. Llevas ${clp(d.gastoMes)} en total.`); break; }
+        lines.push(op.categoria ? `📊 ${d.mes}:` : `📊 ${d.mes}: llevas ${clp(d.gastoMes)} gastados. Lo que más:`);
+        lines.push(...sel.slice(0, 5).map(linea));
+        break;
+      }
+      // «¿Cuándo me pagan?»: el próximo ingreso y lo que se puede gastar hasta ese día
+      if (op.foco === "ingreso") {
+        const ing = ((d.proximos ?? []) as any[]).find((p) => p.tipo === "ingreso") ?? (d.proximo ? { ...d.proximo, tipo: "ingreso" } : null);
+        const pend = ((d.porConfirmar ?? []) as any[])[0];
+        if (pend) lines.push(`💼 ${pend.desc} (${clp(pend.monto)}) ya debería haber llegado (${fechaCorta(pend.fecha)}). ¿Llegó? Dime «me llegó el sueldo» y lo anoto.`);
+        else if (ing) lines.push(`💼 ${String(ing.desc).replace(/\s*\([^)]*\)/g, "")}: ${clp(ing.monto)} el ${fechaCorta(ing.fecha)}${typeof ing.enDias === "number" ? ` (en ${ing.enDias} día${ing.enDias === 1 ? "" : "s"})` : ""}.`);
+        else lines.push("Todavía no tengo tu sueldo programado: configúralo en Finanzas → Plan (día de pago o «último día hábil») y te aviso cuando llegue.");
+        if (d.conCuentas && typeof d.libre === "number" && d.libre >= 0) lines.push(`🗓️ Hasta entonces puedes gastar ${clp(d.libre)}${typeof d.porDia === "number" && d.libre > 0 ? `, ~${clp(d.porDia)} por día` : ""}.`);
+        break;
+      }
+      // Solo existe la plata de sus cuentas (2026-10-22): «tu plata» = cuentas + efectivo + ahorro; sin «te quedan X del
+      // mes» (contaba el sueldo que aún no llegaba: plata que no estaba en ningún lado)
       if (d.hayBoveda) {
-        lines.push(`💰 Plata a mano: **${clp(d.liquidez)}**`);
-        lines.push(`· Efectivo: ${clp(d.efectivo)}`);
+        lines.push(`💰 Tu plata: **${clp(d.plata ?? d.liquidez)}**`);
+        if (d.usaEfectivo !== false) lines.push(`· Efectivo: ${clp(d.efectivo)}`);
         for (const c of (d.cuentas ?? []) as FinanceAccountView[]) {
           lines.push(c.tipo === "credito"
             ? `· ${c.nombre}: cupo libre ${clp(c.saldo)}${(c.cupo ?? 0) - c.saldo > 0 ? `, deuda ${clp((c.cupo ?? 0) - c.saldo)}` : ""}`
@@ -121,12 +165,18 @@ export function formatFinanceReply(op: FinanceOp, r: FinanceResult, now: Date = 
         }
         if (d.deudaTC > 0) lines.push(`💳 Deuda en tarjetas: ${clp(d.deudaTC)}`);
       } else {
-        lines.push("Todavía no tienes cuentas en la Bóveda de Finanzas, así que no sé cuánta plata hay en cada lado.");
+        lines.push("Todavía no tienes cuentas en Finanzas, así que no sé cuánta plata tienes: agrégalas en Finanzas → Cuentas (y tu efectivo, si tienes).");
+      }
+      if (d.conCuentas && typeof d.libre === "number") {
+        const hasta = d.proximo ? `hasta tu ${String(d.proximo.desc).replace(/\s*\([^)]*\)/g, "").toLowerCase()} (en ${d.proximo.enDias} día${d.proximo.enDias === 1 ? "" : "s"})` : "hasta fin de mes";
+        lines.push(d.libre >= 0
+          ? `🗓️ Puedes gastar ${clp(d.libre)} ${hasta}${typeof d.porDia === "number" && d.libre > 0 ? `, ~${clp(d.porDia)} por día` : ""}.`
+          : `🗓️ ${hasta[0].toUpperCase()}${hasta.slice(1)} te faltan ${clp(-d.libre)} para los fijos que vienen.`);
       }
       lines.push(d.ingreso > 0
-        ? `📊 ${d.mes}: llevas ${clp(d.gastoMes)} gastados de ${clp(d.ingreso)}${d.ingresoExtra > 0 ? ` (incluye ${clp(d.ingresoExtra)} extra)` : ""} — te quedan ${clp(d.disponible)} del mes.`
-        : `📊 ${d.mes}: llevas ${clp(d.gastoMes)} gastados. Todavía no tengo tu sueldo: anótalo en Finanzas para saber cuánto te queda.`);
-      if (d.ahorroAcum > 0) lines.push(`💰 Ahorro: ${clp(d.ahorroAcum)}.`);
+        ? `📊 ${d.mes}: entraron (o vienen) ${clp(d.ingreso)}${d.ingresoExtra > 0 ? ` (incluye ${clp(d.ingresoExtra)} extra)` : ""} y llevas ${clp(d.gastoMes)} gastados.`
+        : `📊 ${d.mes}: llevas ${clp(d.gastoMes)} gastados. Todavía no tengo tu sueldo: configúralo en Finanzas → Plan.`);
+      if (d.porOrdenar > 0) lines.push(`⚠️ Tienes ${d.porOrdenar} movimiento${d.porOrdenar === 1 ? "" : "s"} sin cuenta en «Por ordenar» (Finanzas → Cuentas): no cuentan en tu plata hasta que les asignes una.`);
       if (d.pendienteCobro > 0) lines.push(`📋 Te deben ${clp(d.pendienteCobro)}.`);
       for (const p of (d.porConfirmar ?? []).slice(0, 3)) {
         const q = /quincena|anticipo/i.test(p.desc) ? ["tu quincena", "me llegó la quincena"] : /^sueldo/i.test(p.desc) ? ["tu sueldo", "me llegó el sueldo"] : [String(p.desc).toLowerCase(), "me llegó"];

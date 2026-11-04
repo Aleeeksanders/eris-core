@@ -13,21 +13,33 @@ import { parseFinanceMessage, parseFinanceWhatIf, accountNamesFromContext, categ
 import { canFinance, requestFinanceOp } from "../services/FinanceBridge.js";
 import { formatFinanceReply, financeToolOutput, formatWhatIfReply } from "../services/FinanceReply.js";
 import { pullFinanceBackup } from "../services/FinanceBackup.js";
-import { fromHwKeys, draft, aplicarProgramados, estado, hwResolve, simularCompra } from "../services/FinanceCore.js";
+import { fromHwKeys, draft, aplicarProgramados, estado, hwResolve, simularCompra, limpiarEfectivoVacio, tablero, cuadre } from "../services/FinanceCore.js";
 import { intentsIn } from "../services/Intent.js";
+import { parseInventoryMessage } from "../services/InventoryParse.js";
+import { matchFoods } from "../services/MealRecommender.js";
+
+/** ¿La descripción de un gasto es un alimento? («1 kilo de lentejas», «palta») — sin la cantidad delante */
+function esComida(desc: string): boolean {
+  const rest = desc.replace(/^\s*\d+[.,]?\d*\s*(kilos?|kg|gr|g|gramos|litros?|l|unidades?|bolsas?|paquetes?|cajas?|mallas?|bandejas?)?\s*(de\s+)?/i, "").trim();
+  return rest.length >= 3 && rest.split(/\s+/).length <= 5 && matchFoods(rest).length > 0;
+}
+import { canInventory, requestInventoryOp } from "../services/InventoryBridge.js";
 
 const CATS = ["vivienda", "alimentacion", "transporte", "salud", "entretenimiento", "deuda", "educacion", "hogar", "otros"] as const;
-const ACTIONS = ["gasto", "prestamo", "cobro", "abono", "giro", "transferencia", "pago_tarjeta", "ahorro", "deshacer", "resumen", "simular"] as const;
+const ACTIONS = ["gasto", "prestamo", "cobro", "abono", "giro", "transferencia", "pago_tarjeta", "ahorro", "deshacer", "resumen", "simular", "cuadre", "saldo_banco"] as const;
 
 const FinanceInputSchema = z.object({
   action: z.enum(ACTIONS).describe(
     "gasto = pagó/compró algo; prestamo = le prestó plata a alguien; cobro = alguien le devolvió lo prestado; abono = le entró plata a una cuenta " +
     "(sueldo, depósito); giro = sacó efectivo de una cuenta; transferencia = movió plata entre SUS cuentas; pago_tarjeta = pagó su tarjeta de crédito; " +
     "ahorro = apartó plata como ahorro; deshacer = borrar el último registro que hiciste por chat; resumen = cuánta plata tiene / cómo va el mes; " +
-    "simular = '¿y si me compro X?', '¿me alcanza para…?': cómo quedaría su plata, SIN anotar nada."),
+    "simular = '¿y si me compro X?', '¿me alcanza para…?': cómo quedaría su plata, SIN anotar nada; " +
+    "cuadre = '¿mis finanzas calzan?', '¿calza mi BCI con el banco?' (compara lo anotado con lo que dice el banco y dice por qué no calza); " +
+    "saldo_banco = el usuario dice cuánto tiene una cuenta según su banco ('mi BCI tiene 412 lucas'): se guarda y se cuadra."),
   monto: z.number().positive().optional().describe("Monto en PESOS chilenos: '5 lucas' = 5000, 'luca y media' = 1500, '1 palo' = 1000000."),
   descripcion: z.string().optional().describe("En qué fue (gasto) o para qué; corto: 'Almuerzo', 'Uber', 'Arriendo'."),
   categoria: z.enum(CATS).optional().describe("Categoría del gasto. Si no la sabes, omítela."),
+  foco: z.enum(["categorias", "ingreso"]).optional().describe("resumen: «¿en qué gasté más?» / «¿cuánto llevo en comida?» = categorias (con categoria si nombra una); «¿cuándo me pagan?» = ingreso."),
   cuenta: z.string().optional().describe("Cuenta de donde SALE la plata (o a la que ENTRA en un abono), como la nombró el usuario: 'BCI', 'efectivo', 'tarjeta de crédito'. Si no la dijo, omítela."),
   hacia: z.string().optional().describe("Cuenta de destino en transferencia o la tarjeta en pago_tarjeta."),
   persona: z.string().optional().describe("A quién le prestó (prestamo) o quién le devolvió (cobro)."),
@@ -35,6 +47,7 @@ const FinanceInputSchema = z.object({
   devolucion: z.string().optional().describe("YYYY-MM-DD, cuándo le devuelven un préstamo (si lo dijo)."),
   objeto: z.string().optional().describe("deshacer: qué tipo de registro borrar ('gasto', 'prestamo'…)."),
   cuotas: z.number().int().min(2).max(48).optional().describe("gasto: compra en cuotas con tarjeta de crédito (número de cuotas). Omítelo si fue al contado."),
+  aplicar: z.enum(["mejor", "ajuste"]).optional().describe("cuadre: 'mejor' = arreglar lo que calza exacto ('arregla mi BCI'); 'ajuste' = anotar la diferencia como ajuste ('ajusta mi BCI al banco'). Omítelo si solo pregunta."),
 });
 type FinanceInput = z.infer<typeof FinanceInputSchema>;
 
@@ -57,7 +70,7 @@ function pureFinance(message: unknown): boolean {
 export class FinanceTrackerTool extends Tool<FinanceInput> {
   readonly name = "finance_tracker";
   readonly description =
-    "Anota en Finanzas (la app Hunter Wallet del teléfono del usuario) lo que cuenta de su plata: gastos, préstamos que hizo, cobros, " +
+    "Anota en Finanzas (el módulo de la app del teléfono del usuario) lo que cuenta de su plata: gastos, préstamos que hizo, cobros, " +
     "abonos/sueldo, giros de efectivo, transferencias entre sus cuentas, pagos de tarjeta y ahorro; deshace el último registro; y da el " +
     "resumen de saldos ('¿cuánta plata tengo?'). USAR SIEMPRE que el usuario diga que gastó, pagó, compró, prestó, le devolvieron, sacó plata, " +
     "le llegó plata o ahorró. NUNCA digas que anotaste algo sin haber llamado a esta herramienta, y usa solo las cifras que devuelve.";
@@ -79,7 +92,7 @@ export class FinanceTrackerTool extends Tool<FinanceInput> {
         const v = fold(value);
         // Solo si la respuesta ES una de las opciones o nombra una cuenta ("gracias" no completa nada)
         const matches = (p.opciones ?? []).some((o: string) => { const f = fold(o); return f.includes(v) || v.includes(f.split(/\s*·\s*/)[0]); }) ||
-          (p.field !== "persona" && /\b(efectivo|cash|debito|credito|tarjeta|cuenta|bci|bice|santander|scotia\w*|estado|chile|edwards|falabella|cmr|ripley|itau|tenpo|mach|mercado ?pago|coopeuch)\b/.test(v));
+          (p.field !== "persona" && /\b(efectivo|cash|debito|credito|tarjeta|cuenta|bci|bice|santander|scotia\w*|estado|chile|edwards|falabella|cmr|ripley|itau|tenpo|mach|mercado ?pago|coopeuch|security|consorcio|global ?66|prex|polar|cuenta ?rut)\b/.test(v));
         if (short && p.field && v.length >= 2 && matches) {
           await memory.set(PENDING_KEY, null).catch(() => {});
           return { ...p.op, [p.field]: value };
@@ -105,22 +118,47 @@ export class FinanceTrackerTool extends Tool<FinanceInput> {
     const op: FinanceOp = { ...input, action: input.action };
     if (op.monto) op.monto = Math.round(op.monto);
     if (op.action === "gasto" && !op.categoria) op.categoria = (op.descripcion && categoryFor(op.descripcion)) || "otros";
+    // «1 kilo de lentejas» no tiene palabra de supermercado, pero es comida: la base de alimentos lo sabe (2026-10-23)
+    if (op.action === "gasto" && op.categoria === "otros" && op.descripcion && esComida(op.descripcion)) op.categoria = "alimentacion";
 
     // Datos mínimos: si faltan, que el modelo los pregunte (sin respuesta rápida)
-    const needsMonto = ["gasto", "prestamo", "abono", "giro", "transferencia", "ahorro"].includes(op.action);
+    const needsMonto = ["gasto", "prestamo", "abono", "giro", "transferencia", "ahorro", "saldo_banco"].includes(op.action);
     // "Me llegó el sueldo" sin monto: el teléfono usa el sueldo que el usuario configuró (si no lo configuró, lo pide)
     const sueldoSinMonto = op.action === "abono" && /sueldo|quincena|anticipo/i.test(op.descripcion ?? "");
     if (needsMonto && !op.monto && !sueldoSinMonto) return { output: "Falta el monto (en pesos). Pregúntale al usuario cuánto fue; NO digas que lo anotaste." };
     if ((op.action === "prestamo" || op.action === "cobro") && !op.persona) return { output: "Falta a quién (persona). Pregúntaselo; NO digas que lo anotaste." };
     if (op.action === "transferencia" && (!op.cuenta || !op.hacia)) return { output: "Falta de qué cuenta a qué cuenta. Pregúntaselo; NO digas que lo anotaste." };
 
+    if ((!ws || !canFinance(ws)) && op.action === "cuadre" && !op.aplicar) {
+      // Sin el teléfono: el mismo núcleo sobre el respaldo del PC (sin «Por confirmar», que vive en el teléfono)
+      const dump = memory ? await pullFinanceBackup(memory).catch(() => null) : null;
+      if (dump) {
+        const S = fromHwKeys(dump.keys), C = cuadre(S, new Date());
+        const cuentas = C.cuentas.filter((c) => c.banco).map((c) => ({ nombre: c.nombre, estado: c.estado, diff: c.diff, banco: c.banco!.saldo, libro: c.libro,
+          horas: Math.round((Date.now() - c.banco!.at) / 3_600_000), explicacion: c.explicaciones[0]?.texto ?? null, arreglable: false }));
+        const reply = formatFinanceReply(op, { ok: true, data: { cuentas, alertas: C.alertas.map((a) => a.texto).slice(0, 2) } } as any)
+          .replace(/\n?\[Opción:[^\n]*$/, "") + "\n(Con tu último respaldo de Finanzas; para arreglarlo, ábrelo en la app.)";
+        return { output: financeToolOutput(op, { ok: true } as any, reply), metadata: { quickReply: quick ? reply : undefined, financeOk: true } };
+      }
+    }
     if (!ws || !canFinance(ws)) {
       const reply = "Eso lo anoto en Finanzas, que vive en tu teléfono: pídemelo desde la app de Eris (actualizada) y queda al tiro.";
       return { output: `NO se anotó: esta conexión no es la app del teléfono.\n${reply}`, metadata: { quickReply: quick ? reply : undefined, financeOk: false } };
     }
 
     const r = await requestFinanceOp(ws, op);
-    const reply = formatFinanceReply(op, r);
+    let reply = formatFinanceReply(op, r);
+    // Comida comprada por chat («compré 2 kilos de pollo en 9 lucas»): también a la despensa del Inventario, con su precio
+    // (2026-10-23, «Eris como Jarvis»: antes quedaba solo el gasto). Solo con cantidad dicha: «compré pollo» no inventa cuánto.
+    if (r.ok && op.action === "gasto" && op.categoria === "alimentacion" && op.descripcion && canInventory(ws)) {
+      const inv = parseInventoryMessage(`compré ${op.descripcion}`);
+      if (inv?.action === "compra" && inv.producto && inv.cantidad != null) {
+        const ri = await requestInventoryOp(ws, { ...inv, precio: op.monto }).catch(() => null);
+        // No calza con lo que ya tiene («Pechuga de pollo» se cuenta en unidades y dijo kilos): se dice, no se calla
+        if (ri && !ri.ok && ri.code !== "timeout" && ri.code !== "sin_conexion" && ri.msg) reply += `\n🏠 No lo sumé a tu despensa: ${ri.msg.replace(/\.$/, "")}.`;
+        if (ri?.ok) reply += `\n🏠 También lo sumé a tu despensa: ${ri.data?.agregado ?? `${inv.cantidad} ${inv.unidad ?? ""}`.trim()} de ${String(ri.data?.nombre ?? inv.producto).toLowerCase()}. (Si no va, dime «deshaz lo último del inventario».)`;
+      }
+    }
 
     // Si falta elegir una cuenta o un préstamo, la próxima respuesta corta del usuario completa esta misma operación
     if (memory) {
@@ -149,18 +187,24 @@ export class FinanceTrackerTool extends Tool<FinanceInput> {
     }
     const now = new Date();
     // Lo que haría el teléfono al abrir Finanzas: los fijos cuyo día ya llegó cuentan (copia de trabajo, no se guarda)
-    const S = draft(fromHwKeys(dump.keys));
+    const S0 = fromHwKeys(dump.keys);
+    const S = draft(limpiarEfectivoVacio(S0) ?? S0); // igual que al abrirlo en el teléfono (sin el «Efectivo» en $0 de regalo)
     let nid = -1;
     aplicarProgramados(S, { now, newId: () => nid-- });
     if (!S.tx.length && !S.cuentas.length && !S.prog.length) {
       const reply = "Todavía no tienes Finanzas configurado: ábrelo en la app, pon tu sueldo y cuentas, y te digo cómo quedarías.";
       return { output: `Finanzas vacío. ${reply}`, metadata: { quickReply: quick ? reply : undefined } };
     }
+    // Solo existe la plata de sus cuentas (2026-10-22): al contado y sin cuentas no hay con qué comparar
+    if (!(input.cuotas && input.cuotas > 1) && !tablero(S, now).conCuentas) {
+      const reply = "Para decirte si te alcanza necesito saber cuánta plata tienes: agrega tus cuentas (y tu efectivo, si tienes) en Finanzas → Cuentas.";
+      return { output: `SIN CUENTAS en Finanzas: no se puede simular. ${reply}`, metadata: { quickReply: quick ? reply : undefined } };
+    }
     const categoria = input.categoria ?? (input.descripcion ? categoryFor(input.descripcion) : undefined) ?? "otros";
     const cuotas = input.cuotas && input.cuotas > 1 ? input.cuotas : undefined;
     const hint = input.cuenta ? hwResolve(estado(S), input.cuenta, cuotas ? "credito" : null) : null;
     const sim = simularCompra(S, { monto, cat: categoria, cuotas, cuenta: hint?.ref ?? null, desc: input.descripcion }, now);
-    if (!sim) return { output: "No pude simularlo (monto inválido)." };
+    if (!sim) return { output: "No pude simularlo: necesito el monto y tus cuentas en Finanzas." };
     const reply = formatWhatIfReply({ descripcion: input.descripcion, monto: sim.monto, cuotas: sim.cuotas, veredicto: sim.veredicto, hasta: sim.hasta, lineas: sim.lineas, at: dump.at }, now);
     return {
       output: `SIMULACIÓN (NO se anotó nada). Usa SOLO estas cifras:

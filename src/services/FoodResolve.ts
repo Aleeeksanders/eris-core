@@ -5,12 +5,12 @@
 // macros para una cantidad. Lo usan el registro de comidas (NutritionTool) y la estimación de glucosa (GlucoTool).
 // ============================================================
 
-import { foodTokens, wordMatch, SOUND, FoodIndex, nameKeys, correctText, editDistance } from "./FoodText.js";
+import { foodTokens, wordMatch, SOUND, FoodIndex, nameKeys, correctText, editDistance, sameFood, normText } from "./FoodText.js";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { UnifiedFoodService } from "./gluco/UnifiedFoodService.js";
-import type { FoodServing } from "./gluco/FoodService.js";
+import type { FoodItem, FoodServing } from "./gluco/FoodService.js";
 
 const GENERIC = new Set(["sin", "premium", "natural", "casero", "casera", "light", "tradicional", "grande", "chico", "mediano", "extra",
   "clasico", "clasica", "fresco", "fresca", "cocido", "cocida", "frito", "frita", "asado", "asada"].flatMap((w) => foodTokens(w)));
@@ -35,7 +35,9 @@ export function foodFit(name: string, r: { name: string; brandName?: string }): 
   const matched = base.filter((k, i) => hit(k) || (i < base.length - 1 && hit(k + base[i + 1])) || (i > 0 && hit(base[i - 1] + k))).length;
   if (matched === base.length) return "strong";
   const head = foodTokens(r.name)[0];
-  if (matched * 2 > base.length || (!!head && base.some((k) => wordMatch(k, head) >= SOUND))) return "weak";
+  // La palabra principal sola vale con nombres cortos («yogurt griego» → Yogurt natural). 2026-10-21: «Keto chicken melt
+  // Starbucks» terminó como «Chicken, canned, meat only» de USDA por compartir solo «chicken» (1 de 4 palabras).
+  if (matched * 2 > base.length || (base.length <= 2 && !!head && base.some((k) => wordMatch(k, head) >= SOUND))) return "weak";
   return null;
 }
 
@@ -94,4 +96,53 @@ export function scaleServing(s: FoodServing, grams: number): FoodServing {
     calories: Math.round(s.calories * f), carbs: r1(s.carbs * f), fiber: r1((s.fiber || 0) * f),
     protein: r1(s.protein * f), fat: r1(s.fat * f),
   };
+}
+
+// ─── Tu versión de un alimento (app 1.58, 2026-10-23) ─────────────────────────
+// En la app, «Editar información nutricional» de algo anotado guarda TU versión (la hallulla de tu panadería) y la usa desde
+// ahí. El teléfono manda la lista (`my_foods_sync`) y el chat la usa antes que la base, solo si es exactamente ese alimento.
+
+export interface MyFood {
+  name: string; brand?: string;
+  calories: number; protein: number; carbs: number; fat: number; fiber?: number; sugar?: number; sodium?: number; satFat?: number;
+  servingSize?: number; servings?: Array<{ description: string; grams: number }>; liquid?: boolean;
+}
+
+const fin = (v: unknown, max: number): number | undefined => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= max ? v : undefined);
+
+/** Lo que manda la app, saneado: valores posibles por 100 g y hasta 300 alimentos. */
+export function cleanMyFoods(raw: unknown): MyFood[] {
+  if (!Array.isArray(raw)) return [];
+  const out: MyFood[] = [];
+  for (const x of raw.slice(0, 300) as any[]) {
+    const name = typeof x?.name === "string" ? x.name.trim().slice(0, 120) : "";
+    const kcal = fin(x?.calories, 900), protein = fin(x?.protein, 100), carbs = fin(x?.carbs, 100), fat = fin(x?.fat, 100);
+    if (!name || kcal === undefined || protein === undefined || carbs === undefined || fat === undefined || protein + carbs + fat > 105) continue;
+    const servings = (Array.isArray(x.servings) ? x.servings : [])
+      .filter((s: any) => typeof s?.description === "string" && fin(s?.grams, 5000))
+      .slice(0, 6).map((s: any) => ({ description: String(s.description).slice(0, 60), grams: s.grams }));
+    out.push({
+      name, brand: typeof x.brand === "string" && x.brand.trim() ? x.brand.trim().slice(0, 60) : undefined,
+      calories: kcal, protein, carbs, fat, fiber: fin(x.fiber, 100), sugar: fin(x.sugar, 100), sodium: fin(x.sodium, 40000), satFat: fin(x.satFat, 100),
+      servingSize: fin(x.servingSize, 5000), servings, liquid: x.liquid === true || undefined,
+    });
+  }
+  return out;
+}
+
+/**
+ * Tu versión de lo dicho, como alimento de la base (con su porción habitual), o null. Solo si es EXACTAMENTE ese alimento
+ * (mismas palabras; uno con marca, solo si se nombró la marca): «hallulla» usa tu hallulla, «hallulla integral» no.
+ */
+export function myFoodFor(list: MyFood[], name: string): FoodItem | null {
+  const f = list.find((x) => sameFood(name, x.name, x.brand));
+  if (!f) return null;
+  const g = f.servings?.[0]?.grams || f.servingSize || 100;
+  const k = g / 100;
+  const serving: FoodServing = {
+    id: `mia_${g}g`, description: f.servings?.[0]?.description ?? `${g} ${f.liquid ? "ml" : "g"}`, metricServingAmount: g,
+    calories: Math.round(f.calories * k), protein: r1(f.protein * k), carbs: r1(f.carbs * k), fat: r1(f.fat * k),
+    fiber: r1((f.fiber ?? 0) * k), ...(f.sugar !== undefined ? { sugar: r1(f.sugar * k) } : {}), ...(f.sodium !== undefined ? { sodium: Math.round(f.sodium * k) } : {}),
+  };
+  return { id: `mia:${normText(`${f.name} ${f.brand ?? ""}`)}`, name: f.name, brandName: f.brand, type: "Generic", servings: [serving], defaultServing: serving };
 }

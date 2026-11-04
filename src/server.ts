@@ -22,8 +22,14 @@ import { buildAxsDashboard } from "./services/vault/AxsDashboard.js";
 import { systemStatus } from "./services/SystemStatus.js";
 import { parseServiceRequest, runServiceAction, SERVICE_LABEL } from "./services/ServiceControl.js";
 import { sanitizeDump, saveFinanceBackup, listFinanceBackups, pullFinanceBackup } from "./services/FinanceBackup.js";
+import { sanitizeForgeDump, saveForgeBackup, listForgeBackups, pullForgeBackup } from "./services/ForgeBackup.js";
+import { sanitizeInventoryDump, saveInventoryBackup, listInventoryBackups, pullInventoryBackup } from "./services/InventoryBackup.js";
+import { resolveInventoryOp } from "./services/InventoryBridge.js";
+import { resolveSupplementOp } from "./services/SupplementBridge.js";
+import { saveIntent, sanitizeProjection, PROJECTION_KEY, intentFor } from "./services/TrainingIntent.js";
+import { sanitizeIntent } from "./services/forge/forgeTrain.js";
 import { leerCartola } from "./services/FinanceStatement.js";
-import { leerBoletaFoto } from "./services/ReceiptOcr.js";
+import { leerBoletaFoto, leerSaldoCaptura } from "./services/ReceiptOcr.js";
 import { diagnoseBaseline, formatDiagnosisForLLM } from "./services/BaselineEngine.js";
 import { deriveRestrictions } from "./services/DietaryRestrictions.js";
 import { assessFood } from "./services/FoodSafetyCheck.js";
@@ -46,7 +52,7 @@ import { todayKeyOf } from "./services/NutritionDay.js";
 import { dayCtxFrom, nutritionDayOf, isoDayKey } from "./services/MealSchedule.js";
 import { AdminService } from "./services/security/AdminService.js";
 import { getFeatures, setFeature, isFeatureName, FEATURE_LABELS } from "./services/Features.js";
-import { loadTargets, sanitizeBody } from "./services/DailyTargets.js";
+import { loadTargets, sanitizeBody, localDay } from "./services/DailyTargets.js";
 import { buildNudge, parseNudgeRequest } from "./services/NudgeSuggest.js";
 import { isTone, getTone, toneForAge } from "./services/Tone.js";
 import { manualSleepFor } from "./tools/SleepLogTool.js";
@@ -54,6 +60,7 @@ import { AdminOverviewTool } from "./tools/AdminOverviewTool.js";
 import { AxsBriefingTool } from "./tools/AxsBriefingTool.js";
 import { VaultNoteTool } from "./tools/VaultNoteTool.js";
 import { routeTools, TOOL_GROUP } from "./services/ToolRouter.js";
+import { sinContextoPegado } from "./services/AnalisisDia.js";
 import type { ApprovalRequest, ApprovalDecision } from "./QueryEngine.js";
 import { GlucoService } from "./services/gluco/GlucoService.js";
 import { UnifiedFoodService } from "./services/gluco/UnifiedFoodService.js";
@@ -62,6 +69,7 @@ import { NutritionTool } from "./tools/NutritionTool.js";
 import { resolveFinanceOp } from "./services/FinanceBridge.js";
 import { lookupBarcode, contributeProduct } from "./services/BarcodeLookup.js";
 import { searchPackagedHits } from "./services/PackagedFoods.js";
+import { cleanMyFoods } from "./services/FoodResolve.js";
 import { waterTotalToday } from "./services/WaterToday.js";
 import { understandVoice, voiceVocabulary, lexiconIndex } from "./services/stt/VoiceFix.js";
 import { ProfileManagementTool } from "./tools/ProfileManagementTool.js";
@@ -79,6 +87,18 @@ const ROLE_PROMPTS: Record<Role, string> = {
 
 const PORT = Number(process.env.ERIS_PORT) || 3000;
 const MAX_USER_MESSAGE_CHARS = 8000;
+/** Tamaño máximo (caracteres del JSON) de cada mensaje del teléfono (revisión 2026-10-31, S2). */
+const WS_TOPE_DEFAULT = 2_000_000;
+const WS_TOPES: Record<string, number> = {
+  // fotos, audio y archivos (la foto llega en base64: hasta ~9 MB de imagen)
+  message: 14_000_000, voice_message: 14_000_000, finance_receipt_photo: 14_000_000, finance_balance_photo: 14_000_000, finance_statement_parse: 10_000_000,
+  // respaldos de los módulos
+  finance_backup_push: 8_000_000, forge_backup_push: 8_000_000, inventory_backup_push: 8_000_000, backfill_rollup: 4_000_000, sync_nutrition_days: 4_000_000,
+  // lo que va a la memoria y al contexto del modelo: acotado
+  update_health_snapshot: 600_000, sync_toji_context: 400_000, save_profile: 200_000, update_financial_context: 120_000, update_inventory_context: 120_000,
+  update_supplement_context: 40_000, add_journal_entry: 20_000, create_project: 20_000, rename_project: 20_000, update_project: 20_000, tts_request: 20_000,
+  save_preference: 12_000, set_tone: 2_000, set_strict_mode: 2_000, set_persona: 2_000, rename_chat: 4_000,
+};
 // (El contexto de Ollama ya no es fijo por perfil: lo elige ContextPlanner por turno, entre 8192 y 16384, según lo que de verdad se
 //  envía. Antes Ikaros tenía 16384 fijo —14 % más lento en cada respuesta— y cada cambio de perfil o de modo recargaba el modelo.)
 
@@ -91,6 +111,8 @@ const LEGACY_LOGIN_ENABLED = process.env.ERIS_LEGACY_LOGIN !== "0";
 
 /** sessionId → perfil dueño. Impide que un perfil lea/borre el historial de otro pasando su id de sesión. */
 const sessionOwners = new Map<string, string>();
+/** El piloto automático del plan, uno a la vez por perfil (se reprograma con cada parte del snapshot) */
+const autoTickTimers = new Map<string, ReturnType<typeof setTimeout>>();
 function claimSession(id: string, profileId: string): string {
   const owner = sessionOwners.get(id);
   if (owner && owner !== profileId) id = crypto.randomUUID();
@@ -119,7 +141,7 @@ const METRIC_TO_NOTE_SCOPE: Record<string, "hydration" | "sleep" | "nutrition" |
   proteinG: "nutrition",
   steps: "training",
   restingHR: "training",
-  disponible: "finance",
+  plata: "finance",
   savingsRate: "finance",
   moodScore: "general",
 };
@@ -313,7 +335,12 @@ async function buildNutritionToday(memory: MemoryAdapter) {
       fatGLimit: storedGoals.fat || t.fatGLimit,
     };
     goalsSet = t.set as Record<string, number>;
-    targets = { sources: t.sources, notes: t.notes, kcalMaintenance: t.kcalMaintenance, kcalTraining: t.kcalTraining };
+    targets = {
+      sources: t.sources, notes: t.notes, kcalMaintenance: t.kcalMaintenance, kcalTraining: t.kcalTraining,
+      // El entreno de hoy (Forge 2.0): «te quedan X (incluye ~N de tu pierna de las 19:00) · sin el entreno te pasarías por Y»
+      byDay: t.byDay ?? null, kcalGhost: t.kcalGhost ?? null, kcalNoGhost: t.kcalNoGhost ?? null, kcalPlanned: t.kcalPlanned ?? null,
+      intentPhrase: t.intentPhrase ?? null, minutesToWorkout: t.minutesToWorkout ?? null,
+    };
   } catch {}
   // Hidratación EFECTIVA (café/alcohol/bebidas azucaradas hidratan menos que el agua), igual que get_daily_log
   // y el asesor metabólico — antes esto sumaba litros crudos y las cifras no coincidían entre pantallas.
@@ -743,6 +770,10 @@ async function startServer() {
           (ws.data as any).canApprove = Array.isArray(data.caps) && data.caps.includes("approvals");
           // …y solo una app que sabe aplicar operaciones en Finanzas (FinanceBridge) recibe las de finance_tracker
           (ws.data as any).canFinance = Array.isArray(data.caps) && data.caps.includes("finance_ops");
+          // …y lo mismo con el Inventario (InventoryBridge, 2026-10-22)
+          (ws.data as any).canInventory = Array.isArray(data.caps) && data.caps.includes("inventory_ops");
+          // …y con «Mis suplementos» (SupplementBridge, 2026-10-23)
+          (ws.data as any).canSupplement = Array.isArray(data.caps) && data.caps.includes("supplement_ops");
 
           if (data.type === 'auth_google' || data.type === 'auth_session') {
             // ─── SSO de Google: el SERVIDOR verifica la identidad; el perfil sale de la cuenta, no de lo que diga el cliente ───
@@ -826,10 +857,10 @@ async function startServer() {
 
             const profileKey = `${profileId}:${pin || ''}`;
             if (!queryEngines.has(profileKey)) {
-              const allTools = roleDefinition.allowedTools.includes('*');
               queryEngines.set(profileKey, new QueryEngine(provider, filteredRegistry, personalizedPrompt, {
-                // Con todas las herramientas, el modelo solo ve las del grupo que pide cada mensaje
-                router: allTools ? routeTools : undefined,
+                // El modelo solo ve las herramientas del grupo que pide cada mensaje (de las que su rol tiene). Antes los usuarios
+                // públicos no tenían selector: cada mensaje llevaba sus 16 herramientas (revisión 2026-11-04, R2)
+                router: routeTools,
               }));
             }
             // Separación Eris / Ikaros. Con el Modo AXS Executive APAGADO, el perfil Ikaros habla con ERIS: su prompt (reglas de
@@ -877,7 +908,8 @@ async function startServer() {
             }
           } catch (err: any) {
             console.error('[WS] Error de autenticación/memoria:', err);
-            ws.send(JSON.stringify({ type: 'error', message: err?.message || 'PIN incorrecto.' }));
+            // code: la app cierra la sesión solo con esto (no por una palabra del texto; revisión S3)
+            ws.send(JSON.stringify({ type: 'error', code: 'auth_failed', message: err?.message || 'PIN incorrecto.' }));
             return;
           }
           return;
@@ -896,6 +928,14 @@ async function startServer() {
 
         try {
           const data = JSON.parse(message as string);
+          // Tamaño máximo por tipo de mensaje (revisión 2026-10-31, S2): lo que manda el teléfono termina en la memoria y en
+          // el contexto del modelo; sin tope, un texto enorme llenaba el disco o el prompt. Los mayores son el audio y las fotos.
+          const tope = WS_TOPES[String(data?.type)] ?? WS_TOPE_DEFAULT;
+          if (String(message).length > tope) {
+            console.warn(`[WS] ${profileId}: «${String(data?.type).slice(0, 40)}» de ${String(message).length} caracteres (tope ${tope}): se ignora`);
+            ws.send(JSON.stringify({ type: "error", code: "too_large", message: "El mensaje es demasiado grande." }));
+            return;
+          }
 
           if (data.type === "logout") {
             // Cerrar sesión: el token deja de valer también en el servidor
@@ -1049,7 +1089,7 @@ async function startServer() {
               return;
             }
             const newPin = data.newPin;
-            if (!newPin) throw new Error("Nuevo PIN inválido");
+            if (!newPin) { ws.send(JSON.stringify({ type: "error", message: "Nuevo PIN inválido" })); return; }
             await memory.changePin(newPin);
             
             const oldKey = `${profileId}:${pin || ''}`;
@@ -1242,11 +1282,13 @@ async function startServer() {
           }
 
           if (data.type === "save_preference") {
-            if (data.key) {
-              try {
-                await memory.set(`pref_${data.key}`, data.value);
-              } catch {}
-              ws.send(JSON.stringify({ type: "preference_saved", key: data.key }));
+            // Solo las preferencias que manda la app y con tamaño acotado (revisión 2026-10-31, S1: la clave iba tal cual a
+            // la ruta del archivo y con «../» se escribía fuera del perfil)
+            const PREFS = new Set(["notifications", "auto_prefs"]);
+            const key = typeof data.key === "string" ? data.key : "";
+            if (PREFS.has(key) && JSON.stringify(data.value ?? null).length <= 8_000) {
+              try { await memory.set(`pref_${key}`, data.value); } catch {}
+              ws.send(JSON.stringify({ type: "preference_saved", key }));
             }
             return;
           }
@@ -1258,12 +1300,43 @@ async function startServer() {
             if (data.profile?.medical && data.profile.medical.labs === undefined && current?.medical?.labs?.length) {
               data.profile = { ...data.profile, medical: { ...data.profile.medical, labs: current.medical.labs } };
             }
+            // El historial médico tiene un solo camino (medical_history_*): una copia vieja de la app no lo pisa ni revive lo borrado
+            if (data.profile?.medical) {
+              const { history: _h, ...med } = data.profile.medical;
+              data.profile = { ...data.profile, medical: { ...med, ...(current?.medical?.history?.length ? { history: current.medical.history } : {}) } };
+            }
             await memory.saveProfile(data.profile);
             queryEngines.delete(`${profileId}:${pin || ''}`);
             queryEngines.delete(`${profileId}:${pin || ''}#eris`);
             const oldGluco = activeGlucoServices.get(profileId);
             if (oldGluco) { oldGluco.stopPolling(); activeGlucoServices.delete(profileId); }
             ws.send(JSON.stringify({ type: "profile_saved", profile: data.profile }));
+            return;
+          }
+
+          // ─── Historial médico (Inventario → Botiquín): consultas, exámenes, vacunas y eventos con su fecha ───
+          if (data.type === "medical_history_add" || data.type === "medical_history_delete") {
+            const profile: any = await memory.getProfile().catch(() => null);
+            if (!profile) { ws.send(JSON.stringify({ type: "medical_history_saved", requestId: data.requestId, ok: false, msg: "Todavía no tienes perfil" })); return; }
+            const medical = profile.medical ?? { conditions: [], medications: [], thresholds: {} };
+            let history: any[] = Array.isArray(medical.history) ? medical.history : [];
+            if (data.type === "medical_history_add") {
+              const e = data.entry ?? {};
+              const TIPOS = ["consulta", "examen", "vacuna", "procedimiento", "urgencia", "evento"];
+              const title = String(e.title ?? "").trim().slice(0, 80);
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(String(e.date)) || !TIPOS.includes(e.type) || !title) {
+                ws.send(JSON.stringify({ type: "medical_history_saved", requestId: data.requestId, ok: false, msg: "Falta la fecha, el tipo o qué fue" }));
+                return;
+              }
+              history = [...history, { id: crypto.randomUUID(), date: e.date, type: e.type, title, ...(e.note ? { note: String(e.note).trim().slice(0, 400) } : {}), addedAt: new Date().toISOString() }]
+                .sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 300);
+            } else {
+              history = history.filter((h) => h.id !== data.id);
+            }
+            const next = { ...profile, medical: { ...medical, history } };
+            await memory.saveProfile(next);
+            ws.send(JSON.stringify({ type: "medical_history_saved", requestId: data.requestId, ok: true, history }));
+            ws.send(JSON.stringify({ type: "profile_saved", profile: next }));
             return;
           }
 
@@ -1326,6 +1399,10 @@ async function startServer() {
               // directo contra lo último persistido, que es también lo que lee LiveContextTool.
               let merged = data.snapshot;
               let prevActivity: any = null;
+              // Piloto automático del plan de Eris: con los datos al día (despertó, es de noche), arma lo que toque
+              // (uno por perfil: el teléfono manda varias partes seguidas y cada una armaba su propio intento; revisión S2)
+              clearTimeout(autoTickTimers.get(profileId));
+              autoTickTimers.set(profileId, setTimeout(() => { autoTickTimers.delete(profileId); import("./services/DayPlanService.js").then((DP) => DP.autoTick(memory, ws)).catch(() => null); }, 1500));
               try {
                 const existing = await memory.get('health_snapshot_latest');
                 prevActivity = existing?.activity ?? null;
@@ -1343,6 +1420,7 @@ async function startServer() {
                 // Sueño, pulso, pasos y entreno: el día calendario
                 await memory.upsertDailyRollup({
                   sleepHours: merged.sleep?.durationHours,
+                  sleepNightHours: typeof merged.sleep?.nightHours === "number" ? merged.sleep.nightHours : undefined,
                   restingHR: merged.heartRate?.resting,
                   steps: merged.steps,
                   // Solo si Forge dijo que fue HOY: `trained` a secas quedaba en true para siempre y marcaba todos los días
@@ -1370,6 +1448,49 @@ async function startServer() {
             resolveFinanceOp(ws, data);
             return;
           }
+          // ─── Resultado de una operación de Inventario pedida por inventory_tracker ───
+          if (data.type === "inventory_op_result") {
+            resolveInventoryOp(ws, data);
+            return;
+          }
+          // ─── Lo que tiene en casa (Inventario): el texto para Eris y los números (el asesor de comida los usa en I7) ───
+          // ─── «Mis suplementos» (fase I5): el resultado de una toma por chat, lo de hoy para Eris y el estado completo ──
+          // El estado se guarda (cifrado, como todo el perfil) para responder «¿qué me falta?» sin el teléfono y para devolverlo
+          // si el teléfono aparece sin nada (otro teléfono, app reinstalada). Un estado vacío nunca pisa uno con suplementos.
+          if (data.type === "supplement_op_result") {
+            resolveSupplementOp(ws, data);
+            return;
+          }
+          if (data.type === "update_supplement_context") {
+            try {
+              if (typeof data.context === "string" && data.context.length < 20_000) {
+                await memory.set("supplements_context_latest", { at: new Date().toISOString(), context: data.context, summary: data.summary && typeof data.summary === "object" ? data.summary : null });
+              }
+              const st = data.state;
+              if (st && typeof st === "object" && Array.isArray(st.items) && JSON.stringify(st).length < 200_000) {
+                const prev: any = await memory.get("supplements_state").catch(() => null);
+                const vacio = !st.items.length && !Object.keys(st.log ?? {}).length;
+                if (!vacio || !prev?.state?.items?.length) await memory.set("supplements_state", { at: new Date().toISOString(), state: st });
+              }
+            } catch {}
+            return;
+          }
+          if (data.type === "supplement_state_get") {
+            const prev: any = await memory.get("supplements_state").catch(() => null);
+            ws.send(JSON.stringify({ type: "supplement_state", state: prev?.state ?? null, at: prev?.at ?? null }));
+            return;
+          }
+          // ─── Tus versiones de alimentos (app 1.58): el chat las usa antes que la base (FoodResolve.myFoodFor) ──
+          if (data.type === "my_foods_sync") {
+            try { await memory.set("my_foods", cleanMyFoods(data.foods)); } catch {}
+            return;
+          }
+          if (data.type === "update_inventory_context") {
+            if (typeof data.context === "string" && data.context.length < 60_000) {
+              try { await memory.set("inventory_context_latest", { at: new Date().toISOString(), context: data.context, summary: data.summary && typeof data.summary === "object" ? data.summary : null }); } catch {}
+            }
+            return;
+          }
 
           // ─── Contexto financiero desde Hunter Wallet ─────────────────────────
           if (data.type === "update_financial_context") {
@@ -1381,7 +1502,7 @@ async function startServer() {
                 const presupuesto = Array.isArray(sm.presupuesto) ? sm.presupuesto.slice(0, 20).filter((l: any) => l && typeof l.cat === "string")
                   .map((l: any) => ({ cat: String(l.cat).slice(0, 30), estado: String(l.estado ?? "").slice(0, 20), queda: num(l.queda), porDia: num(l.porDia), presup: num(l.presup), gastado: num(l.gastado) })) : undefined;
                 try {
-                  await memory.set('financial_summary_latest', { at: new Date().toISOString(), disponible: num(sm.disponible), libre: num(sm.libre), porDia: num(sm.porDia),
+                  await memory.set('financial_summary_latest', { at: new Date().toISOString(), plata: num(sm.plata), libre: num(sm.libre), porDia: num(sm.porDia),
                     runwayDias: num(sm.runwayDias), patrimonio: num(sm.patrimonio), rating: sm.rating && typeof sm.rating.nota === "string" ? { nota: sm.rating.nota.slice(0, 4), score: num(sm.rating.score) } : undefined,
                     ...(presupuesto ? { presupuesto } : {}) });
                 } catch {}
@@ -1392,8 +1513,9 @@ async function startServer() {
                   // celebraba como mejora (2026-10-07). Las apps nuevas mandan ultimoMovimiento; con eso, sin movimientos recientes no cuenta.
                   const last = data.summary.ultimoMovimiento;
                   const stale = "ultimoMovimiento" in data.summary && (typeof last !== "string" || Date.now() - Date.parse(`${last}T12:00:00`) > 7 * 86_400_000);
+                  // «Tu plata» (cuentas + ahorro) en vez del «disponible» del mes, que contaba el sueldo que aún no llegaba (2026-10-22)
                   await memory.upsertDailyRollup({
-                    disponible: data.summary.disponible,
+                    plata: typeof data.summary.plata === "number" ? data.summary.plata : undefined,
                     ahorroAcum: data.summary.ahorroAcum,
                     savingsRate: stale ? undefined : data.summary.savingsRate,
                   });
@@ -1441,13 +1563,56 @@ async function startServer() {
           // Misma normalización que el resto (FoodText): tildes, mayúsculas, símbolos, espacios, orden y errores de tipeo.
           if (data.type === "food_search") {
             const query = String(data.query || "").slice(0, 80);
-            let hits: Array<{ product: unknown; score: number }> = [];
+            let hits: Array<{ product: unknown; score: number; exact: boolean }> = [];
             let corrected: string | null = null;
             try {
-              hits = searchPackagedHits(query, 8, { prefix: true, partial: true }).map((h) => ({ product: h.item, score: Math.round(h.score * 100) / 100 }));
+              hits = searchPackagedHits(query, 8, { prefix: true, partial: true }).map((h) => ({ product: h.item, score: Math.round(h.score * 100) / 100, exact: h.exact }));
               corrected = unifiedFood.correctQuery(query);
             } catch {}
             ws.send(JSON.stringify({ type: "food_search_result", requestId: data.requestId, hits, corrected }));
+            return;
+          }
+          // ─── Modo estricto con los antojos (fase I7; Perfil): un antojo que no calza se recomienda solo con la contrapartida ──
+          // ─── «¿Qué recomienda Eris?» (Eris al timón · T1): la hoja y la tarjeta «Plan de Eris» de Inicio ──
+          if (data.type === "day_plan_request") {
+            const reply = (o: Record<string, unknown>) => ws.send(JSON.stringify({ type: "day_plan", requestId: data.requestId, ...o }));
+            try {
+              const DP = await import("./services/DayPlanService.js");
+              // La app que conoce el Modo Rendimiento (R1) lo avisa con v: 2; a las anteriores el plan les llega como Óptimo
+              if (Number(data.v) >= 2) (ws.data as any).planV = 2;
+              const rend = (ws.data as any).planV >= 2 && await DP.rendimientoOk((ws.data as any).role);
+              const mode = ["estricto", "optimo", "flexible"].includes(data.mode) || (data.mode === "rendimiento" && rend) ? data.mode : "optimo";
+              const nota = typeof data.nota === "string" ? data.nota.slice(0, 240) : undefined;
+              // El check-in de mente (de la hoja, en el Modo Rendimiento): números del 1 al 5 y el tipo de día
+              const mm = data.mente && typeof data.mente === "object" ? data.mente : null;
+              const n15 = (x: unknown) => (Number.isInteger(x) && (x as number) >= 1 && (x as number) <= 5 ? (x as number) : undefined);
+              const mente = mm ? Object.fromEntries(Object.entries({ estres: n15(mm.estres), foco: n15(mm.foco), tipo: ["detalle", "ideas", "todo"].includes(mm.tipo) ? mm.tipo : undefined }).filter(([, v]) => v !== undefined)) : null;
+              const reply = (o: Record<string, unknown>) => ws.send(JSON.stringify({ type: "day_plan", requestId: data.requestId, ...o, ...("plan" in o ? { plan: DP.planForClient(ws, o.plan as any) } : {}) }));
+              switch (data.action) {
+                case "preview": reply({ plan: await DP.loadPlan(memory), modos: await DP.previewPlans(memory, new Date(), { rendimiento: rend }), auto: (await DP.getAuto(memory)).on }); break;
+                case "build": reply({ plan: await DP.buildPlan(memory, mode, nota, new Date(), null, { provider, model: THINKING_MODES.flash.model }, mente && Object.keys(mente).length ? mente : null), aplicar: true }); break;
+                // Piloto automático: «que Eris arme mi día cada mañana»
+                case "auto": reply({ plan: await DP.loadPlan(memory), auto: (await DP.setAuto(memory, data.on === true)).on }); if (data.on === true) void DP.autoTick(memory, ws).catch(() => null); break;
+                case "swap": { const r = await DP.swapPlan(memory, String(data.slot ?? "")); reply({ plan: r?.plan ?? await DP.loadPlan(memory), ...(r ? {} : { error: "sin_opcion" }) }); break; }
+                case "undo": await DP.undoPlan(memory); reply({ plan: null }); break;
+                case "done": { const r = await DP.doneStep(memory, ws, String(data.pasoId ?? "")); reply({ plan: r?.plan ?? await DP.loadPlan(memory), logged: !!r?.logged }); break; }
+                // Comió otra cosa (lo anotó en la app): el resto del día se rearma con lo que el teléfono sabe que comió
+                case "replan": {
+                  const a = data.ate && typeof data.ate === "object" ? data.ate : {};
+                  const ate = { slots: Array.isArray(a.slots) ? a.slots.filter((s: unknown) => typeof s === "string").slice(0, 8) : [], kcal: Number(a.kcal) || 0, protein: Number(a.protein) || 0 };
+                  reply({ plan: await DP.replan(memory, null, ate) ?? null });
+                  break;
+                }
+                default: reply({ plan: await DP.loadPlan(memory) });
+              }
+            } catch (e: any) {
+              reply({ error: String(e?.message ?? e).slice(0, 200) });
+            }
+            return;
+          }
+          if (data.type === "set_strict_mode") {
+            try { await memory.set("strict_mode", data.on === true); } catch {}
+            ws.send(JSON.stringify({ type: "strict_mode", on: data.on === true }));
             return;
           }
           // ─── El tono con que habla Eris (lo elige la persona; la edad de Forge solo sugiere uno) ──
@@ -1493,6 +1658,74 @@ async function startServer() {
             ws.send(JSON.stringify({ type: "finance_backup_pull", requestId: data.requestId, ok: !!dump, dump }));
             return;
           }
+          // ─── El entreno de hoy («¿entrenas hoy?», services/TrainingIntent.ts): metas según el día ──
+          if (data.type === "set_training_intent") {
+            const today = localDay();
+            const intent = data.intent === null ? null : sanitizeIntent(data.intent, today);
+            if (data.intent !== null && !intent) { ws.send(JSON.stringify({ type: "training_intent", ok: false })); return; }
+            await saveIntent(memory, intent?.day ?? today, intent).catch(() => {});
+            ws.send(JSON.stringify({ type: "training_intent", ok: true, day: intent?.day ?? today, intent }));
+            try { ws.send(JSON.stringify({ type: "nutrition_today", ...(await buildNutritionToday(memory)) })); } catch {}
+            return;
+          }
+          if (data.type === "get_training_intent") {
+            ws.send(JSON.stringify({ type: "training_intent", ok: true, day: localDay(), intent: await intentFor(memory).catch(() => null) }));
+            return;
+          }
+          // Lo que calcula Forge con el plan de hoy y tus últimas cargas (para «hoy entreno» por chat)
+          if (data.type === "sync_forge_projection") {
+            const p = sanitizeProjection(data.projection);
+            if (p) await memory.set(PROJECTION_KEY, p).catch(() => {});
+            return;
+          }
+          // ─── Respaldo de Forge, cifrado en el PC (services/ForgeBackup.ts) ──
+          if (data.type === "forge_backup_push") {
+            const dump = sanitizeForgeDump(data.dump, profileId);
+            if (!dump) { ws.send(JSON.stringify({ type: "forge_backup_saved", ok: false })); return; }
+            try {
+              const r = await saveForgeBackup(memory, dump);
+              if (r.saved) console.log(`[Forge] respaldo de ${profileId}: ${dump.stats.dias} días entrenados, ${dump.stats.habilidades} habilidades`);
+              ws.send(JSON.stringify({ type: "forge_backup_saved", ...r }));
+            } catch (e: any) {
+              console.warn("[Forge] no se pudo guardar el respaldo:", e?.message ?? e);
+              ws.send(JSON.stringify({ type: "forge_backup_saved", ok: false }));
+            }
+            return;
+          }
+          if (data.type === "forge_backup_list") {
+            ws.send(JSON.stringify({ type: "forge_backup_list", requestId: data.requestId, copies: await listForgeBackups(memory).catch(() => []) }));
+            return;
+          }
+          if (data.type === "forge_backup_pull") {
+            const day = typeof data.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.day) ? data.day : undefined;
+            const dump = await pullForgeBackup(memory, day).catch(() => null);
+            ws.send(JSON.stringify({ type: "forge_backup_pull", requestId: data.requestId, ok: !!dump, dump }));
+            return;
+          }
+          // ─── Respaldo de Inventario, cifrado en el PC (services/InventoryBackup.ts) ──
+          if (data.type === "inventory_backup_push") {
+            const dump = sanitizeInventoryDump(data.dump, profileId);
+            if (!dump) { ws.send(JSON.stringify({ type: "inventory_backup_saved", ok: false })); return; }
+            try {
+              const r = await saveInventoryBackup(memory, dump);
+              if (r.saved) console.log(`[Inventario] respaldo de ${profileId}: ${dump.stats.items} cosas (${dump.stats.conStock} con stock)`);
+              ws.send(JSON.stringify({ type: "inventory_backup_saved", ...r }));
+            } catch (e: any) {
+              console.warn("[Inventario] no se pudo guardar el respaldo:", e?.message ?? e);
+              ws.send(JSON.stringify({ type: "inventory_backup_saved", ok: false }));
+            }
+            return;
+          }
+          if (data.type === "inventory_backup_list") {
+            ws.send(JSON.stringify({ type: "inventory_backup_list", requestId: data.requestId, copies: await listInventoryBackups(memory).catch(() => []) }));
+            return;
+          }
+          if (data.type === "inventory_backup_pull") {
+            const day = typeof data.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.day) ? data.day : undefined;
+            const dump = await pullInventoryBackup(memory, day).catch(() => null);
+            ws.send(JSON.stringify({ type: "inventory_backup_pull", requestId: data.requestId, ok: !!dump, dump }));
+            return;
+          }
           // Cartola del banco (Excel/CSV) → movimientos; se lee en memoria y no se guarda (services/FinanceStatement.ts).
           // La conciliación con lo anotado la hace el teléfono con el núcleo (conciliarCartola).
           if (data.type === "finance_statement_parse") {
@@ -1515,6 +1748,14 @@ async function startServer() {
             ws.send(JSON.stringify({ type: "finance_receipt_read", requestId: data.requestId, ...r }));
             return;
           }
+          // Captura de la app del banco → los saldos que muestra (Eris administra, A2: para cuadrar). Vuelven solo números.
+          if (data.type === "finance_balance_photo") {
+            const img = typeof data.image === "string" ? data.image : "";
+            let r: any;
+            try { r = await leerSaldoCaptura(img); } catch { r = { ok: false, code: "ocr", msg: "No pude leer la captura." }; }
+            ws.send(JSON.stringify({ type: "finance_balance_read", requestId: data.requestId, ...r }));
+            return;
+          }
           // Producto que el usuario cargó a mano desde el envase: queda en la base para la próxima vez
           if (data.type === "food_barcode_contribute") {
             const saved = data.product ? contributeProduct(data.product) : null;
@@ -1533,7 +1774,7 @@ async function startServer() {
               const food = kcal !== undefined && kcal >= 300 && kcal <= 4500 && (prot ?? 0) <= 300;
               return {
                 date: typeof d?.date === "string" ? d.date.slice(0, 10) : "",
-                steps: num(d?.steps, 100000), sleepHours: num(d?.sleepHours, 20), hydrationL: num(d?.hydrationL, 15),
+                steps: num(d?.steps, 100000), sleepHours: num(d?.sleepHours, 20), sleepNightHours: num(d?.sleepNightHours, 20), hydrationL: num(d?.hydrationL, 15),
                 ...(food ? { calories: kcal, proteinG: prot, carbsG: num(d?.carbsG, 2000), fatG: num(d?.fatG, 1000) } : {}),
               };
             });
@@ -1890,6 +2131,9 @@ async function startServer() {
             const currentSessionId = (ws.data as any).sessionId;
             const history = sessions.get(currentSessionId) || [];
 
+            // Apps ≤1.78 pegaban «[Contexto biométrico detallado: …]» al pedir el análisis: el servidor ya tiene esos datos,
+            // y en el texto hacían lento el turno y quedaban guardados como si los hubiera escrito la persona (R1)
+            userText = sinContextoPegado(userText) || userText;
             console.log(`\n[MSG] ${profileId}: "${userText.substring(0, 30)}..." | Modo: ${requestedMode}`);
             const startTime = Date.now();
 
@@ -1940,23 +2184,15 @@ async function startServer() {
                   onThinking: (text) => {
                     ws.send(JSON.stringify({ type: "thinking_token", content: text }));
                   },
+                  // Al teléfono solo QUÉ herramienta corre (para la interfaz), nunca su entrada ni su salida: llevaban datos internos
+                  // y texto para el modelo (revisión 2026-11-04, P2). El detalle queda en el rastro del mensaje (trace).
                   onToolCall: (tc) => {
                     traceTools.push(tc.name);
-                    ws.send(JSON.stringify({
-                      type: "tool_call",
-                      name: tc.name,
-                      input: tc.input,
-                    }));
+                    ws.send(JSON.stringify({ type: "tool_call", name: tc.name }));
                   },
                   onToolResult: (result) => {
                     if (result.error) traceErrors.push(`${result.name}: ${String(result.error).slice(0, 120)}`);
-                    ws.send(JSON.stringify({
-                      type: "tool_result",
-                      name: result.name,
-                      output: result.output,
-                      error: result.error,
-                      duration: result.duration,
-                    }));
+                    ws.send(JSON.stringify({ type: "tool_result", name: result.name, ok: !result.error, duration: result.duration }));
                   },
                   onModeResolved: (mode, model) => {
                     ws.send(JSON.stringify({
@@ -1975,6 +2211,8 @@ async function startServer() {
                   memory,
                   role: (ws.data as any).role,
                   wsClient: ws,
+                  // Para lo que el código no entiende y el modelo SOLO convierte a datos («Otro» del plan de Eris)
+                  llm: { provider, model: THINKING_MODES.flash.model },
                   glucoService: activeGlucoServices.get(profileId) || null,
                   foodService: unifiedFood,
                   // La app manda si está en Modo AXS Executive: fuera de él, Eris no usa las herramientas de AXS
@@ -2053,8 +2291,9 @@ async function startServer() {
               const toSummarize = memory.getMessagesToSummarize(currentSessionId, 6);
               if (toSummarize && toSummarize.length > 0) {
                 console.log(`  🗜️ [${profileId}] Comprimiendo ${toSummarize.length} mensajes...`);
+                const nombre = await memory.getProfile().then((p: any) => p?.displayName ?? p?.name ?? null).catch(() => null);
                 compressor
-                  .compress(toSummarize, ctx.summary)
+                  .compress(toSummarize, ctx.summary, nombre)
                   .then((summary) => {
                     // Un resumen vacío (falló el modelo) no reemplaza al anterior ni da por resumidos esos mensajes
                     if (!summary.trim()) return;
@@ -2103,10 +2342,8 @@ async function startServer() {
               ws.send(JSON.stringify({ type: "voice_transcribed", text: transcribed, ...(transcribed !== v.heard ? { heard: v.heard } : {}) }));
               await handleUserText(transcribed, data.mode || DEFAULT_CONFIG.defaultMode);
             } catch (err) {
-              ws.send(JSON.stringify({
-                type: "error",
-                message: `No pude transcribir el audio: ${err instanceof Error ? err.message : String(err)}`,
-              }));
+              console.error("[Voz] No pude transcribir:", err);
+              ws.send(JSON.stringify({ type: "error", message: "No pude transcribir el audio. Inténtalo de nuevo en un momento." }));
             }
             return;
           }
@@ -2133,10 +2370,8 @@ async function startServer() {
                 mimeType: "audio/wav",
               }));
             } catch (err) {
-              ws.send(JSON.stringify({
-                type: "error",
-                message: `No pude generar la voz: ${err instanceof Error ? err.message : String(err)}`,
-              }));
+              console.error("[Voz] No pude generar la voz:", err);
+              ws.send(JSON.stringify({ type: "error", message: "No pude generar la voz esta vez." }));
             }
             return;
           }
@@ -2152,10 +2387,9 @@ async function startServer() {
             }));
           }
         } catch (err) {
-          ws.send(JSON.stringify({
-            type: "error",
-            message: err instanceof Error ? err.message : String(err),
-          }));
+          // El detalle (rutas, puertos, nombres internos) queda en el registro del servidor; al teléfono, algo que se entienda
+          console.error(`[WS] Error en «${String((() => { try { return JSON.parse(String(message)).type; } catch { return "?"; } })())}»:`, err);
+          ws.send(JSON.stringify({ type: "error", message: "Algo falló de mi lado. Inténtalo de nuevo en un momento." }));
         }
       },
 

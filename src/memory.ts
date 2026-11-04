@@ -13,6 +13,17 @@ const MEMORY_DIR = join(os.homedir(), ".eris");
 const PROFILES_DIR = join(MEMORY_DIR, "profiles");
 
 /** Largo máximo de las instrucciones de un proyecto: van en CADA consulta y el contexto del modelo local es chico. */
+
+/**
+ * Una clave de la memoria es un nombre, nunca una ruta (revisión 2026-10-31, S1): con «../» una clave llegaba a escribir
+ * fuera del perfil (otro perfil, roles.json). Solo letras, números, espacios, «_», «-», «.» y «:», sin «..», y largo acotado.
+ */
+export function claveSegura(key: string): string {
+  const k = String(key ?? "");
+  if (!/^[A-Za-z0-9 _.:-]{1,120}$/.test(k) || k.includes("..")) throw new Error(`Clave de memoria no válida: ${k.slice(0, 40)}`);
+  return k;
+}
+
 export const MAX_PROJECT_INSTRUCTIONS = 1500;
 
 export interface Project {
@@ -110,6 +121,22 @@ export interface MedicalProfile {
   dietaryRestrictions?: string[];
   /** Exámenes que el usuario contó (HbA1c, colesterol…), con su fecha. Los guarda lab_results; la app los conserva al guardar el perfil. */
   labs?: LabResult[];
+  /**
+   * El historial médico (Inventario → Botiquín, 2026-10-22): consultas, exámenes, vacunas, procedimientos y otros eventos con
+   * su fecha. Lo escribe SOLO `medical_history_add/delete` (guardar el perfil desde la app no lo pisa).
+   */
+  history?: MedicalEvent[];
+}
+
+export type MedicalEventType = 'consulta' | 'examen' | 'vacuna' | 'procedimiento' | 'urgencia' | 'evento';
+export interface MedicalEvent {
+  id: string;
+  /** YYYY-MM-DD */
+  date: string;
+  type: MedicalEventType;
+  title: string;
+  note?: string;
+  addedAt: string;
 }
 
 export type LabTest = 'hba1c' | 'glucosa_ayunas' | 'colesterol_total' | 'ldl' | 'hdl' | 'trigliceridos' | 'creatinina';
@@ -142,6 +169,8 @@ export interface InsulinDose {
 export interface DailyRollupEntry {
   date: string;           // YYYY-MM-DD local (ver localDateKey)
   sleepHours?: number;
+  /** Sueño 2.0 · S0: lo dormido en la noche (sleepHours es el total del día: noche + segundo sueño + siestas) */
+  sleepNightHours?: number;
   restingHR?: number;
   steps?: number;
   hydrationL?: number;
@@ -150,7 +179,10 @@ export interface DailyRollupEntry {
   fatG?: number;
   calories?: number;
   trained?: boolean;
+  /** histórico (hasta 2026-10-22): ingresos − gastos del mes; ya no se escribe */
   disponible?: number;
+  /** tu plata: efectivo + débito + ahorro (Finanzas) */
+  plata?: number;
   ahorroAcum?: number;
   savingsRate?: number;
   moodScore?: number;     // 1-5, promedio de las entradas del bloc de notas ese día
@@ -446,7 +478,7 @@ export class FileSystemAdapter implements MemoryAdapter {
    * Ahora la escritura es atómica (ver set) y una lectura que no se puede interpretar se reintenta; si sigue fallando, lanza.
    */
   async get(key: string): Promise<any> {
-    const file = join(this.profileDir, `kv_${key}.json`);
+    const file = join(this.profileDir, `kv_${claveSegura(key)}.json`);
     for (let attempt = 0; ; attempt++) {
       let raw: string;
       try {
@@ -469,7 +501,7 @@ export class FileSystemAdapter implements MemoryAdapter {
   /** Escritura atómica y cifrada (ver writeAtomic y sealFile). */
   async set(key: string, value: any): Promise<void> {
     try {
-      const file = join(this.profileDir, `kv_${key}.json`);
+      const file = join(this.profileDir, `kv_${claveSegura(key)}.json`);
       await this.writeAtomic(file, this.sealFile(JSON.stringify(value)));
     } catch (e) {
       console.error(`[Memory] Error guardando clave "${key}":`, e);
@@ -516,11 +548,9 @@ export class FileSystemAdapter implements MemoryAdapter {
   async updateSummary(sessionId: string, summary: string, summarizedUpTo: number): Promise<void> {
     const conv = this.store.conversations.find((c) => c.id === sessionId);
     if (!conv) return;
-    if (conv.summary) {
-      conv.summary = `${conv.summary}\n\n${summary}`;
-    } else {
-      conv.summary = summary;
-    }
+    // El compresor ya integra el resumen anterior (se le pasa): se REEMPLAZA. Antes se pegaba detrás del viejo y el resumen
+    // se duplicaba en cada compresión (revisión 2026-11-04, R4). Tope por si el modelo se alarga.
+    conv.summary = summary.trim().slice(0, 4000);
     conv.summaryUpTo = summarizedUpTo;
     await this.save();
   }
@@ -659,17 +689,13 @@ export class FileSystemAdapter implements MemoryAdapter {
       if (cleanMessages.length < 2) return;
 
       const entry = { id: sessionId, timestamp: new Date().toISOString(), approved: false, messages: cleanMessages };
-      const filePath = join(this.trainingDir, "conversations.jsonl");
-      // Cifrado de training omitido temporalmente, se guardará cifrado en el futuro o se cifra la línea
+      // Un archivo por conversación, con su última versión. Antes se agregaba la conversación ENTERA en cada turno a un solo
+      // archivo que además se leía completo para reescribirlo: crecía al cuadrado (860 KB en un perfil) y cada respuesta lo
+      // releía (revisión 2026-11-04, R4). conversations.jsonl queda como estaba (lo antiguo).
+      const safe = String(sessionId).replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80) || "sin_id";
+      const filePath = join(this.trainingDir, `sesion_${safe}.jsonl`);
       const line = JSON.stringify(entry) + "\n";
-      const encryptedLine = this.crypto.encrypt(line) + "\n";
-
-      try {
-        const existing = await readFile(filePath, "utf-8");
-        await writeFile(filePath, existing + encryptedLine, "utf-8");
-      } catch {
-        await writeFile(filePath, encryptedLine, "utf-8");
-      }
+      await writeFile(filePath, this.crypto.encrypt(line) + "\n", "utf-8");
     } catch (err) {
       console.error("Error guardando training data:", err);
     }

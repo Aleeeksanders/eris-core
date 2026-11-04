@@ -120,7 +120,7 @@ export class ProfileManagementTool extends Tool<ProfileManagementInput> {
         allergies: currentProfile.medical?.allergies,
         dietaryRestrictions: currentProfile.medical?.dietaryRestrictions,
         conditions: currentProfile.medical?.conditions?.map((c: any) => c.id),
-        medications: currentProfile.medical?.medications?.map((m: any) => `${m.name}${m.active ? "" : " (inactivo)"}`),
+        medications: currentProfile.medical?.medications?.map((m: any) => `${m.name}${m.active === false ? " (inactivo)" : ""}`),
         customContext: currentProfile.customContext,
         goals: currentProfile.goals,
       };

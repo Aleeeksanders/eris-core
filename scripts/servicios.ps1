@@ -96,6 +96,13 @@ function Start-Piper {
 function Start-Backend {
   if (Listening 3000) { Write-Host '  El backend ya estaba arriba'; return }
   New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+  # El log anterior se guarda con su fecha (los últimos 10): antes cada reinicio lo borraba y se perdían los errores de días
+  # anteriores (revisión del 2026-10-21)
+  if (Test-Path $Log) {
+    $stamp = (Get-Item $Log).LastWriteTime.ToString('yyyy-MM-dd_HHmm')
+    Move-Item -Force $Log (Join-Path $LogDir "servidor-$stamp.log")
+    Get-ChildItem $LogDir -Filter 'servidor-*.log' | Sort-Object LastWriteTime -Descending | Select-Object -Skip 10 | Remove-Item -Force -Confirm:$false
+  }
   Start-Wmi ('cmd /c "bun run src/server.ts > "' + $Log + '" 2>&1"')
   if (Wait-Port 3000 60 'Backend') {
     $ready = Select-String -Path $Log -Pattern 'Modelo precargado|chat queda en pausa' -ErrorAction SilentlyContinue | Select-Object -Last 1

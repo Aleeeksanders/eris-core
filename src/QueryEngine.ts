@@ -21,9 +21,11 @@ import { asksToLog, claimsLogged } from "./services/FoodParse.js";
 import { TOOL_GROUP, groupsFor } from "./services/ToolRouter.js";
 import { getFeatures } from "./services/Features.js";
 import { asksToSave, claimsSaved, isWriteCall, groundMoney, chileanNumbers, looksLikeReasoning, stripReasoning, cutDegenerate, inventedGlucose, alarmist, stripGlucose, fixNutrientSlips, stripFalseNutrientClaims, offersToLog } from "./services/ReplyGuards.js";
-import { detectRedFlags } from "./services/SymptomGuide.js";
+import { detectRedFlags, matchSymptoms } from "./services/SymptomGuide.js";
 import { buildTodayBrief } from "./services/LiveContext.js";
-import { isPure } from "./services/Intent.js";
+import { isPure, intentsIn } from "./services/Intent.js";
+import { leerAutoPrefs, autoPrefsDe, modulosApagados, MODULO_HERRAMIENTAS } from "./services/AutoPrefs.js";
+import { parseInventoryMessage } from "./services/InventoryParse.js";
 import { getTone, toneInstruction } from "./services/Tone.js";
 import { promptForTools } from "./services/PromptSections.js";
 
@@ -150,7 +152,10 @@ export class QueryEngine {
     // Las herramientas reciben también el mensaje original del usuario: así una respuesta rápida solo se usa si el mensaje pide UNA cosa.
     // …y la última respuesta de Eris: "borra eso" solo se resuelve por código si lo anterior fue anotar comida (FoodParse).
     const lastAssistantMessage = [...conversationHistory].reverse().find((m) => m.role === "assistant")?.content;
-    toolContext = { ...(toolContext ?? {}), userMessage: rawUserMessage ?? userMessage, lastAssistantMessage };
+    // …y lo que dijo ANTES la persona (el turno actual ya viene al final del historial): «Sí porfa» sigue a esa pregunta
+    const histPrev = conversationHistory.length && conversationHistory[conversationHistory.length - 1].role === "user" ? conversationHistory.slice(0, -1) : conversationHistory;
+    const lastUserMessage = [...histPrev].reverse().find((m) => m.role === "user")?.content;
+    toolContext = { ...(toolContext ?? {}), userMessage: rawUserMessage ?? userMessage, lastAssistantMessage, lastUserMessage };
     callbacks?.onModeResolved?.(actualMode, modeConfig.model);
 
     // ─── Construir mensajes ─────────────────────────────────
@@ -269,10 +274,23 @@ Reglas:
         console.log(`[Router] en modo Eris no quedaba ninguna herramienta: salud + Finanzas (${toolDefinitions.length})`);
       }
       allowedTools = new Set(toolDefinitions.map((d) => d.name));
+    } else if (this.router && !(topics.length === 1 && topics[0] === "web") && !toolDefinitions.some((d) => d.name !== "web_search")) {
+      // Un rol sin las herramientas del grupo pedido (usuario público y «el resumen de mis notas» → AXS, que no tiene): lo
+      // mismo que en el modo Eris, salud + Finanzas, en vez de dejarlo sin herramientas (revisión 2026-11-04, R2)
+      toolDefinitions = this.toolRegistry.getDefinitions().filter((d) =>
+        ["health", "finance", "web"].includes(TOOL_GROUP[d.name]) || d.name === "get_live_context");
+      if (toolDefinitions.length) { topics = ["health", "finance"]; allowedTools = new Set(toolDefinitions.map((d) => d.name)); }
     }
     if (glucoseOff) {
       toolDefinitions = toolDefinitions.filter((d) => d.name !== "gluco_tracker");
       allowedTools?.delete("gluco_tracker");
+    }
+    // Los módulos apagados en Perfil (revisión A2): sus herramientas no se ofrecen ni sus atajos corren
+    const apagados = toolContext?.memory ? modulosApagados(await leerAutoPrefs(toolContext.memory).catch(() => autoPrefsDe(null)), (toolContext as any)?.axsMode === true) : [];
+    const toolsApagadas = new Set(apagados.flatMap((m) => MODULO_HERRAMIENTAS[m].tools));
+    if (toolsApagadas.size) {
+      toolDefinitions = toolDefinitions.filter((d) => !toolsApagadas.has(d.name));
+      for (const t of toolsApagadas) allowedTools?.delete(t);
     }
     // Las instrucciones de una herramienta que este turno no ve no viajan (services/PromptSections.ts): el prompt de Eris
     // con todo pesaba ~12 500 caracteres y, junto a las definiciones, pasaba el contexto de 8192 (banco de pruebas 2026-10-16)
@@ -297,14 +315,19 @@ Reglas:
 
 ${b.text}`;
       }
-      return out;
+      // Rutas del PC fuera de la respuesta, salvo que el turno haya sido de archivos o comandos (Modo AXS): en Hestia llegó una
+      // ruta interna a una respuesta de salud (revisión 2026-11-04, P1)
+      const rutasOk = !hideAxs && (usedSystemTool || topics.includes("system"));
+      return rutasOk ? out : sinRutas(out);
     };
 
     // ¿En este turno entró texto de terceros? Si sí, las herramientas peligrosas quedan bloqueadas.
     let tainted = false;
     const untrustedCalls = new Set<string>();
     // Lo que ya hicieron las herramientas (para poder responder algo útil si el modelo no alcanza a redactar)
-    const doneTools: Array<{ name: string; output: string }> = [];
+    const doneTools: Array<{ name: string; output: string; human?: string }> = [];
+    // Herramientas del PC usadas en este turno: ahí sí puede ir una ruta en la respuesta (P1)
+    let usedSystemTool = false;
     // ¿Se registró de verdad comida o agua en este turno? (para detectar un "✅ registrado" inventado por el modelo)
     let loggedThisTurn = false;
     let claimRetried = false;
@@ -398,6 +421,8 @@ ${b.text}`;
       log(decision, { ok: !res.error, error: res.error });
       if (!res.error && tool.name === "nutrition_tracker" && /^log_(meal|water)$/.test(String((tc.input as any)?.action)) && !(res.metadata as any)?.notLogged) loggedThisTurn = true;
       if (!res.error && tool.name === "finance_tracker" && (res.metadata as any)?.financeOk) loggedThisTurn = true;
+      if (!res.error && tool.name === "inventory_tracker" && (res.metadata as any)?.inventoryOk) loggedThisTurn = true;
+      if (!res.error && tool.name === "supplement_tracker" && (res.metadata as any)?.supplementOk) loggedThisTurn = true;
       if (!res.error && isWriteCall(tool.name, tc.input, res.metadata)) wroteThisTurn = true;
       if (tool.name === "symptom_guide") symptomThisTurn = true;
       return res;
@@ -460,12 +485,26 @@ ${b.text}`;
     // ─── Continuación automática de flujos de herramientas ──────────────
     // Ej.: Eris preguntó "¿qué tienes a mano?" y el usuario responde con ingredientes. El modelo de 4B a veces lo
     // toma por un registro de comida ("¿te lo registro?") en vez de volver a llamar a la herramienta: la llamamos acá.
-    for (const t of this.toolRegistry.getAll()) {
+    // La salud va primero (revisión 2026-10-31, H1): el primer atajo que calza responde, y la guía de síntomas iba undécima.
+    // «¿Qué me recomiendas? me duele el pecho y el brazo izquierdo» respondía el plan del día sin revisar señales de alarma.
+    // Con una señal de alarma, o una PREGUNTA sobre un síntoma, la guía va antes que todo; un síntoma contado como dato
+    // («me duele la rodilla», la nota del plan) sigue su camino.
+    const textoPre = repeatText ?? rawUserMessage ?? userMessage;
+    // «¿Cómo vengo de estrés?» o «¿cómo ando del ánimo?» preguntan por cómo VIENE (el Modo Rendimiento, el sueño), no qué
+    // hacer con un síntoma: la guía se los robaba (banco de chat 2026-11-04, «r-senales»). Con alarma, igual va primero.
+    const comoVengo = /\bc[oó]mo (vengo|ando|voy|he andado|he estado|me (ha|han) ido)\b/i.test(textoPre) && !/\b(dol|duel|fiebre|sangr|mare|v[oó]mit|n[aá]use|pecho|respir)/i.test(textoPre);
+    const urgente = detectRedFlags(textoPre).length > 0 || (!comoVengo && matchSymptoms(textoPre, 1).length > 0 && /[?¿]|^\s*(que|qué|como|cómo|tengo|me tomo|puedo)\b/i.test(textoPre));
+    const todas = this.toolRegistry.getAll();
+    const enOrden = urgente ? [...todas.filter((t) => t.name === "symptom_guide"), ...todas.filter((t) => t.name !== "symptom_guide")] : todas;
+    let atajo = false;
+    for (const t of enOrden) {
       if (!t.preroute) continue;
       if (hideAxs && HIDDEN_IN_ERIS.has(TOOL_GROUP[t.name])) continue; // briefing/auditoría de la bóveda: solo en Modo AXS
+      if (toolsApagadas.has(t.name)) continue; // su módulo está apagado en Perfil (A2)
       let input: Record<string, unknown> | null = null;
-      try { input = await t.preroute(repeatText ?? rawUserMessage ?? userMessage, toolContext); } catch { input = null; }
+      try { input = await t.preroute(textoPre, toolContext); } catch { input = null; }
       if (!input) continue;
+      atajo = true;
       const tc: ToolCall = { id: `preroute_${t.name}`, name: t.name, input };
       callbacks?.onToolCall?.(tc);
       const started = Date.now();
@@ -476,27 +515,35 @@ ${b.text}`;
       llmMessages.push({ role: "tool", content: `[Resultado de ${t.name}]\n${res.error ? `Error: ${res.error}\nOutput: ${res.output}` : res.output}`, toolCallId: tc.id });
       const append = (res.metadata as any)?.appendToReply;
       if (append?.text && !res.error) appendBlocks.set(t.name, { text: String(append.text), marker: String(append.marker || "$^") });
-      if (!res.error) doneTools.push({ name: t.name, output: res.output });
+      if (!res.error) doneTools.push({ name: t.name, output: res.output, human: (res.metadata as any)?.quickReply });
       // Herramienta determinista con respuesta lista: no hace falta una pasada del modelo (ver finishQuick)
       const q = (res.metadata as any)?.quickReply;
       if (!res.error && quickEnabled() && typeof q === "string" && q.trim()) return finishQuick(q.trim());
       break;
+    }
+    // Revisión A2: ningún atajo lo tomó y el mensaje es de un módulo apagado en Perfil → se dice, en vez de que el modelo
+    // improvise sin la herramienta («¿tengo arroz en la despensa?» con el Inventario apagado)
+    if (!atajo) {
+      const hay = intentsIn(String(rawUserMessage ?? userMessage ?? ""));
+      const m = apagados.find((x) => hay.has(MODULO_HERRAMIENTAS[x].intent));
+      if (m) return finishQuick(`Tienes **${MODULO_HERRAMIENTAS[m].nombre}** apagado (Perfil → Módulos): mientras esté apagado no lo veo ni anoto nada ahí. Si lo enciendes, te ayudo con eso.`);
     }
 
     const rescue = (): string => {
       const parts: string[] = [];
       const seen = new Set<string>(); // si el modelo insistió con la MISMA herramienta varias veces (ej. agotó las
       // 10 iteraciones re-consultando lo mismo), no repetir el mismo resultado una vez por cada intento.
+      let crudo = false;
       for (const t of doneTools) {
         if (appendBlocks.has(t.name)) continue; // ese bloque ya se anexa aparte
-        const clean = t.output
-          .replace(/\[Cómo presentarlo:[\s\S]*?\]/g, "")
-          .replace(/\[Guía médica para ti[\s\S]*?\]/g, "")
-          .replace(/TODAVÍA NO RECOMIENDES[^\n]*\n?/g, "")
-          .trim();
+        // Lo que la herramienta ya redactó para la persona (quickReply) va tal cual; si no, su salida SIN las marcas internas
+        // («HECHO (estado):», «FICHA (copia…):», «SIN DATOS…»), que antes llegaban al teléfono (revisión 2026-11-04, P2)
+        const clean = t.human?.trim() || salidaHumana(t.output);
+        if (!t.human?.trim()) crudo = true;
         if (clean && !seen.has(clean)) { seen.add(clean); parts.push(clean.slice(0, 1800)); }
       }
-      return "No alcancé a redactar la respuesta a tiempo, pero esto es lo que hice:" + (parts.length ? "\n\n" + parts.join("\n\n") : "");
+      if (!parts.length) return "Se me hizo largo y no alcancé a responderte. ¿Me lo preguntas de nuevo?";
+      return (crudo ? "Se me hizo largo redactarlo, pero esto es lo que encontré:\n\n" : "") + parts.join("\n\n");
     };
 
     let webSearches = 0;
@@ -641,23 +688,30 @@ ${b.text}`;
         // confirmación y no quedaba nada guardado. Se le exige llamar a la herramienta una vez; si insiste, se dice la verdad.
         const userText = rawUserMessage ?? userMessage;
         // Lo mismo con la plata: "gasté 5 lucas…" → "✅ anotado" sin finance_tracker no dejaba nada en Finanzas
-        const money = typeof userText === "string" && !/[?¿]/.test(userText) &&
+        // …y con el Inventario: «compré 2 L de leche» (sin plata) → «📦 anotado» sin inventory_tracker (2026-10-22)
+        const invOp = typeof userText === "string" ? parseInventoryMessage(userText) : null;
+        const inv = !!invOp && ["compra", "consumo", "se_acabo", "quedan", "botar", "agregar_lista"].includes(invOp.action);
+        const money = !inv && typeof userText === "string" && !/[?¿]/.test(userText) &&
           /\b(lucas?|luquitas?|palos?|pesos|gaste|pague|compre|preste|saque|ahorre|deposite)\b|\$\s?\d/.test(userText.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase());
         // "¿Te lo registro como almuerzo?" + kcal en rangos cuando la persona YA contó lo que comió: no llamó a la herramienta
         // (2026-10: «Al morse un plato de poroto con chuleta» → «800-900 kcal… ¿Te lo registro?»). Se le exige registrarlo.
-        const offered = !money && asksToLog(userText) && !loggedThisTurn && offersToLog(response.content);
-        if (((asksToLog(userText) || money) && claimsLogged(response.content) && !loggedThisTurn) || offered) {
-          const target = money ? "finance_tracker" : "nutrition_tracker";
+        const offered = !money && !inv && asksToLog(userText) && !loggedThisTurn && offersToLog(response.content);
+        if (((asksToLog(userText) || money || inv) && claimsLogged(response.content) && !loggedThisTurn) || offered) {
+          const target = inv ? "inventory_tracker" : money ? "finance_tracker" : "nutrition_tracker";
           const canLog = !!this.toolRegistry.get(target) && (!allowedTools || allowedTools.has(target));
           if (canLog && !claimRetried && iterations < MAX_TOOL_ITERATIONS) {
             claimRetried = true;
             llmMessages.push({ role: "assistant", content: response.content || "" });
-            llmMessages.push({ role: "user", content: money
+            llmMessages.push({ role: "user", content: inv
+              ? `[Sistema] Dijiste que lo anotaste, pero NO llamaste a inventory_tracker: no quedó nada en el Inventario. Llama ahora a inventory_tracker con lo que dice EXACTAMENTE este mensaje del usuario: «${String(userText).slice(0, 200)}». No respondas sin llamar a la herramienta.`
+              : money
               ? `[Sistema] Dijiste que lo anotaste, pero NO llamaste a finance_tracker: no quedó nada en Finanzas. Llama ahora a finance_tracker con lo que dice EXACTAMENTE este mensaje del usuario: «${String(userText).slice(0, 200)}» (monto en pesos: '5 lucas' = 5000). No respondas sin llamar a la herramienta.`
               : `[Sistema] ${offered ? "No preguntes si lo registras ni des rangos de calorías: la persona ya te contó lo que comió, y eso es pedir que se anote (la comida la decide la herramienta por la hora)." : "Dijiste que lo registraste, pero NO llamaste a nutrition_tracker: no se guardó nada."} Llama ahora a nutrition_tracker para registrar EXACTAMENTE lo que dice este mensaje del usuario, sin agregar alimentos de mensajes anteriores: «${String(userText).slice(0, 200)}». Usa action log_meal con items (name y grams de una porción normal si no dio cantidades), o log_water si es una bebida. No respondas sin llamar a la herramienta.` });
             continue;
           }
-          response = { ...response, content: money
+          response = { ...response, content: inv
+            ? "No alcancé a anotarlo en tu Inventario: no quedó guardado. Dímelo así: «compré 2 L de leche» o «se acabó el shampoo» y lo anoto."
+            : money
             ? "No alcancé a anotarlo en Finanzas: no quedó guardado. Dímelo así: «gasté 5 lucas en almuerzo con la BCI» y lo anoto."
             : "No alcancé a registrarlo: no quedó guardado. Dime cada alimento con su cantidad (por ejemplo, «registra 1 hallulla y ½ palta») y lo anoto." };
         } else if (!loggedThisTurn && !wroteThisTurn && asksToSave(userText) && claimsSaved(response.content)) {
@@ -667,10 +721,16 @@ ${b.text}`;
             llmMessages.push({ role: "assistant", content: response.content || "" });
             llmMessages.push({ role: "user", content: "[Sistema] Dijiste que lo guardaste, cambiaste o borraste, pero NO llamaste a ninguna herramienta: no pasó nada. " +
               "Si hay una herramienta para esto, llámala ahora (sleep_log: horas dormidas de una noche; nutrition_tracker: comida y agua; " +
-              "finance_tracker: plata; manage_user_profile: SOLO datos permanentes). Si no hay herramienta para lo que pide, dile con honestidad que no quedó guardado." });
+              "finance_tracker: plata; training_plan: la rutina de Forge (build_routine / save_routine); manage_user_profile: SOLO datos permanentes). " +
+              "Si no hay herramienta para lo que pide, dile con honestidad que no quedó guardado." });
             continue;
           }
-          response = { ...response, content: "Ojo: no alcancé a guardarlo, así que no quedó registrado. ¿Me lo repites? Si es tu sueño, dime por ejemplo «dormí 7 horas» y lo anoto para ese día." };
+          // El ejemplo según de qué se hablaba (2026-10-18: pidió guardar su rutina y el aviso le habló de su sueño)
+          const about = String(userText ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+          const example = /\b(rutina|entren\w*|gym|gimnasio|ejercicio)\b/.test(about)
+            ? "Pídemela así: «arma mi rutina de 4 días, 60 min, en el gimnasio» y la dejo en Forge."
+            : /\b(dormi|sueno|siesta|desperte)\b/.test(about) ? "Si es tu sueño, dime por ejemplo «dormí 7 horas» y lo anoto para ese día." : "¿Me lo repites con un poco más de detalle?";
+          response = { ...response, content: `Ojo: no alcancé a guardarlo, así que no quedó registrado. ${example}` };
         }
         // Cifras de dinero: solo las que están a la vista (Finanzas, herramientas, lo que dijo el usuario); el resto se quita
         // y se muestran las reales. 2026-10-07: "Saldo 12.650 · Gasto comida hoy 1.808 CLP" (eran sus kcal) no existían.
@@ -773,7 +833,8 @@ ${b.text}`;
           error: execResult.error,
           duration,
         };
-        if (!execResult.error) doneTools.push({ name: tc.name, output: execResult.output });
+        if (!execResult.error) doneTools.push({ name: tc.name, output: execResult.output, human: (execResult.metadata as any)?.quickReply });
+        if (TOOL_GROUP[tc.name] === "system") usedSystemTool = true;
         const append = (execResult.metadata as any)?.appendToReply;
         if (append?.text && !execResult.error) appendBlocks.set(tc.name, { text: String(append.text), marker: String(append.marker || "$^") });
         else appendBlocks.delete(tc.name);
@@ -846,4 +907,35 @@ ${b.text}`;
         content: m.content,
       }));
   }
+}
+
+/** La salida de una herramienta sin sus marcas para el modelo (para el rescate, cuando el modelo no alcanzó a redactar). */
+export function salidaHumana(output: string): string {
+  return String(output ?? "")
+    .replace(/\[Cómo presentarlo:[\s\S]*?\]/g, "")
+    .replace(/\[Guía médica para ti[\s\S]*?\]/g, "")
+    .replace(/TODAVÍA NO RECOMIENDES[^\n]*\n?/g, "")
+    .replace(/^(?:HECHO|NO SE ANOT[ÓO]|NO se anot[óo]|SIN FICHA|FICHA|DATO DE LA BASE|RESPUESTA DE LA FICHA|RESULTADO|INSTRUCCI[ÓO]N)\b[^:\n]*:\s*/gm, "")
+    .replace(/^SIN DATOS[^.\n]*\.\s*/gm, "")
+    .replace(/\((?:copia|usa|presenta)[^)]*tal cual[^)]*\)/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/**
+ * Rutas del PC fuera de un texto para la persona: «C:\Proyectos\AXS\10-19 Strategic Vision\Visión de Eris.md» → «Visión de
+ * Eris», una carpeta → «una carpeta del PC», «~/.eris/…» → «los datos de Eris».
+ */
+// Una unidad de disco («C:\», «c:/») que no sea parte de un enlace («https://»), o una ruta de Git Bash («/c/Users/…»)
+const RUTA_INI = String.raw`(?:(?<![A-Za-z0-9])[A-Za-z]:[\\/](?![\\/])|(?<![\w.:/-])\/(?:c|Users|home)\/)`;
+const RUTA_ARCHIVO = new RegExp(RUTA_INI + String.raw`[^\n"'` + "`" + String.raw`<>|*?]*?([^\\/\n"'` + "`" + String.raw`<>|*?]+)\.(?:md|json|jsonl|ts|tsx|js|txt|log|ps1|csv|pdf|html|png|jpg)\b`, "g");
+const RUTA_CARPETA = new RegExp(RUTA_INI + String.raw`[^\s"'` + "`" + String.raw`<>|*?,;)]*`, "g");
+export function sinRutas(text: string): string {
+  return String(text ?? "")
+    // archivos (hasta su extensión, aunque la ruta tenga espacios)
+    .replace(RUTA_ARCHIVO, (_m, base: string) => `«${base.trim()}»`)
+    // carpetas
+    .replace(RUTA_CARPETA, "una carpeta del PC")
+    .replace(/~[\\/]\.eris[^\s"'`<>|*?,;)]*/g, "los datos de Eris")
+    .replace(/`(«[^»]+»|una carpeta del PC|los datos de Eris)`/g, "$1");
 }

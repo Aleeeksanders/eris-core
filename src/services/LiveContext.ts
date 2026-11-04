@@ -15,17 +15,34 @@ import { getFeatures } from "./Features.js";
 import { getUserNotes, formatNotesForLLM } from "../tools/UserContextTool.js";
 import { loadTargets, localDay, GOALS, activityLabel } from "./DailyTargets.js";
 import { rollupFieldsOf } from "./NutritionLog.js";
-import { waterTotalToday } from "./WaterToday.js";
-import { todayKeyOf, internalClockLine } from "./NutritionDay.js";
-import { dayCtxFrom, nutritionDayKey, isoDayKey } from "./MealSchedule.js";
+import { waterTotalToday, waterPace, paceText } from "./WaterToday.js";
+import { todayKeyOf, todayIsoOf, internalClockLine } from "./NutritionDay.js";
+import { gatherMindSignals, mindLine } from "./MindSignals.js";
+import { dayCtxFrom, nutritionDayKey, isoDayKey, wakeHourFrom } from "./MealSchedule.js";
+import { sleepSummaryText, sleepReading, insightsText, bedtimeText, sleepReadiness, lastSleepFrom } from "./SleepCore.js";
 import { financeFactLines } from "./ReplyGuards.js";
 import { labsSummary } from "../tools/LabResultsTool.js";
+import { moduloOn } from "./AutoPrefs.js";
 
 /** "Mañana" en el horario de un remedio es la jornada, no el día siguiente (Eris lo leyó como "a tomar mañana a las 7"). */
 export function humanSchedule(s: unknown): string {
   const t = String(s ?? "").trim();
   if (!t) return "";
   return /^(mañana|manana|tarde|noche)$/i.test(t) ? `por la ${t.toLowerCase().replace("manana", "mañana")}` : t;
+}
+
+/** El mensaje habla de exámenes o de algo que se lee con ellos (glucosa, colesterol, riñón, carbohidratos). */
+export const LABS_TOPIC = /\b(examen\w*|laboratorio|resultados?|hba1c|a1c|hemoglobina|glicosilada|glucosilada|glicada|glucos\w*|glicemia|glucemia|azucar|diabet\w*|prediabet\w*|colesterol|ldl|hdl|triglicerido\w*|creatinina|presion|salud|control(es)?|medic\w*|doctor\w*|rinon|rinones|renal|higado|tiroides|tsh|insulina|resistencia|carbohidrat\w*|carbos?|indice glicemico|hipo\w*|hiper\w*|vitamina d|ferritina|hierro|anemia)\b/;
+
+/** De qué habla el mensaje, para sumar al contexto solo las aclaraciones que vienen al caso (agua, proteína, la meta). */
+export function topicsOf(message?: string): { water: boolean; protein: boolean; goal: boolean; overview: boolean } {
+  const t = String(message ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return {
+    water: /\b(agua|hidrat\w*|litros?|vasos?|beb\w*|sed)\b/.test(t),
+    protein: /\b(proteina\w*|prote|me pase|exceso)\b/.test(t),
+    goal: /\b(meta|metas|calorias|kcal|subio|bajo|cambio|por que|porque)\b/.test(t),
+    overview: /\b(como voy|como estoy|como va|analiza\w*|panorama|resumen|metricas|evalua\w*|que hago|que me recomiendas|recomienda\w*|desayun\w*|almuerz\w*|cena|once|snack|comer)\b/.test(t),
+  };
 }
 
 const fmtN = (n: number) => Math.round(n).toLocaleString("es-CL");
@@ -43,7 +60,7 @@ export async function buildTodayBrief(memory: MemoryAdapter, userMessage?: strin
     const safe = async (k: string) => { try { return await memory.get(k); } catch { return null; } };
     const [targets, snap, nut, hyd, fin, sleepLog] = await Promise.all([
       loadTargets(memory as any).catch(() => null), safe("health_snapshot_latest"), safe(`nutrition_log_${today}`),
-      safe(`hydration_log_${today}`), safe("financial_context_latest"), safe("sleep_log"),
+      safe(`hydration_log_${today}`), moduloOn(memory, "finanzas").then((on) => (on ? safe("financial_context_latest") : null)), safe("sleep_log"),
     ]);
     const chat = rollupFieldsOf(nut, hyd);
     const snapToday = !!snap?.lastUpdated && nutritionDayKey(new Date(snap.lastUpdated), dayCtxFrom(snap)) === today;
@@ -61,8 +78,27 @@ export async function buildTodayBrief(memory: MemoryAdapter, userMessage?: strin
       const protRange = targets.proteinRange ? ` (rango ${fmtN(targets.proteinRange[0])}–${fmtN(targets.proteinRange[1])} g)` : "";
       const goalTxt = targets.goal ? ` · objetivo en Forge: ${GOALS[targets.goal].label}` : "";
       lines.push(`- Metas de hoy: ${fmtN(targets.kcal)} kcal · proteína ${fmtN(targets.proteinG)} g${protRange}${targets.proteinIsCap ? " (TOPE, no meta)" : ""} · ${waterGoal}${goalTxt}`);
+      // Solo cuando el mensaje toca el tema: cada línea suma al prompt y un registro de comida sin intención clara ya llega al
+      // borde de 8192 tokens (2026-10-21: «Te faltó la carne molida» se cortó y respondió «no recibiste ningún mensaje»)
+      const about = topicsOf(userMessage);
+      // 2026-10-16: «la proteína está superando tu meta… puede estar afectando tu control metabólico» (184 g, 2,2 g/kg, sin
+      // enfermedad renal). La meta de proteína es un mínimo a alcanzar; solo con enfermedad renal es un tope.
+      if (!targets.proteinIsCap && (about.protein || about.overview)) lines.push("- La proteína es un MÍNIMO a alcanzar, no un tope: pasarse de la meta no es un problema ni afecta la glucosa; no lo presentes como exceso ni como riesgo.");
+      // 2026-10-19: «¿por qué subió de 2.100 a 3.300?» y el modelo culpó a un medicamento y dijo «estar más preparado». El porqué real:
+      if (about.goal || about.overview) lines.push(`- Cómo sale la meta de calorías de hoy: ${targets.sources.kcal}. Si pregunta por qué cambió su meta, explícalo SOLO con esto (no inventes otras razones: medicamentos, glucosa, «prepararse»).`);
+    }
+    // El entreno de hoy («¿entrenas hoy?», Forge 2.0): la meta ya es según el día
+    if (targets?.byDay === "descanso") lines.push("- Hoy dijo que DESCANSA: la meta es de día de descanso. No le pidas entrenar ni moverse más.");
+    else if (targets?.byDay === "entreno" && targets.intentPhrase) {
+      const mt = targets.minutesToWorkout;
+      lines.push(`- Hoy dijo que ENTRENA: ${targets.intentPhrase}${targets.kcalPlanned ? ` (~${fmtN(targets.kcalPlanned)} kcal planificadas)` : ""}${targets.kcalGhost ? `; faltan ~${fmtN(targets.kcalGhost)} y la meta ya las incluye (puede comer para entrenar)` : ""}${mt != null ? (mt > 0 ? `; faltan ${mt >= 60 ? `${Math.floor(mt / 60)} h ${mt % 60} min` : `${mt} min`}` : "; ya era la hora") : ""}.`);
     }
     lines.push(`- Lleva hoy: ${fmtN(kcal)} kcal · ${fmtN(protein)} g de proteína · ${water > 0 ? fmtL(water) : "0 L"} de agua${water > 0 ? waterFood : " (no ha anotado agua hoy)"}`);
+    // El agua A ESTA HORA (2026-10-18: «reponer 3,5 L» a las 10:54, cuando iba 2 vasos atrás): lo que falta del día no es deuda
+    if (targets?.waterL && (topicsOf(userMessage).water || topicsOf(userMessage).overview)) {
+      const p = waterPace(water, targets.waterL, new Date(), wakeHourFrom(snap));
+      lines.push(`- Agua A ESTA HORA: ${paceText(p, targets.waterL, water)}. Habla del agua así (cómo va para la hora); lo que falta para la meta del día NO es una deuda ni algo que «reponer»: no lo presentes como urgencia.`);
+    }
     // Actividad del reloj (detectada sin «modo entrenamiento»): ya suma a la meta de kcal y agua (DailyTargets)
     const act = snapToday && snap?.activity?.day === isoDayKey(new Date()) && snap.activity.minutes >= 10 ? snap.activity : null;
     if (act) lines.push(`- Actividad de hoy (reloj): ${activityLabel(act)}, ~${fmtN(act.kcal)} kcal${act.vigorousMin ? ` (${fmtN(act.vigorousMin)} min intensa)` : ""}. La meta de hoy ya suma ese gasto; no le pidas moverse más.`);
@@ -72,21 +108,43 @@ export async function buildTodayBrief(memory: MemoryAdapter, userMessage?: strin
     const manual = typeof sleepLog?.[localDay()]?.hours === "number" ? sleepLog[localDay()].hours : null;
     // Lo que contó el usuario manda (el reloj se equivoca si quedó cargando o no detectó una parte: 2026-10-12)
     const relojAntes = typeof snap?.sleep?.reloj === "number" ? snap.sleep.reloj : null;
-    lines.push(`- Sueño de anoche: ${manual !== null ? `${manual} h (lo anotó el usuario${device !== null && Math.abs(device - manual) > 0.25 ? `; el reloj marcaba ${device} h` : relojAntes !== null && Math.abs(relojAntes - manual) > 0.25 ? `; el reloj marcaba ${relojAntes} h` : ""})` : device !== null ? `${device} h (reloj)` : "sin dato (el reloj no lo midió y no lo ha contado)"}`);
+    // Por partes, como el reloj (Sueño 2.0 · S0): la noche, un segundo sueño, siestas, en la misma frase que la app
+    const eps = snapToday && manual === null && Array.isArray(snap?.sleep?.episodes) && snap.sleep.episodes.length ? snap.sleep.episodes : null;
+    const porPartes = eps && device !== null ? (() => {
+      const d = { episodes: eps, totalH: device, nightH: snap.sleep.nightHours ?? null, split: !!snap.sleep.split, night: eps.find((e: any) => e.kind === "noche") ?? null };
+      const r = sleepReading(d, snap?.schedule?.sleepHours);
+      return `${sleepSummaryText(d)}${r ? ` ${r}` : ""} (reloj; para la recuperación cuenta el total, para la calidad la noche)`;
+    })() : null;
+    lines.push(`- Sueño de anoche: ${manual !== null ? `${manual} h (lo anotó el usuario${device !== null && Math.abs(device - manual) > 0.25 ? `; el reloj marcaba ${device} h` : relojAntes !== null && Math.abs(relojAntes - manual) > 0.25 ? `; el reloj marcaba ${relojAntes} h` : ""})` : porPartes ?? (device !== null ? `${device} h (reloj)` : "sin dato (el reloj no lo midió y no lo ha contado)")}`);
+    // Las 2 semanas (Sueño 2.0 · S1, sleepCore en el teléfono): deuda, regularidad, cronotipo y la hora para acostarse hoy
+    const ins = snapToday && snap?.sleepInsights && typeof snap.sleepInsights.need === "number" ? snap.sleepInsights : null;
+    if (ins && ins.nights >= 4) lines.push(`- Sueño de 2 semanas: ${insightsText(ins)} ${bedtimeText(ins)} (cifras del reloj; úsalas tal cual)`);
+    // Sueño 2.0 · S3: cómo llega a entrenar hoy (lo mismo que muestra Forge) y su plan de sueño en curso
+    const rd = snapToday ? sleepReadiness(ins, lastSleepFrom(snap?.sleep)) : null;
+    if (rd && rd.level !== "normal") lines.push(`- Para entrenar hoy: ${rd.level} — ${rd.why} ${rd.tip}`);
+    if (snapToday && snap?.sleepPlan?.title && !snap.sleepPlan.done) lines.push(`- Su plan de sueño: «${snap.sleepPlan.title}» (${snap.sleepPlan.text})`);
+    // ⚡ R2: señales de mente, solo si usa el día exigente (check-in de hoy, la semana, el pulso contra su promedio, lo que se repite)
+    try {
+      const mind = mindLine(await gatherMindSignals(memory, await todayIsoOf(memory as any), snapToday && Number(snap?.heartRate?.resting) > 0 ? Number(snap.heartRate.resting) : null));
+      if (mind) lines.push(mind);
+    } catch {}
     // Salud de base, en una línea: condiciones, remedios con su horario y exámenes (para cruzar bien sin pedir herramientas)
     try {
       const med = (await memory.getProfile())?.medical;
       const bits: string[] = [];
       if (med?.conditions?.length) bits.push(med.conditions.map((c) => c.id.replace(/_/g, " ")).join(", "));
-      const meds = (med?.medications ?? []).filter((m) => m.active).map((m) => `${m.name}${m.schedule ? ` (${humanSchedule(m.schedule)})` : ""}`);
+      const meds = (med?.medications ?? []).filter((m) => m.active !== false).map((m) => `${m.name}${m.schedule ? ` (${humanSchedule(m.schedule)})` : ""}`);
       if (meds.length) bits.push(`toma ${meds.join(", ")}`);
+      // Los exámenes, solo si el mensaje habla de eso (salud, glucosa, exámenes, carbohidratos): antes iban en cada turno y
+      // Eris nombraba su HbA1c en casi todas las respuestas, también ante «¿qué ceno?» o la plata (revisión 2026-11-04, R3)
       const labs = labsSummary(med?.labs);
-      if (labs) bits.push(`exámenes: ${labs}`);
+      const tLabs = String(userMessage ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+      if (labs && LABS_TOPIC.test(tLabs)) bits.push(`exámenes: ${labs}`);
       if (bits.length) lines.push(`- Salud de base: ${bits.join(" · ")}`);
       // ¿Pregunta por sus remedios? Va la ficha de la base médica: el 2026-10-07, sin ella, Eris dijo que un remedio de la diabetes
       // "mejora la sensibilidad a la insulina" (no es así: eso es la metformina)
       const t = String(userMessage ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-      const active = (med?.medications ?? []).filter((m) => m.active);
+      const active = (med?.medications ?? []).filter((m) => m.active !== false);
       const asksMeds = /\b(remedio|remedios|medicamento|medicamentos|pastilla|pastillas|farmaco|tratamiento)\b/.test(t)
         || active.some((m) => { const n = String(m.name || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().split(/\s+/)[0]; return n.length >= 5 && t.includes(n.slice(0, 6)); });
       if (asksMeds) {
@@ -123,8 +181,8 @@ export async function buildMedicalContext(memory: MemoryAdapter): Promise<string
     if (med.conditions?.length) {
       mParts.push('Condiciones: ' + med.conditions.map(c => c.id.replace(/_/g, ' ')).join(', '));
     }
-    if (med.medications?.filter(m => m.active).length) {
-      const meds = med.medications.filter(m => m.active).map(m => `${m.name} ${m.dose || ''}`.trim() + (m.schedule ? ` (${humanSchedule(m.schedule)})` : ''));
+    if (med.medications?.filter(m => m.active !== false).length) {
+      const meds = med.medications.filter(m => m.active !== false).map(m => `${m.name} ${m.dose || ''}`.trim() + (m.schedule ? ` (${humanSchedule(m.schedule)})` : ''));
       mParts.push('Medicamentos activos: ' + meds.join(', '));
     }
     if (med.thresholds) {
@@ -160,7 +218,7 @@ export async function buildHealthContext(memory: MemoryAdapter): Promise<string>
     const snap: any = await memory.get('health_snapshot_latest');
     if (!snap) return '';
     const parts: string[] = ['\n\n## 📊 Métricas de Salud Actuales (del dispositivo del usuario):'];
-    if (snap.sleep)     parts.push(`- Sueño: ${snap.sleep.durationHours}h`);
+    if (snap.sleep)     parts.push(`- Sueño: ${snap.sleep.durationHours}h${snap.sleep.split && typeof snap.sleep.nightHours === "number" ? ` en partes (noche ${snap.sleep.nightHours}h)` : ""}`);
     if (snap.heartRate) parts.push(`- FC: ${snap.heartRate.average} bpm (reposo: ${snap.heartRate.resting} bpm)`);
     if (snap.hrv)       parts.push(`- HRV: ${snap.hrv}ms`);
     if (snap.steps)     parts.push(`- Pasos hoy: ${snap.steps.toLocaleString()}`);
@@ -194,6 +252,7 @@ export async function buildHealthContext(memory: MemoryAdapter): Promise<string>
 
 export async function buildFinancialContext(memory: MemoryAdapter): Promise<string> {
   try {
+    if (!(await moduloOn(memory, 'finanzas'))) return ''; // Finanzas apagado en Perfil (A2)
     const ctx = await memory.get('financial_context_latest');
     return typeof ctx === 'string' && ctx ? ctx : '';
   } catch {

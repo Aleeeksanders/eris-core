@@ -5,7 +5,7 @@ import { buildLiveContextText } from "../services/LiveContext.js";
 const LiveContextInputSchema = z.object({
   scope: z.enum(["health", "medical", "financial", "personal", "all"]).optional()
     .describe("Qué categoría de datos reales del usuario traer: 'health' (sueño, pasos, FC, nutrición, hidratación), " +
-      "'medical' (condiciones, medicamentos, umbrales), 'financial' (contexto de Hunter Wallet), 'personal' " +
+      "'medical' (condiciones, medicamentos, umbrales), 'financial' (contexto de Finanzas), 'personal' " +
       "(notas que el usuario ha compartido). 'all' (default) trae todo — úsalo si no está claro cuál aplica."),
 });
 

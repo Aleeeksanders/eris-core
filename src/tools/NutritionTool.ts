@@ -6,7 +6,7 @@
 
 import { assessFood, formatRisks, type ItemRisk } from "../services/FoodSafetyCheck.js";
 import { deriveRestrictions } from "../services/DietaryRestrictions.js";
-import { resolveFood, correctFoodName, foodFit } from "../services/FoodResolve.js";
+import { resolveFood, correctFoodName, foodFit, cleanMyFoods, myFoodFor } from "../services/FoodResolve.js";
 import { waterToday, waterLine, fmtLiters } from "../services/WaterToday.js";
 import { beverageTypeOf, amountText } from "../services/Beverage.js";
 import { itemWaterL } from "../services/FoodWater.js";
@@ -16,18 +16,57 @@ import { UnifiedFoodService } from "../services/gluco/UnifiedFoodService.js";
 import { formatGuidanceForLLM } from "../services/MedicalKnowledgeBase.js";
 import type { MedicalProfile } from "../memory.js";
 import { parseWaterMessage } from "../services/WaterParse.js";
-import { dayCtxFrom, nutritionDayKey } from "../services/MealSchedule.js";
+import { dayCtxFrom, nutritionDayKey, MEAL_ORDER, MEAL_NAME } from "../services/MealSchedule.js";
 import { todayKeyOf } from "../services/NutritionDay.js";
-import { parseFoodMessage, parseMultiMealMessage, parseDeleteMessage, parseWhatIfMessage, mealTimingOf, pastDayOf, pastMealTimingOf, mentionedMeals, type MealType, saidGramsFor, asksToLog, unmentionedItems, otherDayOf, foodNameMatches, dayQueryOf, LAST_ENTRY } from "../services/FoodParse.js";
+import { parseFoodMessage, parseMultiMealMessage, parseDeleteMessage, parseAmountFix, addToLastMeal, MEAL_SAID, parseWhatIfMessage, mealTimingOf, pastDayOf, pastMealTimingOf, mentionedMeals, type MealType, saidGramsFor, asksToLog, unmentionedItems, otherDayOf, foodNameMatches, dayQueryOf, LAST_ENTRY } from "../services/FoodParse.js";
 import { buildWhatIf, formatWhatIf, type WhatIfFood } from "../services/WhatIfFood.js";
+import { respuestaAntojo, contraLineas, esMasc, PENDIENTE_KEY, TRATO_KEY, type Trato } from "../services/Antojo.js";
+import { todayIsoOf } from "../services/NutritionDay.js";
+import { getTone } from "../services/Tone.js";
 import { isPure } from "../services/Intent.js";
 import { loadTargets } from "../services/DailyTargets.js";
 import { applyGoalUpdate, upsertChatRollup, addToPastRollup, dayEntries, dayTotals, itemKey, removeItem, type LogEntry } from "../services/NutritionLog.js";
+import { isCaffeinated, lateCaffeine } from "../services/SleepCore.js";
 
 const fold = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 const fmt = (n: number) => Math.round(n).toLocaleString("es-CL");
 
 // ─── Tipos ────────────────────────────────────────────────────────
+
+/**
+ * Guarda una comida en el registro del día de comida (`dayKey`, toDateString), pone al día el historial y avisa al teléfono
+ * (`nutrition_logged`, que NutritionScreen agrega y el Inventario descuenta). Lo usan el chat y «Lo comí» del plan de Eris.
+ */
+export async function saveNutritionEntry(memory: any, wsClient: any, entry: NutritionEntry, dayKey: string, pastDay: Date | null = null): Promise<NutritionEntry[] | undefined> {
+  let savedLog: NutritionEntry[] | undefined;
+  try {
+    // El día de COMIDA de cuando se comió (termina al dormir: lo de las 2 AM sin haber dormido es de ayer)
+    const key = `nutrition_log_${dayKey}`;
+    const existing = await memory.get(key).catch(() => []);
+    const log = Array.isArray(existing) ? existing : [];
+    const nextLog = [...log, entry];
+    await memory.set(key, nextLog);
+    savedLog = nextLog;
+    // Para que el motor de baselines ("Análisis del Día") vea esto HOY sin depender de que la app tenga
+    // Nutrición abierta para reenviarlo — antes solo se enteraba si el móvil mandaba update_health_snapshot.
+    // Un día anterior: se suma a lo que ese día ya tenía el historial.
+    if (pastDay) await addToPastRollup(memory, pastDay, entry.totals).catch(() => {});
+    else {
+      const hydrationLog = await memory.get(`hydration_log_${dayKey}`).catch(() => []);
+      await upsertChatRollup(memory, nextLog, hydrationLog).catch(() => {});
+    }
+  } catch (e) {
+    console.warn("[NutritionTool] Error guardando en memoria:", e);
+  }
+  // Push al móvil vía WebSocket para que NutritionScreen se actualice
+  if (wsClient) {
+    try {
+      // de qué día de comida es (un día anterior lo guarda el teléfono en ese día, no en hoy)
+      wsClient.send(JSON.stringify({ type: "nutrition_logged", entry, day: dayKey }));
+    } catch {}
+  }
+  return savedLog;
+}
 
 export interface NutritionEntry {
   timestamp: string;
@@ -76,7 +115,11 @@ const NutritionInputSchema = z.object({
     "set_nutritional_goals", // Fijar metas ideales para el usuario
     "delete_entry",    // Borrar una comida ya registrada hoy (por nombre, vía searchQuery)
     "simulate",        // «¿Y si me como X?»: cómo cambiaría su día, SIN anotarlo (services/WhatIfFood.ts)
+    "meal_order", // «¿Cuál es el orden de las comidas del día?»: por código, con los nombres de Chile (MealSchedule)
+    "antojo_respuesta", // Respuesta a la contrapartida de un antojo («Acepto la contrapartida» / «Mejor no»): services/Antojo.ts
+    "yo_lo_anoto", // «Yo lo anoto», «lo registro yo con el código de barras»: Eris no insiste (revisión 2026-11-04, Q3)
   ]).describe("Acción a ejecutar"),
+  accept: z.boolean().optional().describe("antojo_respuesta: true si aceptó la contrapartida."),
 
   mealType: z.enum([
     "desayuno",
@@ -128,6 +171,10 @@ const NutritionInputSchema = z.object({
   // interno: la respuesta a «¿en qué comida de ayer fue?» (la comida elegida manda y se usa el mensaje original)
   fixedMeal: z.boolean().optional(),
   origMessage: z.string().max(400).optional(),
+  // interno: la ayuda del buscador de la app: si no lo encuentra, la respuesta va lista (sin el modelo)
+  quickNotFound: z.boolean().optional(),
+  // interno: «son 250 g, no 150 g» (FoodParse.parseAmountFix): se borra lo último anotado y se anota con la cantidad corregida
+  replaceLast: z.object({ name: z.string(), from: z.number(), grams: z.number(), unit: z.enum(["g", "ml"]) }).optional(),
   searchQuery: z.string().optional().describe("Texto a buscar (search_food) o nombre del alimento a borrar del log de hoy (delete_entry) — coincide por substring, sin distinguir mayúsculas."),
 });
 
@@ -228,6 +275,13 @@ export class NutritionTool extends Tool<NutritionInput> {
    * «registra 1 ½ hallulla con 4 huevos revueltos para el desayuno» (services/FoodParse.ts). Lo demás sigue igual.
    */
   async preroute(message: string, context?: any): Promise<Record<string, unknown> | null> {
+    // «Acepto la contrapartida» / «Mejor no» justo después de simular un antojo (fase I7)
+    const ans = await respuestaAntojo(context?.memory, String(message ?? "")).catch(() => null);
+    if (ans) return { action: "antojo_respuesta", accept: ans.accept };
+    // «¿Cuál es el orden de las comidas?»: el modelo de 4B a veces contestaba «desayuno, comida, merienda y cena» (de España)
+    if (MEAL_ORDER_ASK.test(foldMsg(message))) return { action: "meal_order" };
+    // «Lo registro yo con el código de barras» (chat real): igual preguntaba la composición. Se suelta, sin insistir
+    if (YO_LO_ANOTO.test(foldMsg(message)) && foldMsg(message).length <= 90) return { action: "yo_lo_anoto" };
     const w = parseWaterMessage(message);
     if (w) return { ...w };
     const foodService: UnifiedFoodService | null = context?.foodService ?? null;
@@ -241,7 +295,21 @@ export class NutritionTool extends Tool<NutritionInput> {
         return { action: "log_meal", items: pend.items, mealType: meal, otherDay: pend.word, fixedMeal: true, origMessage: pend.message, ...(pend.corrected?.length ? { corrected: pend.corrected } : {}) };
       }
     }
+    // El botón de ayuda del buscador de Nutrición: «Quiero anotar «X» y no lo encontré en el buscador. ¿Me ayudas?». Se intenta
+    // anotar X por código (el servidor busca también en Open Food Facts y USDA). 2026-10-19: llegó a un chat de Hestia, el
+    // modelo buscó en internet 50 s y contestó «¡Qué buen descanso, Alesito!».
+    const help = String(message ?? "").match(/^Quiero anotar «([^»]{1,80})» y no lo encontr[eé] en el buscador/);
+    if (help) return { action: "log_meal", items: [{ name: help[1].trim() }], origMessage: `anota ${help[1].trim()}`, quickNotFound: true };
+    // «Son 250g, no 150g» justo después de anotar un alimento: se corrige la cantidad de ese mismo alimento
+    const fix = parseAmountFix(message, context?.lastAssistantMessage);
+    if (fix) return { action: "log_meal", items: [{ name: fix.name, grams: fix.grams }], mealType: fix.mealType, fixedMeal: true, replaceLast: { name: fix.name, from: fix.from, grams: fix.grams, unit: fix.unit } };
     const lookup = async (q: string) => foodService.searchLocal(q);
+    // «Te faltó la carne molida, unos 150 g» justo después de anotar: a esa misma comida
+    const add = addToLastMeal(message, context?.lastAssistantMessage);
+    if (add) {
+      const f = await parseFoodMessage(add.text, lookup);
+      if (f) return { ...f, mealType: add.mealType, origMessage: add.text };
+    }
     // "¿y si me como un completo?": se simula, no se anota (services/WhatIfFood.ts)
     const wi = await parseWhatIfMessage(message, lookup);
     if (wi) return { ...wi };
@@ -277,6 +345,17 @@ export class NutritionTool extends Tool<NutritionInput> {
       case "save_food":
         return this.handleSaveFood(input, memory, foodService);
       case "log_meal": {
+        if (input.replaceLast) {
+          // Primero se saca lo último anotado (el mismo alimento con la cantidad anterior); después va con la cantidad dicha
+          const rl = input.replaceLast;
+          const del = await this.handleDeleteEntry(LAST_ENTRY, memory, wsClient, foodService, medical, context?.userMessage);
+          if (del.error || (del.metadata as any)?.notLogged) return del;
+          // Con la comida dicha («… para la cena»): sin ella, pasada la medianoche la corrección caía en «Colación PM»
+          const said = `${rl.grams} ${rl.unit} de ${rl.name} ${input.mealType ? MEAL_SAID[input.mealType as MealType] ?? "" : ""}`.trim();
+          const r = await this.handleLogMeal({ ...input, replaceLast: undefined }, memory, wsClient, foodService, medical, said);
+          const pre = `✏️ Corregí ${rl.name}: ${rl.from} ${rl.unit} → ${rl.grams} ${rl.unit}.\n\n`;
+          return { ...r, output: pre + (r.output ?? ""), ...(typeof r.metadata?.quickReply === "string" ? { metadata: { ...r.metadata, quickReply: pre + r.metadata.quickReply } } : {}) };
+        }
         if (!input.multi?.length) return this.handleLogMeal(input, memory, wsClient, foodService, medical, input.origMessage ?? context?.userMessage);
         // Una comida tras otra, cada una con su propia frase (cantidades y hora de ese tramo); «llevas X de Y» solo al final.
         // «ayer en el almuerzo X y en la cena Y»: el día vale para todas.
@@ -304,6 +383,21 @@ export class NutritionTool extends Tool<NutritionInput> {
         return this.handleSetGoals(input.goals, memory, medical, wsClient);
       case "simulate":
         return this.handleSimulate(input, memory, foodService, medical, context?.userMessage);
+      case "meal_order": {
+        const q = mealOrderText();
+        return { output: q, metadata: { notLogged: true, quickReply: q } };
+      }
+      case "yo_lo_anoto": {
+        // Lo que quedó a medias de una comida por chat se olvida (no se anota nada)
+        await memory?.set?.("food_pending_day", { at: 0 }).catch?.(() => {});
+        const barras = /barra|escane|codigo/.test(foldMsg(context?.userMessage ?? ""));
+        const q = barras
+          ? "Dale, anótalo tú con el código de barras (Nutrición › ＋ › 📷). Así queda con los datos del envase. Cuando esté, si quieres te digo cómo te queda el día."
+          : "Dale, anótalo tú en Nutrición › ＋ (con el buscador o el código de barras). Cuando esté, si quieres te digo cómo te queda el día.";
+        return { output: q, metadata: { notLogged: true, quickReply: q } };
+      }
+      case "antojo_respuesta":
+        return this.handleAntojoRespuesta(!!(input as any).accept, memory);
       case "need_photo":
         return {
           output:
@@ -331,8 +425,10 @@ export class NutritionTool extends Tool<NutritionInput> {
     const notes: string[] = [];
     if ((input as any).assumed) notes.push(String((input as any).assumed));
     for (const c of Array.isArray((input as any).corrected) ? (input as any).corrected : []) notes.push(`Entendí ${c}.`);
+    // Tu versión de un alimento (corregida en la app) manda sobre la base
+    const mine = cleanMyFoods(await memory.get("my_foods").catch(() => []));
     for (const item of input.items) {
-      let hit = foodService ? await resolveFood(foodService, item.name).catch(() => null) : null;
+      let hit = myFoodFor(mine, item.name) ?? (foodService ? await resolveFood(foodService, item.name).catch(() => null) : null);
       if (!hit && foodService) {
         const fixed = correctFoodName(item.name);
         hit = fixed ? await resolveFood(foodService, fixed).catch(() => null) : null;
@@ -346,7 +442,7 @@ export class NutritionTool extends Tool<NutritionInput> {
         per100: { kcal: s.calories * k, protein: s.protein * k, carbs: s.carbs * k, fat: s.fat * k, fiber: (s.fiber || 0) * k,
           ...(s.sugar != null ? { sugar: s.sugar * k } : {}), ...((s as any).sodium != null ? { sodium: (s as any).sodium * k } : {}) },
       });
-      const risk = assessFood(hit.name, hit.safety, restrictions);
+      const risk = assessFood(hit.name, (hit as { safety?: Parameters<typeof assessFood>[1] }).safety, restrictions);
       if (risk) risks.push(risk);
     }
     if (!foods.length) {
@@ -354,11 +450,44 @@ export class NutritionTool extends Tool<NutritionInput> {
         "Dime la marca o el nombre como sale en el envase.");
     }
     const r = await buildWhatIf(memory, foods, { meal: input.mealType ?? null });
-    const text = formatWhatIf(r, {
-      said: typeof (input as any).said === "string" && !missing.length ? (input as any).said : undefined,
-      risks, restrictionLabels: restrictions.labels, missing, notes,
-    });
+    const said = typeof (input as any).said === "string" && !missing.length ? (input as any).said : undefined;
+    const text = formatWhatIf(r, { said, risks, restrictionLabels: restrictions.labels, missing, notes });
+    // Antojo que no calza (fase I7): la contrapartida queda esperando «Acepto» o «Mejor no» (30 min)
+    try {
+      if (r.contra) {
+        const nombre = said ?? r.foods.map((f) => f.name.split(" / ")[0].toLowerCase()).join(" y ");
+        const kcal = Math.round(r.foods.reduce((a, f) => a + (f.per100.kcal * f.grams) / 100, 0));
+        const alt = r.alts.find((x) => x.kind === "cambio") ?? r.alts[0];
+        await memory.set(PENDIENTE_KEY, { said: nombre, kcal, contra: r.contra, strict: r.strict, ...(alt ? { alt: alt.text } : {}), dia: await todayIsoOf(memory), at: new Date().toISOString() });
+      } else await memory.set(PENDIENTE_KEY, null);
+    } catch {}
     return { output: `${text}\n[Cómo presentarlo: muestra este bloque tal cual, sin cambiar ninguna cifra ni letra.]`, metadata: { notLogged: true, ...(isPure(userMessage, ["food"]) ? { quickReply: text } : {}) } };
+  }
+
+  // ─── El trato de un antojo (fase I7) ──────────────────────────────
+  // «Acepto la contrapartida»: queda el trato del día (el asesor arma la comida compensada más liviana y «¿cómo voy hoy?» lo
+  // recuerda). «Mejor no»: con el modo estricto, hoy no (y otra opción); sin él, nada cambia.
+  private async handleAntojoRespuesta(accept: boolean, memory: any): Promise<ToolExecutionResult> {
+    const ans = await respuestaAntojo(memory, accept ? "acepto" : "mejor no").catch(() => null);
+    const usted = (await getTone(memory).catch(() => null)) === "usted";
+    const done = (msg: string) => ({ output: msg, metadata: { notLogged: true, quickReply: msg } });
+    if (!ans) return done(usted ? "No tengo un antojo pendiente: pregúnteme «¿y si me como…?» y lo vemos." : "No tengo un antojo pendiente: pregúntame «¿y si me como…?» y lo vemos.");
+    const p = ans.p;
+    await memory.set(PENDIENTE_KEY, null).catch(() => {});
+    if (accept) {
+      const t: Trato = { said: p.said, dia: p.dia, ...(p.contra.comidaMenos ? { comidaMenos: p.contra.comidaMenos } : {}),
+        ...(p.contra.caminataMin ? { caminataMin: p.contra.caminataMin } : {}), ...(p.contra.calidad ? { calidad: p.contra.calidad } : {}), at: new Date().toISOString() };
+      await memory.set(TRATO_KEY, t).catch(() => {});
+      const lineas = contraLineas(p.contra, usted).map((l) => `• ${l}`).join("\n");
+      const cm = p.contra.comidaMenos;
+      const comida = cm ? `${esMasc(cm.slot) ? "el" : "la"} ${cm.nombre}` : null;
+      const loLa = cm && esMasc(cm.slot) ? "lo" : "la";
+      return done(
+        `🤝 Trato hecho: ${usted ? "disfrute" : "disfruta"} ${p.said}.\n${lineas}\n` +
+        `Cuando ${usted ? "se lo coma, escríbame" : "te lo comas, escribe"} «anota ${p.said}».${comida ? ` Si ${usted ? "me pide" : "me pides"} qué comer en ${comida}, ya ${usted ? "se" : "te"} ${loLa} propongo más ${loLa === "lo" ? "liviano" : "liviana"}.` : ""}`);
+    }
+    if (p.strict) return done(`Bien, hoy no.${p.alt ? ` ${usted ? "Le" : "Te"} convendría más ${p.alt}.` : ""} Si ${usted ? "quiere" : "quieres"} otra idea, ${usted ? "pregúnteme" : "pregúntame"} «¿qué como?».`);
+    return done(`Sin trato, entonces. Si ${usted ? "se lo come igual, anótelo" : "te lo comes igual, anótalo"} y seguimos.`);
   }
 
   // ─── Metas nutricionales ──────────────────────────────────────────
@@ -531,11 +660,12 @@ export class NutritionTool extends Tool<NutritionInput> {
 
     const MEAL_LABELS: Record<string, string> = {
       desayuno: "🌅 Desayuno",
-      colacion_am: "🍎 Colación AM",
+      // Los mismos nombres e íconos que Nutrición (revisión N3: el chat decía «Colación AM/PM»)
+      colacion_am: "🍎 Colación mañana",
       almuerzo: "☀️ Almuerzo",
-      once: "☕ Once",
+      once: "🫖 Once",
       cena: "🌙 Cena",
-      colacion_pm: "🍪 Colación PM",
+      colacion_pm: "🍌 Colación tarde",
     };
 
     // Calcular macros de cada ítem
@@ -590,12 +720,18 @@ export class NutritionTool extends Tool<NutritionInput> {
       if (memory) await this.addToFrequentFoods(memory, fullFood.name, fullFood.id);
     };
 
+    // Tu versión de un alimento: la corregiste en la app («Editar información nutricional») y manda sobre la base
+    const mine = memory ? cleanMyFoods(await memory.get("my_foods").catch(() => [])) : [];
     for (const item of input.items) {
       const factor = (item.grams ?? 100) / 100;
       let resolved = false;
 
+      // 0. Tu versión, si es exactamente ese alimento
+      const own = myFoodFor(mine, item.name);
+      if (own) { await pushFood(own, item); resolved = true; }
+
       // 1. UnifiedFoodService: Local Chile DB → USDA → OFF (prioridad máxima)
-      if (foodService) {
+      if (!resolved && foodService) {
         try {
           const hit = await resolveFood(foodService, item.name);
           if (hit) { await pushFood(hit, item); resolved = true; }
@@ -686,11 +822,12 @@ export class NutritionTool extends Tool<NutritionInput> {
     // Nada se encontró: no se anota nada (inventar calorías es peor que preguntar)
     if (!resolvedItems.length) {
       const what = unresolvedNames.map((n) => `«${n}»`).join(" ni ");
+      // Con los datos de la etiqueta o de la web de la marca («410 kcal y 30 g de proteína por unidad») se puede anotar igual
       const msg = `No encontré ${what} en mis bases, así que no anoté nada: prefiero no inventar sus calorías. ` +
-        "Dime la marca o el nombre como sale en el envase, o escanea el código de barras en Nutrición.";
+        "Dime la marca o el nombre como sale en el envase, escanea el código de barras en Nutrición, o dime sus calorías y proteínas por porción (de la etiqueta o la web de la marca) y lo anoto con esos datos.";
       return {
-        output: msg + "\n[Para ti: si es un producto o plato conocido, busca sus macros con web_search y vuelve a llamar log_meal con macros_override (por 100 g). No digas que lo anotaste.]",
-        metadata: { notLogged: true, ...(isPure(userMessage, ["food"]) ? { quickReply: msg } : {}) },
+        output: msg + "\n[Para ti: si es un producto o plato conocido, busca sus macros con web_search y vuelve a llamar log_meal con macros_override (por 100 g). Si web_search no funciona, dilo; no digas que no existe. No digas que lo anotaste.]",
+        metadata: { notLogged: true, ...(isPure(userMessage, ["food"]) || (input as any).quickNotFound ? { quickReply: msg } : {}) },
       };
     }
 
@@ -719,40 +856,15 @@ export class NutritionTool extends Tool<NutritionInput> {
     // Clave del día de comida donde va (toDateString, como el resto de los registros)
     const dayKey = pastDay ? pastDay.toDateString() : nutritionDayKey(timing.at, dayCtx);
 
-    // Guardar en memoria del perfil
-    let savedLog: NutritionEntry[] | undefined;
-    if (memory) {
-      try {
-        // El día de COMIDA de cuando se comió (termina al dormir: lo de las 2 AM sin haber dormido es de ayer)
-        const key = `nutrition_log_${dayKey}`;
-        const existing = await memory.get(key).catch(() => []);
-        const log = Array.isArray(existing) ? existing : [];
-        const nextLog = [...log, entry];
-        await memory.set(key, nextLog);
-        savedLog = nextLog;
-        // Para que el motor de baselines ("Análisis del Día") vea esto HOY sin depender de que la app tenga
-        // Nutrición abierta para reenviarlo — antes solo se enteraba si el móvil mandaba update_health_snapshot.
-        // Un día anterior: se suma a lo que ese día ya tenía el historial.
-        if (pastDay) await addToPastRollup(memory, pastDay, totals).catch(() => {});
-        else {
-          const hydrationLog = await memory.get(`hydration_log_${dayKey}`).catch(() => []);
-          await upsertChatRollup(memory, nextLog, hydrationLog).catch(() => {});
-        }
-      } catch (e) {
-        console.warn("[NutritionTool] Error guardando en memoria:", e);
-      }
-    }
-
-    // Push al móvil vía WebSocket para que NutritionScreen se actualice
-    if (wsClient) {
-      try {
-        wsClient.send(JSON.stringify({
-          type: "nutrition_logged",
-          entry,
-          // de qué día de comida es (un día anterior lo guarda el teléfono en ese día, no en hoy)
-          day: dayKey,
-        }));
-      } catch {}
+    // Guardar en memoria del perfil y avisarle al teléfono
+    const savedLog = memory ? await saveNutritionEntry(memory, wsClient, entry, dayKey, pastDay ?? null) : undefined;
+    // Eris al timón (T2): si esa comida estaba en el plan de hoy y comió otra cosa, se rearma el resto del día
+    let replanned = false, replannedExtra = false;
+    if (memory && !pastDay) {
+      const { replanAfterMeal, replanExtraMeal } = await import("../services/DayPlanService.js");
+      replanned = !!(await replanAfterMeal(memory, wsClient, mealType).catch(() => null));
+      // Una comida que el plan no tenía también cambia lo que queda del día
+      if (!replanned) replannedExtra = !!(await replanExtraMeal(memory, wsClient, mealType).catch(() => null));
     }
 
     // Una bebida anotada junto con comida ("un yogur y dos coca zero") quedaba solo como comida (0 kcal) y no sumaba a la meta
@@ -786,6 +898,15 @@ export class NutritionTool extends Tool<NutritionInput> {
     }
 
     if (drinkNotes.length) output += `\n💧 También sumé ${drinkNotes.join(" y ")} a tu agua de hoy.`;
+    if (replanned) output += `\n🧭 Tu plan de hoy tenía otra cosa para esta comida: rearmé lo que queda del día con lo que comiste.`;
+    else if (replannedExtra) output += `\n🧭 Esa comida no estaba en tu plan de hoy: rearmé lo que queda del día con lo que comiste.`;
+    // Sueño 2.0 · S3: algo con cafeína después de su hora límite (acostarse − 6 h, del sueño de 2 semanas): un aviso sin culpa
+    if (!pastDay && memory && resolvedItems.some((i) => isCaffeinated(i.name))) {
+      const snapS: any = await memory.get("health_snapshot_latest").catch(() => null);
+      const insS = snapS?.sleepInsights && typeof snapS.sleepInsights.need === "number" && snapS.lastUpdated && Date.now() - Date.parse(snapS.lastUpdated) < 20 * 3600_000 ? snapS.sleepInsights : null;
+      const late = insS ? lateCaffeine(resolvedItems.map((i) => ({ name: i.name.split(" / ")[0], at: timing.at.getTime() })), insS) : null;
+      if (late) output += `\n🌙 ${late.text}`;
+    }
     // El agua que trae la comida (jalea, fruta, sopa…) también cuenta: se dice cuando es algo que valga mencionar
     const watery = resolvedItems.map((i) => ({ name: i.name.split(" / ")[0], l: itemWaterL(i) })).filter((w) => w.l > 0);
     const foodWaterL = watery.reduce((a, w) => a + w.l, 0);
@@ -965,22 +1086,31 @@ export class NutritionTool extends Tool<NutritionInput> {
       const waterTxt = `💧 ${waterLine(water)}${water.goalNote ? ` (la meta ${water.goalNote})` : ""}`;
 
       if (view.entries.length === 0) {
+        // Con la meta: «¿cuántas calorías me quedan?» sin nada anotado respondía solo «no has registrado nada» (revisión V1)
         const msg = (view.phoneExtraKcal > 0
           ? `En el chat no hay comidas anotadas hoy, pero en la app llevas ${fmt(view.phoneExtraKcal)} kcal (con esta versión de la app no veo el detalle de qué fue).`
-          : "No has registrado ninguna comida hoy todavía.") + `\n${waterTxt}`;
+          : `No has registrado ninguna comida hoy todavía: te quedan tus ${fmt(view.kcalGoal)} kcal del día` +
+            (view.proteinIsCap ? ` (proteína: tope ${Math.round(view.proteinGoal)} g).` : ` y ${Math.round(view.proteinGoal)} g de proteína.`)) + `\n${waterTxt}`;
         return { output: msg, metadata: isPure(userMessage, ["food", "water"]) ? { quickReply: msg } : undefined };
       }
 
       const MEAL_LABELS: Record<string, string> = {
-        desayuno: "🌅 Desayuno", colacion_am: "🍎 Colación AM", almuerzo: "☀️ Almuerzo",
-        once: "☕ Once", cena: "🌙 Cena", colacion_pm: "🍪 Colación PM", merienda: "🍪 Merienda",
+        desayuno: "🌅 Desayuno", colacion_am: "🍎 Colación mañana", almuerzo: "☀️ Almuerzo",
+        once: "🫖 Once", cena: "🌙 Cena", colacion_pm: "🍌 Colación tarde", merienda: "🍌 Merienda",
       };
       const label = (m?: string) => MEAL_LABELS[m ?? ""] ?? (m ? `🍽️ ${m.replace(/_/g, " ")}` : "🍽️ Comida");
 
-      const mealLines = view.entries.map((entry) => {
-        const items = entry.items.map((i) => `  • ${i.name} (${amountText(i.name, i.grams)}) — ${Math.round(i.calories)} kcal`).join("\n");
-        return `**${label(entry.mealType)}** — ${Math.round(entry.totals.calories)} kcal${entry.fromPhone ? " · anotado en la app" : ""}\n${items}`;
-      });
+      // Una sección por comida, con todo lo de esa comida junto. 2026-10-19: lo anotado en la app llega alimento por alimento y
+      // el registro mostraba siete «🌅 Desayuno» seguidos, uno por cada cosa.
+      const groups: Array<{ meal?: string; kcal: number; app: boolean; chat: boolean; items: string[] }> = [];
+      for (const entry of view.entries) {
+        let g = groups.find((x) => x.meal === entry.mealType);
+        if (!g) groups.push(g = { meal: entry.mealType, kcal: 0, app: false, chat: false, items: [] });
+        g.kcal += entry.totals.calories;
+        if (entry.fromPhone) g.app = true; else g.chat = true;
+        for (const i of entry.items) g.items.push(`  • ${i.name} (${amountText(i.name, i.grams)}) — ${Math.round(i.calories)} kcal`);
+      }
+      const mealLines = groups.map((g) => `**${label(g.meal)}** — ${Math.round(g.kcal)} kcal${g.app && !g.chat ? " · anotado en la app" : g.app ? " · en el chat y la app" : ""}\n${g.items.join("\n")}`);
 
       let output =
         `## 📋 Registro de hoy\n\n` +
@@ -1096,4 +1226,17 @@ export class NutritionTool extends Tool<NutritionInput> {
       console.warn("[NutritionTool] Error guardando frecuentes", e);
     }
   }
+}
+
+// ─── El orden de las comidas del día (por código: los nombres y las horas de MealSchedule) ───
+const foldMsg = (t: string) => String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+/** «Yo lo anoto», «lo registro yo», «mejor lo escaneo yo», «yo me encargo» */
+const YO_LO_ANOTO = /^(?:(?:no|ya|ok|dale|bueno|mejor|tranqui\w*|deja\w*|tranquila)[\s,.!]+)*(?:yo lo (?:anoto|registro|ingreso|agrego|escaneo|hago|subo|pongo)|lo (?:anoto|registro|ingreso|agrego|escaneo|hago|subo|pongo) yo|(?:mejor )?lo escaneo|yo me encargo|lo hago yo|yo lo hago|yo despues lo (?:anoto|registro|ingreso)|lo anoto (?:yo )?despues)\b/;
+const MEAL_ORDER_ASK = /\b(orden de las comidas|(cuales|que) (son las )?comidas (del|de un|de cada) dia|en que orden (van|se comen|son) las comidas)\b/;
+/** Las horas típicas para quien despierta a las 7 (las mismas proporciones de MealSchedule). */
+const TYPICAL_7: Record<string, string> = { desayuno: "7:45", colacion_am: "10:30", almuerzo: "13:00", colacion_pm: "16:00", once: "18:00", cena: "20:30" };
+export function mealOrderText(): string {
+  const list = MEAL_ORDER.map((k) => `${MEAL_NAME[k]} (~${TYPICAL_7[k]})`).join(" → ");
+  return `De la más temprano a la más tarde: ${list}.
+Las horas son para alguien que despierta a las 7; Eris las corre según tu despertar. La colación de la tarde y la once suelen ser una u otra, y puedes ordenar u ocultar las tuyas en Nutrición › Mis comidas.`;
 }

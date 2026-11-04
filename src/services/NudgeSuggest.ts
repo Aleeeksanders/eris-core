@@ -18,6 +18,7 @@ import { gatherMetabolicContext, type MetabolicContext } from "./MetabolicAnalys
 import { waterFraction } from "./FoodWater.js";
 import type { Affinity } from "./CarbOptions.js";
 import { DEFAULT_TONE, getTone, isTone, type Tone } from "./Tone.js";
+import { homePantry } from "./HomePantry.js";
 
 export type NudgeNeed = "fibra" | "proteina" | "colacion";
 export const NUDGE_NEEDS: NudgeNeed[] = ["fibra", "proteina", "colacion"];
@@ -232,6 +233,9 @@ export async function buildNudge(memory: any, req: NudgeRequest, now = new Date(
   if (Array.isArray(saved?.items) && Number.isFinite(savedAt) && now.getTime() - savedAt < 3 * 86400000) {
     pantryIds = new Set(saved.items.flatMap((t: unknown) => matchFoods(String(t)).map((f) => f.id)));
   }
+  // Lo que hay en casa según el Inventario (fase I7) también cuenta como despensa
+  const home = await homePantry(memory, now).catch(() => null);
+  if (home) pantryIds = new Set([...(pantryIds ?? []), ...home.ids]);
   const tone = req.tone ?? (await getTone(memory)) ?? DEFAULT_TONE;
   return suggestNudge(ctx, { ...req, tone }, { goal: body?.goal, affinity, pantryIds, dayIndex: Math.floor(now.getTime() / 86400000) });
 }

@@ -18,8 +18,10 @@ import { getDismissals, getOverrides } from "../tools/InsightFeedbackTool.js";
 import { localDateKey, type MedicalProfile, type UserProfile } from "../memory.js";
 import { dayEntries } from "./NutritionLog.js";
 import { computeTargets, activityLabel, type ActivityToday } from "./DailyTargets.js";
-import { waterTotalToday } from "./WaterToday.js";
+import { waterTotalToday, waterPace, catchUpText } from "./WaterToday.js";
 import { dayCtxFrom, normDayHour, isoDayKey, nutritionDayKey, nutritionDayOf, wakeHourFor } from "./MealSchedule.js";
+import { sleepSummaryText, sleepReading, fmtSleep, hhmmOf, sleepDayTip, sleepReadiness, lateCaffeine, type SleepEpisode, type SleepInsights } from "./SleepCore.js";
+import { moduloOn } from "./AutoPrefs.js";
 
 // ─── Constantes (todas documentadas; ninguna es un valor clínico personalizado) ──────────
 
@@ -54,7 +56,7 @@ export interface FoodBudget {
   disponible?: number;     // disponible total del mes
   daysLeft: number;        // días que quedan del mes (incluye hoy)
   perDay?: number;         // lo que se puede gastar por día en comida
-  perDayBasis: "presupuesto" | "disponible";
+  perDayBasis: "presupuesto" | "disponible" | "libre";
   tier: 1 | 2 | 3;         // nivel de precio máximo sugerido
   note?: string;
 }
@@ -70,11 +72,23 @@ export interface MetabolicContext {
   weightKg?: number;
 
   // Salud de HOY (solo datos con fecha de hoy)
+  /** lo dormido en 24 h (la noche + un segundo sueño + siestas) */
   sleepHours?: number;
+  /** Sueño 2.0 · S0: las partes del sueño de hoy, como en el reloj (SleepCore), y cuánto duerme normalmente */
+  sleepParts?: { episodes: SleepEpisode[]; totalH: number; nightH: number | null; split: boolean; night: SleepEpisode | null; usualSleepH?: number };
+  /** la noche, si el sueño lo anotó por chat en partes (sin los tramos del reloj) */
+  sleepManualNightH?: number;
+  /** Sueño 2.0 · S1: las 2 semanas que calcula el teléfono (deuda, regularidad, cronotipo, puntaje, hora para acostarse) */
+  sleepInsights?: SleepInsights;
+  /** Sueño 2.0 · S3: algo con cafeína anotado hoy después de su hora límite (la frase lista) */
+  lateCaffeine?: string;
   restingHR?: number;
   steps?: number;
   activeCalories?: number;
   trainedToday: boolean | null;   // null = no se sabe (nunca se asume "no entrenaste")
+  /** «¿entrenas hoy?» (Forge 2.0): dijo que descansa, o el entreno que planificó y cuánto falta */
+  restDay?: boolean;
+  plannedWorkout?: { phrase: string; minutesTo: number | null; kcal: number } | null;
   /** minutos de ejercicio de hoy (sesiones de Health Connect y actividad detectada por el reloj) */
   exerciseMinutes?: number;
   /** kcal activas de la actividad detectada hoy, y su nombre («básquet 2 h») */
@@ -104,7 +118,10 @@ export interface MetabolicContext {
 export interface Analysis {
   findings: Finding[];             // ya ordenados por prioridad
   needs: { proteinG: number; kcal: number; carbsG: number; fatG: number; waterL: number };
+  /** Hora del reloj: solo para textos. Para decidir qué comida toca o qué se espera a esta hora, `dayHour`. */
   hour: number;
+  /** La hora de SU día (MealSchedule.normDayHour: 7,5 + horas despierta, puede pasar de 24; sin despertar conocido, el reloj). */
+  dayHour: number;
 }
 
 // ─── Utilidades ──────────────────────────────────────────────────────────────
@@ -174,14 +191,19 @@ export function parseFoodBudget(text: string | null | undefined, now: Date): { b
     }
   }
 
-  const disp = text.match(/Disponible:\s*\$([\d.,]+)/i);
+  const disp = text.match(/Disponible(?: del mes)?:\s*\$([\d.,]+)/i);
   const disponible = disp ? clpToNumber(disp[1]) : undefined;
 
-  const cat = text.match(/Alimentaci[oó]n:\s*\$([\d.,]+)(?:\s*\/\s*\$([\d.,]+)\s*presup)?/i);
+  // «Comida» desde la revisión F2 (2026-11-04; antes «Alimentacion», como la web)
+  const cat = text.match(/(?:Alimentaci[oó]n|·\s*Comida):\s*\$([\d.,]+)(?:\s*\/\s*\$([\d.,]+)\s*presup)?/i);
   const spent = cat ? clpToNumber(cat[1]) : undefined;
   const budgetAmt = cat && cat[2] ? clpToNumber(cat[2]) : undefined;
 
-  if (disponible === undefined && spent === undefined) return { budget: null, note: "No pude leer cifras de presupuesto en el texto de Finanzas." };
+  if (disponible === undefined && spent === undefined && !/Para gastar hasta el pr[oó]ximo ingreso/i.test(text)) {
+    // Solo existe la plata de sus cuentas (2026-10-22): sin cuentas no hay de dónde estimar
+    if (/no tiene cuentas en Finanzas/i.test(text)) return { budget: null, note: "No tienes cuentas en Finanzas, así que no sé cuánta plata tienes para comida: agrégalas en Finanzas → Cuentas." };
+    return { budget: null, note: "No pude leer cifras de presupuesto en el texto de Finanzas." };
+  }
 
   const tierFor = tierForPerDay;
 
@@ -192,17 +214,25 @@ export function parseFoodBudget(text: string | null | undefined, now: Date): { b
       budget: { spent, budget: budgetAmt, remaining, disponible, daysLeft, perDay: round0(perDay), perDayBasis: "presupuesto", tier: tierFor(perDay) },
     };
   }
-  if (disponible !== undefined) {
-    // Sin presupuesto de alimentación: se reparte el disponible total entre los días que quedan y se reserva
-    // solo un tercio para comida (el resto son otros gastos). Se avisa que es una estimación.
-    const perDay = (disponible / daysLeft) / 3;
+  // Sin presupuesto de alimentación: lo que de verdad queda para gastar hasta el próximo ingreso (Finanzas: «Para gastar hasta
+  // el próximo ingreso (Sueldo, en 10 días): $53.573 (~$5.357 por día)»), y un tercio para comida. 2026-10-19: con el
+  // «Disponible» (ingresos del mes − gastos, contando el sueldo que aún no llegaba: $791.951) estimó ~$20.306 al día para
+  // comida teniendo $53.573 en la cuenta, y Eris le habló de «los $791.951 que tienes a mano».
+  const libreM = text.match(/Para gastar hasta el pr[oó]ximo ingreso(?:[^:\n]*?en (\d+) d[ií]as?)?[^:\n]*:\s*\$([\d.,]+)/i);
+  if (libreM) {
+    const libre = clpToNumber(libreM[2]);
+    const days = libreM[1] ? Math.max(1, Number(libreM[1])) : daysLeft;
+    const perDay = (libre / days) / 3;
     return {
       budget: {
-        spent, disponible, daysLeft, perDay: round0(perDay), perDayBasis: "disponible", tier: tierFor(perDay),
-        note: "No tienes presupuesto de alimentación definido en Finanzas: estimé ~1/3 de tu disponible diario para comida.",
+        spent, disponible: libre, daysLeft: days, perDay: round0(perDay), perDayBasis: "libre", tier: tierFor(perDay),
+        note: `No tienes presupuesto de alimentación definido en Finanzas: de lo que te queda para gastar hasta tu próximo ingreso (~$${round0(libre / days).toLocaleString("es-CL")} por día, para todo), estimé ~1/3 para comida.`,
       },
     };
   }
+  // Sin presupuesto ni «Para gastar hasta…» (sin cuentas): antes se repartía el «Disponible» del mes (ingresos − gastos,
+  // contando el sueldo que aún no llegaba). Solo existe la plata de sus cuentas (2026-10-22): sin ellas no se estima.
+  if (disponible !== undefined) return { budget: null, note: "No tienes cuentas en Finanzas, así que no sé cuánta plata tienes para comida: agrégalas en Finanzas → Cuentas." };
   return { budget: null };
 }
 
@@ -258,6 +288,11 @@ export async function gatherMetabolicContext(memory: any, opts: GatherOptions = 
 
   const fromSnap = <T,>(v: T | undefined): T | undefined => (snapshotIsToday ? v : undefined);
   const sleepHours = fromSnap<number>(snap?.sleep?.durationHours) ?? rollupToday?.sleepHours;
+  const eps: SleepEpisode[] | undefined = fromSnap(Array.isArray(snap?.sleep?.episodes) && snap.sleep.episodes.length ? snap.sleep.episodes : undefined);
+  const sleepParts = eps && typeof sleepHours === "number" ? {
+    episodes: eps, totalH: sleepHours, nightH: typeof snap?.sleep?.nightHours === "number" ? snap.sleep.nightHours : null, split: !!snap?.sleep?.split,
+    night: eps.find((e) => e.kind === "noche") ?? null, ...(typeof snap?.schedule?.sleepHours === "number" ? { usualSleepH: snap.schedule.sleepHours } : {}),
+  } : undefined;
   const restingHR = fromSnap<number>(snap?.heartRate?.resting) ?? rollupToday?.restingHR;
   const steps = Math.max(fromSnap<number>(typeof snap?.steps === "number" ? snap.steps : undefined) ?? 0, rollupToday?.steps ?? 0) || undefined;
   const activeCalories = fromSnap<number>(typeof snap?.calories === "object" ? snap.calories?.active : snap?.calories);
@@ -323,7 +358,10 @@ export async function gatherMetabolicContext(memory: any, opts: GatherOptions = 
 
   // ── Metas ── (fuente única: DailyTargets — las mismas que ven Forge, Nutrición, Inicio y el chat)
   const routine = ((await safeGet("toji_routine_md")) as any) || null;
+  const intents = await safeGet("training_intent");
+  const intent = intents && typeof intents === "object" ? intents[isoDayKey(now)] ?? null : null;
   const targets = computeTargets({
+    intent, now,
     stored: await safeGet("nutrition_goals"), body: await safeGet("body_profile"), medical,
     snapWeightKg: weightKg, today: todayKey, trainsRegularly: !!routine?.md || trainedToday === true,
     activity: activity ? { ...activity, day: todayKey } : null,
@@ -357,13 +395,27 @@ export async function gatherMetabolicContext(memory: any, opts: GatherOptions = 
   } catch {}
 
   // ── Presupuesto ──
-  const structured = foodBudgetFromSummary(await safeGet("financial_summary_latest"), now);
-  const fin = structured ? { budget: structured } as { budget: FoodBudget | null; note?: string } : parseFoodBudget(await safeGet("financial_context_latest"), now);
+  // Finanzas apagado en Perfil (A2): el presupuesto de comida no se lee de ahí
+  const finOn = await moduloOn(memory, "finanzas").catch(() => true);
+  const structured = finOn ? foodBudgetFromSummary(await safeGet("financial_summary_latest"), now) : null;
+  const fin = structured ? { budget: structured } as { budget: FoodBudget | null; note?: string } : finOn ? parseFoodBudget(await safeGet("financial_context_latest"), now) : { budget: null };
   if (fin.note && !fin.budget) dataNotes.push(fin.note);
+
+  // Sueño 2.0 · S3: un café (o bebida con cafeína) anotado después de su hora límite
+  const insToday = fromSnap(snap?.sleepInsights && typeof snap.sleepInsights.need === "number" ? snap.sleepInsights as SleepInsights : undefined);
+  const lateCaf = insToday && Array.isArray(nutLog)
+    ? lateCaffeine(nutLog.flatMap((e) => (Array.isArray(e?.items) ? e.items : []).map((i: any) => ({ name: String(i?.name ?? ""), at: Date.parse(e.timestamp) }))).filter((x) => x.name && !Number.isNaN(x.at)), insToday)
+    : null;
 
   return {
     now, wakeHour, profile, medical, restrictions, medTypes, weightKg,
-    sleepHours, restingHR, steps, activeCalories, trainedToday, exerciseMinutes, activityKcal: activity?.kcal, activityLabel: activity ? activityLabel(activity) : undefined, snapshotAgeMin, snapshotIsToday,
+    ...(lateCaf ? { lateCaffeine: lateCaf.text } : {}),
+    restDay: intent?.answer === "no" || undefined,
+    plannedWorkout: intent?.answer === "si" && targets.kcalPlanned ? { phrase: targets.intentPhrase ?? "tu entreno", minutesTo: targets.minutesToWorkout ?? null, kcal: targets.kcalPlanned } : null,
+    sleepHours, ...(sleepParts ? { sleepParts } : {}),
+    ...(fromSnap(snap?.sleep?.manual && snap.sleep.split && typeof snap.sleep.nightHours === "number" ? snap.sleep.nightHours : undefined) !== undefined ? { sleepManualNightH: snap.sleep.nightHours } : {}),
+    ...(fromSnap(snap?.sleepInsights && typeof snap.sleepInsights.need === "number" ? snap.sleepInsights : undefined) ? { sleepInsights: snap.sleepInsights } : {}),
+    restingHR, steps, activeCalories, trainedToday, exerciseMinutes, activityKcal: activity?.kcal, activityLabel: activity ? activityLabel(activity) : undefined, snapshotAgeMin, snapshotIsToday,
     eaten, mealsToday: Array.isArray(nutLog) ? nutLog.length : 0, lastMealAt,
     hydrationEffectiveL, hydrationRawL,
     goals: {
@@ -387,6 +439,9 @@ const AREA_ORDER: Area[] = ["glucosa", "agua", "sueno", "comida", "movimiento", 
 export function analyze(ctx: MetabolicContext): Analysis {
   const f: Finding[] = [];
   const hour = hourOf(ctx.now);
+  // Los umbrales del día van por la hora de SU día, no por el reloj (2026-10-21: a quien despertó hace 3,7 h, a las 23:00,
+  // Eris le propuso «una cena liviana»; y a quien despierta a las 14:00 se le reclamaba a las 17:00 no haber comido).
+  const dayHour = normDayHour(ctx.now, ctx.wakeHour);
   const frac = dayFraction(ctx.now, ctx.wakeHour);
   const g = ctx.glucose;
   const diabetic = hasCondition(ctx.medical, "diabetes_t1", "diabetes_t2", "prediabetes");
@@ -427,14 +482,23 @@ export function analyze(ctx: MetabolicContext): Analysis {
   let waterNeed = 0;
   if (waterGoal) {
     waterNeed = Math.max(0, round1(waterGoal - ctx.hydrationEffectiveL));
-    const expectedNow = waterGoal * frac;
-    const ratio = expectedNow > 0.2 ? ctx.hydrationEffectiveL / expectedNow : 1;
-    if (hour >= 10 && ratio < 0.5) {
-      f.push({ area: "agua", severity: hour >= 14 ? 2 : 1, headline: `Agua: ${cl1(ctx.hydrationEffectiveL)} L de ${cl1(waterGoal)} L`, detail: `A esta hora deberías ir por ~${round1(expectedNow)} L; vas en menos de la mitad.`, action: `Toma 500 ml ahora y reparte ~${Math.max(0.5, round1(waterNeed))} L hasta la noche.` });
-    } else if (hour >= 10 && ratio < 0.75) {
-      f.push({ area: "agua", severity: 1, headline: `Agua: ${cl1(ctx.hydrationEffectiveL)} L de ${cl1(waterGoal)} L`, detail: "Vas algo por debajo del ritmo del día.", action: "Toma un vaso grande (~350 ml) ahora." });
+    // A ESTA HORA, no contra el día completo (2026-10-18: a las 10:54, con 0,5 de 4 L, el asesor le dijo «reponer 3,5 L»).
+    // La misma cuenta que los cuadros de Métricas y la frase del agua (WaterToday.waterPace).
+    const have = ctx.hydrationEffectiveL;
+    const p = waterPace(have, waterGoal, ctx.now, ctx.wakeHour);
+    const exp = cl1(p.expectedNow);
+    const vasos = p.vasos ?? 1;
+    const toGoal = `La meta del día (${cl1(waterGoal)} L) se completa de a poco hasta la noche.`;
+    const behind = { headline: `Agua: ${cl1(have)} L (a esta hora lo esperable es ~${exp} L)`, detail: `Para ir al día: +${catchUpText(p)}. ${toGoal}`, action: `Toma ${vasos > 1 ? `${vasos} vasos` : "un vaso"} de agua en la próxima hora: así vas al día.` };
+    if (p.state === "atras") {
+      f.push({ area: "agua", severity: dayHour >= 15 ? 2 : 1, ...behind });
+    } else if (p.state === "algo_atras") {
+      // Casi al día (un vaso): se dice, pero no pasa a ser «lo más importante de hoy» (y en «✓ Al día» dice «casi»)
+      const casi = have >= p.expectedNow * 0.75;
+      f.push({ area: "agua", severity: casi ? 0 : 1, ...behind, ...(casi ? { headline: `Agua: ${cl1(have)} L, casi al día (te falta${vasos > 1 ? `n ${vasos} vasos` : " 1 vaso"})` } : {}) });
     } else {
-      f.push({ area: "agua", severity: 0, headline: `Agua: ${cl1(ctx.hydrationEffectiveL)} L de ${cl1(waterGoal)} L`, detail: "Vas bien de ritmo." });
+      const detail = p.state === "cumplida" ? "Meta del día cumplida." : p.state === "temprano" ? `Recién empieza tu día. ${toGoal}` : `Vas al día para esta hora (~${exp} L). ${toGoal}`;
+      f.push({ area: "agua", severity: 0, headline: `Agua: ${cl1(have)} L de ${cl1(waterGoal)} L`, detail });
     }
     if (ctx.hydrationRawL - ctx.hydrationEffectiveL > 0.3) {
       f.push({ area: "datos", severity: 0, headline: "Parte de lo que bebiste cuenta menos", detail: `Registraste ${ctx.hydrationRawL} L pero solo ${ctx.hydrationEffectiveL} L hidratan de verdad (café, bebidas con azúcar y alcohol hidratan menos que el agua).` });
@@ -445,13 +509,43 @@ export function analyze(ctx: MetabolicContext): Analysis {
   const baseSleep = ctx.diag?.all.find((m) => m.key === "sleepHours");
   if (ctx.sleepHours !== undefined) {
     const h = ctx.sleepHours;
-    if (h < SLEEP_SHORT_H) {
-      f.push({ area: "sueno", severity: h < 5 ? 2 : 1, headline: `Dormiste ${cl1(h)} h`, detail: `Menos de ${SLEEP_SHORT_H} h. Con poco sueño aumentan el hambre de azúcar y el cansancio, y baja el rendimiento.`, action: h < 5 ? "Hoy entrena suave o descansa, y acuéstate temprano." : "Baja un poco la intensidad si entrenas y evita cafeína pasadas las 15:00." });
+    const parts = ctx.sleepParts;
+    // Partido (Sueño 2.0 · S0): para la recuperación cuenta el total; para la calidad, la noche. El 24-10 Eris dijo «8,8 h,
+    // descanso suficiente» a 5 h 29 de noche, partida y empezando a las 02:33, más 4 h en la tarde.
+    // Anotado por chat en partes («dormí 4 y en la tarde 4 más»): sin los tramos del reloj, se dice con las cifras que dio
+    const manualSplit = !parts && ctx.sleepManualNightH != null && ctx.sleepManualNightH < h - 0.25;
+    if (manualSplit) {
+      const n = ctx.sleepManualNightH!;
+      f.push({ area: "sueno", severity: h < 5 ? 2 : n < 6 ? 1 : 0, headline: `Dormiste ${fmtSleep(h)} en partes`, detail: `${fmtSleep(n)} de noche y ${fmtSleep(h - n)} aparte (lo anotaste tú). En horas cuenta todo, pero partido descansa menos que seguido.` });
+    } else if (parts?.split) {
+      const nightShort = (parts.nightH ?? h) < 6;
+      const reading = sleepReading(parts, parts.usualSleepH);
+      f.push({
+        area: "sueno", severity: h < 5 ? 2 : nightShort ? 1 : 0, headline: `Dormiste ${fmtSleep(h)} en partes`,
+        detail: `${sleepSummaryText(parts)}${reading ? ` ${reading}` : ""}`,
+        ...(nightShort ? { action: "Si te da sueño hoy, una siesta de 20 min o menos antes de las 15:00; esta noche acuéstate cuando te dé sueño y mañana levántate a tu hora de siempre." } : {}),
+      });
+    } else if (h < SLEEP_SHORT_H) {
+      // Sueño 2.0 · S3: la comida primero (con diabetes, el azúcar), cómo entrenar (3 noches + deuda) y la cafeína a SU hora
+      const ins3 = ctx.sleepInsights, last = { totalH: h, nightH: parts?.nightH ?? null, split: !!parts?.split };
+      const tip = sleepDayTip(ins3, last, { diabetic }), rd = sleepReadiness(ins3, last);
+      const accion = [
+        tip?.kind === "corta" ? tip.sub : null,
+        rd ? (rd.level === "liviano" ? "Hoy entrena suave o descansa." : rd.level === "suave" ? "Si entrenas, deja una repetición más en reserva." : null) : (h < 5 ? "Hoy entrena suave o descansa." : "Baja un poco la intensidad si entrenas."),
+        ins3 ? `Cafeína solo hasta las ${hhmmOf(ins3.caffeineUntil)}.` : "Evita cafeína pasadas las 15:00.",
+      ].filter(Boolean).join(" ");
+      f.push({ area: "sueno", severity: h < 5 ? 2 : 1, headline: `Dormiste ${cl1(h)} h`, detail: `Menos de ${SLEEP_SHORT_H} h. Con poco sueño aumentan el hambre de azúcar y el cansancio, y baja el rendimiento.`, action: accion });
     } else if (h < SLEEP_TARGET_H) {
-      f.push({ area: "sueno", severity: 1, headline: `Dormiste ${cl1(h)} h`, detail: `Un poco bajo el mínimo recomendado (${SLEEP_TARGET_H}–9 h).`, action: "Intenta acostarte 30–45 min antes hoy." });
+      const ins3 = ctx.sleepInsights;
+      f.push({ area: "sueno", severity: 1, headline: `Dormiste ${cl1(h)} h`, detail: `Un poco bajo el mínimo recomendado (${SLEEP_TARGET_H}–9 h).`, action: ins3 ? `Esta noche acuéstate entre las ${hhmmOf(ins3.bedtime.from)} y las ${hhmmOf(ins3.bedtime.to)}.` : "Intenta acostarte 30–45 min antes hoy." });
     } else {
-      f.push({ area: "sueno", severity: 0, headline: `Dormiste ${cl1(h)} h`, detail: "Descanso suficiente." });
+      f.push({ area: "sueno", severity: 0, headline: `Dormiste ${cl1(h)} h`, detail: parts && parts.episodes.length > 1 ? `${sleepSummaryText(parts)} Descanso suficiente.` : "Descanso suficiente." });
     }
+    const ins = ctx.sleepInsights;
+    if (ins && ins.nights >= 4 && ins.debtH >= 3) {
+      f.push({ area: "sueno", severity: 1, headline: `Deuda de sueño: ~${fmtSleep(ins.debtH)}`, detail: "Acumulada en las últimas 2 semanas.", action: "Suma 30–60 min por noche esta semana; dormir mucho un solo día no la paga." });
+    }
+    if (ctx.lateCaffeine) f.push({ area: "sueno", severity: 1, headline: "Cafeína después de tu hora límite", detail: ctx.lateCaffeine });
     if (baseSleep?.flagged && baseSleep.expected && baseSleep.confidence !== "generic") {
       f.push({ area: "sueno", severity: 1, headline: "Dormiste menos de lo que sueles", detail: `Tu patrón es ~${round1(baseSleep.expected)} h.` });
     }
@@ -468,16 +562,16 @@ export function analyze(ctx: MetabolicContext): Analysis {
   };
   const hoursSinceMeal = ctx.lastMealAt ? (ctx.now.getTime() - ctx.lastMealAt.getTime()) / 3600000 : null;
 
-  if (ctx.mealsToday === 0 && hour >= 11) {
-    f.push({ area: "comida", severity: hour >= 14 ? 2 : 1, headline: "No hay comidas registradas hoy", detail: "O no has comido, o no lo has anotado; sin eso no puedo saber qué te falta.", action: "Cuéntame qué comiste o te propongo qué comer ahora." });
+  if (ctx.mealsToday === 0 && dayHour >= 11) {
+    f.push({ area: "comida", severity: dayHour >= 14 ? 2 : 1, headline: "No hay comidas registradas hoy", detail: "O no has comido, o no lo has anotado; sin eso no puedo saber qué te falta.", action: "Cuéntame qué comiste o te propongo qué comer ahora." });
   } else {
-    if (hoursSinceMeal !== null && hoursSinceMeal >= 5 && hour >= 9 && hour <= 22) {
+    if (hoursSinceMeal !== null && hoursSinceMeal >= 5 && dayHour >= 9 && dayHour <= 22) {
       f.push({ area: "comida", severity: diabetic ? 2 : 1, headline: `Llevas ${round0(hoursSinceMeal)} h desde tu última comida registrada`, detail: diabetic ? "Con tu condición conviene no dejar tanto intervalo, sobre todo si vas a moverte." : "Puede que estés con poca energía.", action: "Haz una comida o colación con carbohidratos y proteína." });
     }
     const kcalRatio = G.kcal * frac > 0 ? ctx.eaten.kcal / (G.kcal * Math.max(frac, 0.15)) : 1;
     const detailParts = [`${cl0(ctx.eaten.kcal)} de ${cl0(G.kcal)} kcal`];
     if (G.protein) detailParts.push(`${cl0(ctx.eaten.protein)} de ${cl0(G.protein)} g de proteína`);
-    const behind = hour >= 13 && kcalRatio < 0.6;
+    const behind = dayHour >= 13 && kcalRatio < 0.6;
     // Ya pasó la meta: decirlo con calma (antes decía «te faltan ~0 kcal» y lo marcaba como «al día»: banco de pruebas 2026-10-16)
     const over = G.kcal > 0 ? ctx.eaten.kcal - G.kcal : 0;
     const detail = over > 0
@@ -501,10 +595,13 @@ export function analyze(ctx: MetabolicContext): Analysis {
   if (ctx.steps !== undefined) {
     const expected = ctx.goals.steps * frac;
     const ratio = expected > 500 ? ctx.steps / expected : 1;
-    if (ctx.trainedToday === true) {
+    if (ctx.trainedToday !== true && (ctx.restDay || ctx.plannedWorkout)) {
+      // Dijo que descansa o que entrena más tarde: no se le pide caminar (Forge 2.0, sin reproche)
+      f.push({ area: "movimiento", severity: 0, headline: `${ctx.steps.toLocaleString("es-CL")} pasos de ${ctx.goals.steps.toLocaleString("es-CL")}`, detail: ctx.restDay ? "Hoy es tu día de descanso: también cuenta." : `Hoy entrenas (${ctx.plannedWorkout!.phrase}): guarda energía para eso.` });
+    } else if (ctx.trainedToday === true) {
       // Entrenó: los pasos no cuentan las pesas, el básquet ni la bici. No se le pide caminar.
       f.push({ area: "movimiento", severity: 0, headline: `${ctx.steps.toLocaleString("es-CL")} pasos de ${ctx.goals.steps.toLocaleString("es-CL")}`, detail: "Ya entrenaste hoy: los pasos no cuentan todo lo que te moviste." });
-    } else if (hour >= 15 && ratio < 0.5) {
+    } else if (dayHour >= 15 && ratio < 0.5) {
       f.push({ area: "movimiento", severity: 1, headline: `${ctx.steps.toLocaleString("es-CL")} pasos de ${ctx.goals.steps.toLocaleString("es-CL")}`, detail: "Vas por debajo de la mitad del ritmo del día.", action: `Una caminata de 20–30 min suma ~2.500–3.500 pasos${g && g.value > g.high ? " y además ayuda con la glucosa alta" : ""}.` });
     } else {
       f.push({ area: "movimiento", severity: 0, headline: `${ctx.steps.toLocaleString("es-CL")} pasos de ${ctx.goals.steps.toLocaleString("es-CL")}`, detail: ratio >= 1 ? "Vas al día o mejor." : "Ritmo aceptable." });
@@ -516,6 +613,24 @@ export function analyze(ctx: MetabolicContext): Analysis {
     detail: `Prioriza proteína y reponer líquidos y carbohidratos${ctx.activityKcal ? "; tu meta de hoy ya suma ese gasto" : ""}.`,
   });
 
+  // 5b) ENTRENO PLANIFICADO (Forge 2.0): comer antes y cuidados por condición ─────────
+  const pw = ctx.plannedWorkout;
+  if (pw && ctx.trainedToday !== true && pw.minutesTo != null && pw.minutesTo >= 45 && pw.minutesTo <= 150) {
+    f.push({ area: "comida", severity: 0, headline: `Entrenas en ~${Math.round(pw.minutesTo / 15) * 15} min (${pw.phrase})`,
+      detail: "Buen momento para comer algo con carbohidratos y un poco de proteína (fruta con yogur, pan con huevo)." });
+  }
+  if (pw || ctx.trainedToday === true) {
+    const meds = ctx.medTypes ?? new Set<string>();
+    if ([...meds].some((m) => m.startsWith("insulin")) || meds.has("sulfonylurea")) {
+      f.push({ area: "comida", severity: 1, headline: "Entreno con tu tratamiento para la diabetes", tag: "caution",
+        detail: "Con insulina o sulfonilureas, controla tu glucosa antes y después de entrenar y ten algo dulce a mano: puede bajar hasta 24–48 h después. Ajustar dosis lo ve tu médico." });
+    }
+    if (ctx.medical?.conditions?.some((c: any) => c?.id === "hypertension")) {
+      f.push({ area: "movimiento", severity: 0, headline: "Con presión alta, respira en cada repetición", tag: "caution",
+        detail: "No aguantes la respiración al hacer fuerza (exhala al subir el peso) y evita llegar al fallo en los ejercicios pesados." });
+    }
+  }
+
   // 6) ÁNIMO ───────────────────────────────────────────────
   const mood = ctx.diag?.all.find((m) => m.key === "moodScore");
   if (mood?.flagged && mood.confidence !== "generic") {
@@ -526,7 +641,7 @@ export function analyze(ctx: MetabolicContext): Analysis {
   for (const n of ctx.dataNotes) f.push({ area: "datos", severity: 0, headline: "Aviso sobre los datos", detail: n });
 
   f.sort((a, b) => b.severity - a.severity || AREA_ORDER.indexOf(a.area) - AREA_ORDER.indexOf(b.area));
-  return { findings: f, needs, hour };
+  return { findings: f, needs, hour, dayHour };
 }
 
 // ─── Texto para el LLM ───────────────────────────────────────────────────────

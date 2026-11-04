@@ -9,21 +9,27 @@
 // Es solo un filtro de visibilidad: no da permisos. Los permisos, la aprobación y la política de rutas siguen intactos.
 // ============================================================
 
-export type ToolGroup = "axs" | "system" | "admin" | "health" | "health_extra" | "finance" | "web";
+export type ToolGroup = "axs" | "system" | "admin" | "health" | "health_extra" | "finance" | "inventory" | "web";
 
 export const TOOL_GROUP: Record<string, ToolGroup> = {
   axs_briefing: "axs", knowledge_search: "axs", vault_audit: "axs", vault_healer: "axs", vault_note: "axs",
   log_management: "axs", executive_report: "axs", crystallize: "axs",
   bash: "system", file_read: "system", file_write: "system", open: "system", system_info: "system",
   admin_overview: "admin",
-  gluco_tracker: "health", nutrition_tracker: "health", carb_options: "health", metabolic_advisor: "health", manage_user_profile: "health", symptom_guide: "health", sleep_log: "health", lab_results: "health",
+  gluco_tracker: "health", nutrition_tracker: "health", carb_options: "health", metabolic_advisor: "health", manage_user_profile: "health", symptom_guide: "health", sleep_log: "health", lab_results: "health", training_today: "health",
   training_plan: "health_extra", personal_baseline: "health_extra", get_live_context: "health_extra",
   manage_user_context: "health_extra", personal_journal: "health_extra", insight_feedback: "health_extra",
   finance_tracker: "finance",
+  inventory_tracker: "inventory",
+  supplement_tracker: "health",
+  day_agenda: "health",
+  day_plan: "health",
   web_search: "web",
 };
 
 import { readFileSync } from "node:fs";
+import { parseTrainingStatement } from "./TrainingIntent.js";
+import { esAnalisisDia } from "./AnalisisDia.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,9 +41,14 @@ const RULES: Array<[ToolGroup, RegExp]> = [
   ["axs", /\b(axs|boveda|vault|obsidian|notas?|roadmap|briefing|proyectos?|lander|toji|forge|wallet|tsn|johnny|decision(es)?|cristaliz\w*|logs?|bitacora|inbox|pendientes?|backlog|huerfan\w*|enlaces?|sanar|repar\w*|reporte|auditor\w*|conocimiento|como va|estado de|resumen|segun mis notas|que dice|en que esta|crea (una )?nota|documenta\w*)\b/],
   ["system", /\b(comando|terminal|powershell|ejecut\w*|corre|script|archivos?|carpetas?|escritorio|documentos|descargas|abre|abrir|disco|ram|cpu|procesos?|servicios?|instal\w*|servidor|pc|equipo|ollama|puerto|red|ip|temperatura|espacio|escribe|lee|sistema|windows|reinicia\w*|apaga\w*|bun|node|git|whisper|piper|cloudflare\w*|tailscale)\b/],
   ["admin", /\b(usuarios?|perfiles?|registrad\w*|cuentas?|sesion(es)?|roles?|acceso|accesos|intentos?|seguridad|incidentes?|quien (entro|esta|se conecto)|conectad\w*|suspend\w*|bitacora de auditoria)\b/],
-  ["health", /\b(calambres?|dolor(es)?|duele\w*|mare\w+|nausea\w*|vomit\w*|diarrea|fiebre|tos|resfri\w*|gripe|garganta|cabeza|espalda|estomago|acidez|migrana|sintomas?|enferm\w*|herida|corte|quemadura\w*|torcedura|esguince|insomnio|ansiedad|panico|estrenimiento|deshidrat\w*|hinchad\w*|lesion\w*|tobillo|rodilla|glucos\w*|glucemia|azucar|insulina|diabet\w*|comi|comida|comer|desayun\w*|almuerz\w*|cena|colacion|snack|hambre|agua|hidrat\w*|litros?|calorias?|kcal|proteinas?|carbo\w*|macros?|alimentos?|recetas?|dieta|keto|vegan\w*|alergi\w*|celiac\w*|lactosa|peso|medic\w*|pastillas?|remedios?|farmacos?|tratamiento|\w*gliptin\w*|\w*gliflozin\w*|metformin\w*|dosis|presion|hemoglobina|glicosilada|glucosilada|glicada|hba1c|a1c|examen(es)?|laboratorio|colesterol|ldl|hdl|trigliceridos|creatinina|sueno|dormi|descans\w*|cansad\w*|energia|pasos|ejercicio|nutri\w*|hipo|hiper|cgm|libre|mi salud|cuanto (llevo|me falta)|que hago ahora|registra\w*|anota\w*|ingres\w*|onces?|tome once|merienda|merend\w*|almorc\w*|al ?mor[csz]e|cene|cenamos|comimos|porcion\w*|gramos)\b/],
-  ["finance", /\b(gast\w*|pagu\w*|pague|compr\w*|lucas?|luquitas?|palos?|pesos|plata|dinero|efectivo|cajero|gir\w*|saque|transfer\w*|deposit\w*|abon\w*|prest\w*|devolvi\w*|me debe\w*|ahorr\w*|sueldo|finanzas|wallet|presupuesto|tarjeta|debito|credito|banco|saldos?|deudas?|cuenta rut)\b/],
-  ["health_extra", /\b(entren\w*|rutina|plan de entrenamiento|mi plan|gimnasio|gym|forge|diario personal|journal|animo|estres|recuerda que|no olvides|baseline|patron|como voy|como estoy|resumen de (mi )?salud|insights?|habitos?|tendencia|feedback|mis notas personales)\b/],
+  ["health", /\b(calambres?|dolor(es)?|duele\w*|mare\w+|nausea\w*|vomit\w*|diarrea|fiebre|tos|resfri\w*|gripe|garganta|cabeza|espalda|estomago|acidez|migrana|sintomas?|enferm\w*|herida|corte|quemadura\w*|torcedura|esguince|insomnio|ansiedad|panico|estrenimiento|deshidrat\w*|hinchad\w*|lesion\w*|tobillo|rodilla|glucos\w*|glucemia|azucar|insulina|diabet\w*|comi|comida|comer|desayun\w*|almuerz\w*|cena|colacion|snack|hambre|agua|hidrat\w*|litros?|calorias?|kcal|proteinas?|carbo\w*|macros?|alimentos?|recetas?|dieta|keto|vegan\w*|alergi\w*|celiac\w*|lactosa|peso|medic\w*|pastillas?|remedios?|farmacos?|tratamiento|\w*gliptin\w*|\w*gliflozin\w*|metformin\w*|dosis|presion|hemoglobina|glicosilada|glucosilada|glicada|hba1c|a1c|examen(es)?|laboratorio|colesterol|ldl|hdl|trigliceridos|creatinina|sueno|dormi|duermo|dormir|durmiendo|desvel\w*|descans\w*|cansad\w*|energia|pasos|ejercicio|nutri\w*|hipo|hiper|cgm|libre|mi salud|cuanto (llevo|me falta)|que hago ahora|registra\w*|anota\w*|ingres\w*|onces?|tome once|merienda|merend\w*|almorc\w*|al ?mor[csz]e|cene|cenamos|comimos|porcion\w*|gramos)\b/],
+  ["finance", /\b(gast\w*|pagu\w*|pague|compr\w*|lucas?|luquitas?|palos?|pesos|plata|dinero|efectivo|cajero|gir\w*|saque|transfer\w*|deposit\w*|abon\w*|prest\w*|devolvi\w*|me debe\w*|ahorr\w*|sueldo|finanzas|wallet|presupuesto|tarjeta|debito|credito|banco|saldos?|deudas?|cuenta rut|(me |nos )?queda\w* (este mes|del mes|a fin de mes|hasta (el |mi |que llegue el )?(sueldo|pago|fin de mes)))\b/],
+  // El Inventario de la casa (2026-10-22). Sin «tengo» suelto: «tengo hambre» no es del inventario. «¿Cuánto me queda este
+  // mes?» es de Finanzas (2026-10-23); «¿me queda leche?» sigue siendo del Inventario
+  ["inventory", /\b(inventario|despensa|refri\w*|refrigerador|alacena|bodega|botiquin|stock|lista de (las )?compras?|que (me |nos )?falta(n)?|se (me |nos )?(acabo|acabaron|termino|terminaron|agoto|agotaron|vencio|vencieron)|no (me |nos )?queda\w*|me quedan?(?! (este mes|del mes|a fin de mes|hasta))|por vencer|vencimientos?|vencid[oa]s?|caduc\w*|bote|tire|repuse|use|ocupe|compre|compramos|traje)\b/],
+  // Suplementos (fase I5): con las herramientas de salud
+  ["health", /\b(suplement\w*|creatina|omega ?3|vitamina\w*|magnesio|zinc|hierro|b12|whey|cafeina|electrolitos|calcio|colageno|multivitaminic\w*)\b/],
+  ["health_extra", /\b(entren\w*|rutina|plan de entrenamiento|mi plan|gimnasio|gym|forge|ejercicios?|pesas|records?|marcas?|fuerza|levant\w*|press|sentadillas?|peso muerto|dominadas?|diario personal|journal|animo|estres|recuerda que|no olvides|baseline|patron|como voy|como estoy|resumen de (mi )?salud|insights?|habitos?|tendencia|feedback|mis notas personales)\b/],
 ];
 
 const OVERVIEW = /\b(analisis|analiza\w*|cruza\w*|cruce|cruces|cruzar|mi perfil|perfil general|en general|resumen general|como voy|mi dia|panorama|evaluame|evalua\w*|diagnostico)\b/;
@@ -70,12 +81,17 @@ const FOOD_WORDS: Set<string> = (() => {
 })();
 const mentionsFood = (t: string) => t.split(/[^a-zñ]+/).some((w) => w.length >= 5 && (FOOD_WORDS.has(w) || FOOD_WORDS.has(w.replace(/(es|s)$/, ""))));
 
+const INV_WORD = /\b(inventario|despensa|refri\w*|refrigerador|alacena|bodega|botiquin|stock|lista de (las )?compras?|se (me |nos )?(acabo|acabaron|termino|terminaron|agoto|agotaron|vencio|vencieron)|por vencer|vencid[oa]s?|compre|compramos|traje|bote|tire|repuse)\b/;
+const MEDIDA = /\b(calorias?|kcal|proteinas?|carbo\w*|grasas?|azucar(es)?|fibra|agua|litros?|vasos?|pasos|horas?|minutos?|dias?|semanas?|series|repeticiones)\b/;
 /** ¿Qué grupos pide este mensaje? (vacío si no reconoce ninguno) */
 export function groupsFor(message: string): Set<ToolGroup> {
   const t = fold(message);
   const out = new Set<ToolGroup>();
   for (const [g, re] of RULES) if (re.test(t)) out.add(g);
   if (mentionsFood(t)) out.add("health");
+  // «¿Cuántas calorías me quedan?», «¿cuánta agua me falta?», «¿cuánto me queda?»: «me queda» sin una cosa de la casa no es del
+  // Inventario (revisión 2026-11-04, C1: solo veía inventory_tracker y contestaba «no tienes calorías en tu inventario»)
+  if (out.has("inventory") && !INV_WORD.test(t) && (MEDIDA.test(t) || /\bcuant[oa]s?\s+(me|nos)\s+queda\w*[?\s]*$/.test(t))) out.delete("inventory");
   // "Cruza mi perfil y dame el análisis", "¿cómo voy?", "panorama general": cruza salud y plata. Antes "perfil" solo
   // activaba administración (oculta en modo Eris) y el modelo quedaba sin herramientas, inventando cifras (2026-10-07).
   // …salvo una pregunta de explicación («¿por qué la hora de mi día es distinta…?»): cargaba las 16 herramientas (2026-10-16)
@@ -96,19 +112,32 @@ export interface Routing {
 // definiciones): junto al sistema el prompt pasaba los 8192 tokens del contexto, se recortaba y el 4B tardaba 30-90 s y a
 // veces llamaba otra herramienta (banco de pruebas 2026-10-16). Si el mensaje SOLO hace una cosa reconocible, el modelo ve
 // solo lo que sirve para eso (+ la búsqueda web para un plato que no esté en las bases).
-export type Intent = "registrar_comida" | "sueno" | "sintoma" | "ideas_comida" | "panorama";
+export type Intent = "registrar_comida" | "sueno" | "sintoma" | "ideas_comida" | "panorama" | "entreno_hoy" | "inventario" | "suplementos" | "analisis_dia";
 const INTENT_TOOLS: Record<Intent, string[]> = {
   registrar_comida: ["nutrition_tracker", "web_search"],
   sueno: ["sleep_log", "get_live_context"],
+  // «hoy entreno pierna a las 7», «hoy descanso» (Forge 2.0): se anota por código; el plan, si pide qué entrenar
+  entreno_hoy: ["training_today", "training_plan"],
   sintoma: ["symptom_guide", "manage_user_profile", "web_search"],
   ideas_comida: ["metabolic_advisor", "carb_options", "nutrition_tracker", "web_search"],
   // «analiza mis métricas de hoy», «evalúame», «panorama»: antes las 16 herramientas (~42 000 caracteres de prompt)
   panorama: ["metabolic_advisor", "get_live_context", "personal_baseline", "finance_tracker", "web_search"],
+  // «Analiza mi día», «¿qué variable está fuera de mi patrón?» (R1): lo calcula personal_baseline; el modelo solo redacta
+  analisis_dia: ["personal_baseline", "get_live_context"],
+  // «¿qué tengo en el refri?», «se me acabó el detergente y el cloro»: solo el Inventario
+  inventario: ["inventory_tracker"],
+  // «¿qué dice la evidencia de la creatina?», «me tomé el magnesio»: la ficha y «Mis suplementos» (la web, si no hay ficha)
+  suplementos: ["supplement_tracker", "web_search"],
 };
+const SUPLE = /\b(suplement\w*|creatina|omega ?3|vitamina\w*|magnesio|zinc|hierro|b12|cafeina|electrolitos|calcio|colageno|multivitaminic\w*)\b/;
+const SUPLE_G = new RegExp(SUPLE.source, "g");
 const PREGUNTA = /[?¿]|\b(cuant\w+|cual(es)?|por que|deberia|conviene|como (voy|estoy|me fue|quedo)|que tal|resumen)\b/;
-const LOG_VERB = /\b(registr\w*|anot\w*|ingres\w*|agreg\w*|apunt\w*)\b/;
+// «Añade una ensalada… al almuerzo» (revisión 2026-11-04, C3, chat real) no era un pedido de anotar: iba al grupo de salud
+// completo, el modelo eligió Suplementos y se cortó por tiempo
+const LOG_VERB = /\b(registr\w*|anot\w*|ingres\w*|agreg\w*|apunt\w*|anad\w*|pon|ponle|ponme|ponlo|ponla|suma|sumale|sumame|sumalo|carga|cargale|cargame|cargalo|mete|metele|meteme)\b/;
 const ATE = /\b(me comi|comi|comimos|almorce|almorzamos|al ?mor[csz]e|desayune|desayunamos|cene|cenamos|tome once|tomamos once|meren\w*|me tome|acabo de comer|estoy comiendo)\b/;
-const SLEEP = /\b(dormi|me dormi|desperte|me desperte|siesta|me acoste|trasnoch\w*)\b/;
+export const SLEEP_ROUTINE = /\brutina\w* (para|de|antes de) (dormir|dormirme|acostarme|sueno|la noche|noche|descansar mejor)\b|\brutina nocturna\b/;
+const SLEEP = /\b(dormi|me dormi|desperte|me desperte|siesta|me acoste|trasnoch\w*|duermo|desvel\w*)\b/;
 const SYMPTOM = /\b(calambres?|dolor(es)?|duele\w*|mare\w+|nausea\w*|vomit\w*|diarrea|fiebre|tos|resfri\w*|gripe|migrana|sintomas?|herida|quemadura\w*|torcedura|esguince|hinchad\w*|lesion\w*|me siento mal|me corte|me queme|me torci|acidez)\b/;
 const PLATA = /\b(gast\w*|pag\w*|compr\w*|lucas?|plata|dinero|sueldo|deudas?|saldos?|tarjeta|presupuesto|ahorr\w*|entren\w*|rutina|gym)\b/;
 const NOT_FOOD_LOG = /\b(diario|journal|notas?|recordatorio\w*|recuerda\w*|peso|pese|medida\w*|medicament\w*|pastillas?|remedios?|examen\w*|laboratorio|hba1c|glucos\w*|glicemia|presion|entren\w*|rutina|series?)\b/;
@@ -118,11 +147,23 @@ const FOOD_IDEAS = /\b(propon\w*|ideas?|opciones|sugier\w*|sugerencias?|recomien
 /** Lo único que pide el mensaje, si es una sola cosa reconocible; si no, undefined (se usan los grupos). */
 export function intentOf(message: string, groups: Set<ToolGroup>): Intent | undefined {
   const t = fold(message);
+  if (esAnalisisDia(message)) return "analisis_dia";
+  // «Rutina para dormir», «rutina de sueño» (revisión 2026-11-04, C2): es del sueño, no una rutina de Forge
+  if (SLEEP_ROUTINE.test(t) && !/\b(gym|gimnasio|pesas|entren\w*|ejercicio)\b/.test(t)) return "sueno";
+  // El entreno de hoy (y solo eso): metas según el día
+  if (parseTrainingStatement(message) && !LOG_VERB.test(t) && !ATE.test(t) && !/\b(gast|pag|compr)\w*/.test(t)) return "entreno_hoy";
   // Un análisis general sin otro pedido concreto (anotar, un síntoma, plata, entrenamiento, AXS…)
   if (OVERVIEW.test(t) && !groups.has("axs") && !groups.has("system") && !groups.has("admin") && !LOG_VERB.test(t) && !SYMPTOM.test(t)
     && !PLATA.test(t) && !/[0-9]/.test(t)) return "panorama";
-  // Varias cosas a la vez (comida y plata, entrenamiento, AXS…): los grupos de siempre
-  if ([...groups].some((g) => g !== "health" && g !== "web" && !(g === "health_extra" && /\b(entren\w*|gym|gimnasio)\b/.test(t) && FOOD_IDEAS.test(t)))) return undefined;
+  // Solo el Inventario (sin comer, sin plata, sin anotar una comida): «¿qué tengo en la despensa?», «se acabó el cloro»
+  if (groups.has("inventory") && !ATE.test(t) && !groups.has("finance") && !groups.has("axs") && !groups.has("system") && !groups.has("admin")
+    && !SYMPTOM.test(t) && !FOOD_IDEAS.test(t) && !(LOG_VERB.test(t) && !/\b(inventario|lista)\b/.test(t))) return "inventario";
+  // Solo suplementos (sin comida de por medio, sin plata, sin síntomas): la ficha o «Mis suplementos»
+  if (SUPLE.test(t) && !SYMPTOM.test(t) && !FOOD_IDEAS.test(t) && !groups.has("finance") && !groups.has("axs") && !groups.has("system")
+    && !groups.has("admin") && !groups.has("inventory") && !mentionsFood(t.replace(SUPLE_G, " "))) return "suplementos";
+  // Varias cosas a la vez (comida y plata, entrenamiento, AXS…): los grupos de siempre. El Inventario no cuenta como otra
+  // cosa (las palabras de compras y despensa aparecen al pedir ideas de comida)
+  if ([...groups].some((g) => g !== "health" && g !== "web" && g !== "inventory" && !(g === "health_extra" && /\b(entren\w*|gym|gimnasio)\b/.test(t) && FOOD_IDEAS.test(t)))) return undefined;
   const sym = SYMPTOM.test(t), sleep = SLEEP.test(t), ideas = FOOD_IDEAS.test(t);
   // «quiero anotar maní confitado, ¿me ayudas?»: la pregunta es de cortesía, el pedido es anotar
   // «¿me anotas 2 marraquetas?» también es un pedido (no «¿anoté las marraquetas?», que pregunta por lo hecho)
@@ -165,9 +206,26 @@ export const isSmallTalk = (message: string) => { const t = fold(message).trim()
 const PERSONAL = /\b(mi|mis|me|mio|mia|tengo|tenia|llevo|llevas|he|hice|hago|comi|tome|dormi|gaste|estoy|voy|ando)\b/;
 export const isGeneralAsk = (message: string) => { const t = fold(message); return /[?¿]/.test(t) && !PERSONAL.test(t) && !groupsFor(message).size; };
 
+/**
+ * Una confirmación sin objeto («dale, registra», «sí, guárdalo», «anótalo porfa»): lo que hay que registrar está en el hilo.
+ * 2026-10-18 (chat real): después de proponer una rutina, «Dale, registra» activó solo las herramientas de comida (por
+ * «registra») y el modelo anotó un completo italiano inventado.
+ */
+const BARE_CONFIRM = /^(?:(?:si|sip|dale|ya|ok|okey|oka|bueno|perfecto|listo|claro|obvio|de una|ya po|porfa\w*|por favor)[\s,.!]*)*(?:registr\w*|anot\w*|guard\w*|agreg\w*|ingres\w*|apunt\w*|hazlo|dale)[\s,.!]*(?:porfa\w*|por favor|eso|nomas|no mas|po|entonces)?[\s.!]*$/;
+export const isBareConfirm = (message: string) => { const t = fold(message).trim(); return t.length <= 40 && BARE_CONFIRM.test(t); };
+
 export function routeTools(message: string, previousUserMessages: string[], available: string[]): Routing {
   let groups = groupsFor(message);
   let reason: Routing["reason"] = "mensaje";
+  if (isBareConfirm(message)) {
+    // Las herramientas del tema de los últimos mensajes (más las del propio mensaje): sin «intención» de un solo tema
+    for (const prev of [...previousUserMessages].reverse().slice(0, 2)) for (const g of groupsFor(prev)) groups.add(g);
+    if (groups.has("health_extra")) groups.add("health");
+    groups.add("web");
+    const tools = new Set(available.filter((n) => n in TOOL_GROUP && groups.has(TOOL_GROUP[n])));
+    for (const n of available) if (!(n in TOOL_GROUP)) tools.add(n);
+    return { groups: [...groups], tools, reason: "conversación" };
+  }
   const webOnly = (r: Routing["reason"]): Routing => ({ groups: ["web"], tools: new Set(available.filter((n) => TOOL_GROUP[n] === "web")), reason: r });
   // solo la búsqueda web (para datos actuales); el resto lo sabe el modelo
   if (!groups.size && (isGeneralQuestion(message) || isSmallTalk(message) || isGeneralAsk(message))) return webOnly("mensaje");
@@ -187,6 +245,12 @@ export function routeTools(message: string, previousUserMessages: string[], avai
   if (!groups.size) {
     for (const prev of [...previousUserMessages].reverse().slice(0, 2)) {
       const g = groupsFor(prev);
+      // La respuesta a un pedido de comida («Estoy en el trabajo, así que no puedo cocinar» después de «recomiéndame un
+      // almuerzo») sigue con las herramientas de ese pedido, no con las 9 de salud: el prompt llenaba los 8192 tokens (2026-10-21)
+      if (g.size && intentOf(prev, g) === "ideas_comida") {
+        const tools = new Set(available.filter((n) => INTENT_TOOLS.ideas_comida.includes(n)));
+        if (tools.size) return { groups: [...g, "web"], tools, reason: "conversación", intent: "ideas_comida" };
+      }
       if (g.size) { groups = g; reason = "conversación"; break; }
       // «Sí porfa» después de una pregunta general: sigue siendo general (solo la búsqueda web)
       if (isGeneralQuestion(prev) || isGeneralAsk(prev)) return webOnly("conversación");

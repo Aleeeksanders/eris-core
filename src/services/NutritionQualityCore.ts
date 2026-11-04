@@ -46,6 +46,8 @@ export interface QualityItem {
   nova?: number;
   nutriscore?: string;
   liquid?: boolean;
+  /** vitaminas y minerales por 100 g (claves de supplementCore: vC, fe, ca…); falta = no se sabe */
+  micros?: Record<string, number>;
 }
 
 export type Letter = 'A' | 'B' | 'C' | 'D' | 'E';
@@ -63,12 +65,21 @@ export interface DayQuality {
   /** fracción del día que ya debería estar comida a esta hora (0-1) */
   expectedShare: number;
   kcal: number; protein: number; fiber: number; sugar: number; sodiumMg: number;
+  /** grasa saturada y carbohidratos de hoy (g): para los «cuánto te pasaste» de Métricas */
+  satFatG: number; carbsG: number;
   goals: { kcal: number; protein: number; fiber: number; water: number };
   water: { liters: number; expected: number; sugaryMl: number };
   sellos: number;
   ultraShare: number;
   headline: string;
   tips: string[];
+  /**
+   * Calidad v2 (fase I6): de qué sale la nota, cada parte de 0 a 100. `micros` es null si no se evaluaron (sin
+   * recomendaciones, o muy poco de lo comido trae vitaminas y minerales): entonces la nota es la de siempre (v1).
+   */
+  parts?: { quality: number; coverage: number; micros: number | null; timing: number };
+  /** las vitaminas y minerales que van más bajos a esta hora (claves de supplementCore) */
+  microLow?: string[];
 }
 
 // ─── Utilidades ───────────────────────────────────────────────────────────
@@ -113,8 +124,14 @@ const CATEGORY_GROUP: Record<string, FoodGroup> = {
   pescados: 'pescado', huevos: 'huevo', dulces: 'dulce', frutos_secos: 'frutos_secos', comida_rapida: 'comida_rapida',
 };
 
-interface LocalFoodQ { name: string; aliases?: string[]; category: string; group?: FoodGroup; nova?: number; serving: { grams: number; sodium?: number; satFat?: number } }
+interface LocalFoodQ { name: string; aliases?: string[]; category: string; group?: FoodGroup; nova?: number; serving: { grams: number; sodium?: number; satFat?: number }; micro?: Record<string, number> }
 const LOCAL = (localFoodsRaw as unknown as LocalFoodQ[]).map((f) => ({ f, keys: [f.name, ...(f.aliases ?? [])].map(fold) }));
+
+/** El alimento de la base con ese nombre o alias exacto (sin buscar por parecido). */
+function localExact(name: string): LocalFoodQ | undefined {
+  const n = fold(name);
+  return LOCAL.find((x) => x.keys.some((k) => k === n))?.f;
+}
 
 /** Busca el alimento en la base local por nombre/alias (para registros del chat, que llegan sin grupo ni sodio). */
 function localMatch(name: string): LocalFoodQ | undefined {
@@ -272,7 +289,7 @@ export interface GoalTrack {
   leftToday: number;
   /** el próximo control (hora del reloj) y lo esperable ahí */
   next: { clock: string; expected: number } | null;
-  /** en palabras, corto: "Al día ✓", "Para ir al día: +0,3 L (1 vaso)" */
+  /** en palabras, corto: "Al día ✓", "Para ir al día: +2 vasos (~0,5 L)" */
   status: string;
   /** la referencia del día: "Faltan 2,0 L hoy · a las 15:00, ~1,3 L" */
   detail: string;
@@ -281,6 +298,8 @@ export interface GoalTrack {
    * energía) o neutro (temprano, sin meta). El rojo es A LA HORA: nunca solo porque el día todavía no termina.
    */
   tone: 'ok' | 'behind' | 'far' | 'neutral';
+  /** agua atrasada: los vasos de 250 ml para ir al día */
+  vasos?: number;
 }
 
 /** Controles del día, en la hora de SU día (7:30 = al despertar): media mañana, almuerzo, tarde, once y noche. */
@@ -335,11 +354,15 @@ export function trackGoal(got: number, goal: number, opts: { now: Date; wakeHour
     const ahead = got >= expectedNow * 1.15;
     return { state: ahead ? 'adelantado' : 'al_dia', expectedNow, toCatchUp: 0, leftToday, next, status: ahead ? 'Adelantado ✓' : 'Al día ✓', detail, tone: 'ok' };
   }
-  // Atrás: cuánto falta para ir al día, en algo que se pueda hacer (vasos de 250 ml si es agua)
-  const vasos = unit === 'L' ? Math.max(1, Math.ceil(toCatchUp / 0.25)) : 0;
-  const how = vasos ? ` (${vasos} vaso${vasos > 1 ? 's' : ''})` : '';
-  const shown = Math.max(unit === 'L' ? 0.1 : 1, toCatchUp); // nunca "+0 L"
-  return { state: st, expectedNow, toCatchUp, leftToday, next, status: `Para ir al día: +${f(shown)}${how}`, detail, tone: st === 'atras' ? 'far' : 'behind' };
+  // Atrás: cuánto falta para ir al día, en algo que se pueda hacer (vasos de 250 ml si es agua). 2026-10-18: en vasos
+  // enteros y sus litros («+2 vasos (~0,5 L)»); antes decía «+0,4 L (2 vasos)», y 2 vasos son 0,5 L.
+  if (unit === 'L') {
+    const vasos = Math.max(1, Math.ceil(toCatchUp / 0.25 - 1e-9));
+    const litros = `${(Math.round(vasos * 25) / 100).toString().replace('.', ',')} L`;
+    return { state: st, expectedNow, toCatchUp, leftToday, next, status: `Para ir al día: +${vasos} vaso${vasos > 1 ? 's' : ''} (~${litros})`, detail, tone: st === 'atras' ? 'far' : 'behind', vasos };
+  }
+  const shown = Math.max(1, toCatchUp); // nunca "+0 g"
+  return { state: st, expectedNow, toCatchUp, leftToday, next, status: `Para ir al día: +${f(shown)}`, detail, tone: st === 'atras' ? 'far' : 'behind' };
 }
 
 function mealQuality(slot: string, items: QualityItem[], q: ItemQuality[], dayKcalGoal: number, wakeHour?: number): MealQuality {
@@ -383,9 +406,20 @@ function mealQuality(slot: string, items: QualityItem[], q: ItemQuality[], dayKc
 
 // ─── Día hasta ahora ──────────────────────────────────────────────────────
 
+/** Los nombres de los que cuentan para la nota (supplementCore.SCORE_KEYS), para los consejos */
+const MICRO_NOMBRE: Record<string, string> = {
+  vA: 'vitamina A', vC: 'vitamina C', vE: 'vitamina E', b12: 'vitamina B12', fol: 'folato', ca: 'calcio', fe: 'hierro', mg: 'magnesio', k: 'potasio', zn: 'zinc',
+};
+
 export function evaluateDay(items: QualityItem[], opts: {
   now?: Date; goals?: { kcal?: number; protein?: number; fiber?: number; water?: number };
   waterLiters?: number | null; wakeHour?: number;
+  /**
+   * Calidad v2 (fase I6): la recomendación diaria de las vitaminas y minerales que cuentan (supplementCore.microRef, según
+   * edad y sexo) y lo que sumaron hoy los suplementos tomados. Sin `microRef`, la nota es la de siempre.
+   */
+  microRef?: Record<string, number>;
+  supMicros?: Record<string, number>;
 }): DayQuality {
   const now = opts.now ?? new Date();
   // La hora de SU día: 7,5 + horas despierta (services/mealSchedule.ts → normDayHour). 2026-10-11: con el reloj corrido,
@@ -404,6 +438,7 @@ export function evaluateDay(items: QualityItem[], opts: {
   const kcal = q.reduce((a, x) => a + x.kcal, 0);
   const protein = sum((it) => it.per100.protein), fiber = sum((it) => it.per100.fiber);
   const sugar = sum((it) => it.per100.sugar ?? 0), sodiumMg = sum((it) => it.per100.sodiumMg ?? 0);
+  const satFatG = sum((it) => it.per100.satFat ?? 0), carbsG = sum((it) => it.per100.carbs);
 
   // Comidas, en el orden del día
   const bySlot = new Map<string, number[]>();
@@ -426,14 +461,14 @@ export function evaluateDay(items: QualityItem[], opts: {
     const ratio = waterExpected > 0 ? (opts.waterLiters ?? 0) / waterExpected : 1;
     hydrationScore = Math.round(clamp(ratio >= 0.9 ? 1 : ratio / 0.9) * 100 - Math.min(30, (sugaryMl / 250) * 6));
     hydrationScore = Math.max(0, hydrationScore);
-    if (ratio < 0.7) tips.push(`Vas con ${(opts.waterLiters ?? 0).toFixed(1)} L de agua; a esta hora lo esperable es ~${waterExpected.toFixed(1)} L.`);
+    if (ratio < 0.7) tips.push(`Vas con ${String((opts.waterLiters ?? 0).toFixed(1)).replace('.', ',')} L de agua; a esta hora lo esperable es ~${String(waterExpected.toFixed(1)).replace('.', ',')} L.`);
     if (sugaryMl >= 500) tips.push(`Llevas ${Math.round(sugaryMl)} ml de bebidas azucaradas o alcohol: no hidratan igual que el agua.`);
   }
 
   // Nada anotado y todavía es temprano → no se evalúa (no se castiga lo que aún no toca)
   if (!items.length && expectedShare < 0.2) {
     return { foodScore: null, hydrationScore, letter: null, meals, expectedShare, kcal: 0, protein: 0, fiber: 0, sugar: 0, sodiumMg: 0,
-      goals, water: { liters: opts.waterLiters ?? 0, expected: waterExpected, sugaryMl }, sellos: 0, ultraShare: 0,
+      satFatG: 0, carbsG: 0, goals, water: { liters: opts.waterLiters ?? 0, expected: waterExpected, sugaryMl }, sellos: 0, ultraShare: 0,
       headline: 'Todavía no hay comidas anotadas hoy.', tips };
   }
 
@@ -455,8 +490,28 @@ export function evaluateDay(items: QualityItem[], opts: {
   const dinnerMissing = h > 22.5 && !bySlot.has('cena') && !bySlot.has('once');
   const timing = clamp(1 - missed.length * 0.35 - (dinnerMissing ? 0.3 : 0));
 
-  // Lo que más pesa es QUÉ comiste; después si va alcanzando para lo que toca a esta hora; después los horarios
-  const foodScore = Math.round(clamp(quality / 100 * 0.6 + coverage * 0.25 + timing * 0.15) * 100);
+  // 4) Vitaminas y minerales (calidad v2, fase I6): lo comido + los suplementos contra lo recomendado A ESTA HORA. Solo si
+  //    la mayor parte de lo comido (60 % de la energía) trae el dato: si no, no se sabe y no se castiga.
+  let microScore: number | null = null;
+  let microLow: string[] = [];
+  const ref = opts.microRef && Object.keys(opts.microRef).length ? opts.microRef : null;
+  const kcalCon = items.reduce((a, it, i) => a + (it.micros && Object.keys(it.micros).length ? q[i].kcal : 0), 0);
+  if (ref && kcal > 0 && kcalCon / kcal >= 0.6) {
+    const ratios = Object.entries(ref).filter(([, r]) => r > 0).map(([k, r]) => {
+      const got = items.reduce((a, it) => a + ((it.micros?.[k] ?? 0) * it.grams) / 100, 0) + (opts.supMicros?.[k] ?? 0);
+      return [k, clamp(got / (r * exp))] as const;
+    });
+    if (ratios.length) {
+      microScore = Math.round((ratios.reduce((a, [, v]) => a + v, 0) / ratios.length) * 100);
+      microLow = ratios.filter(([, v]) => v < 0.5).sort((a, b) => a[1] - b[1]).slice(0, 3).map(([k]) => k);
+    }
+  }
+
+  // Lo que más pesa es QUÉ comiste; después si va alcanzando para lo que toca a esta hora (y, si se sabe, las vitaminas y
+  // minerales); después los horarios
+  const foodScore = microScore == null
+    ? Math.round(clamp(quality / 100 * 0.6 + coverage * 0.25 + timing * 0.15) * 100)
+    : Math.round(clamp(quality / 100 * 0.55 + coverage * 0.2 + (microScore / 100) * 0.1 + timing * 0.15) * 100);
 
   // Lo más importante primero, en palabras
   const worst = [...meals].sort((a, b) => a.score - b.score)[0];
@@ -466,6 +521,10 @@ export function evaluateDay(items: QualityItem[], opts: {
   if (kRatio > 1.35) tips.push(`Energía: ${Math.round(kcal)} kcal, bastante más de lo esperable a esta hora (~${Math.round(goals.kcal * exp)}).`);
   if (missed.length) tips.push(`Sin ${missed.join(' ni ')} anotado${missed.length > 1 ? 's' : ''}.`);
   if (ultraShare > 0.5) tips.push(`El ${Math.round(ultraShare * 100)} % de tus calorías de hoy viene de ultraprocesados.`);
+  if (microScore != null && microScore < 70 && microLow.length) {
+    const n = microLow.map((k) => MICRO_NOMBRE[k] ?? k);
+    tips.push(`Vitaminas y minerales: lo que menos llevas a esta hora es ${n.length > 1 ? `${n.slice(0, -1).join(', ')} y ${n[n.length - 1]}` : n[0]}.`);
+  }
 
   const letter = letterOf(foodScore);
   const headline = foodScore >= 80 ? 'Estás comiendo bien: nutritivo y a su hora.'
@@ -474,8 +533,11 @@ export function evaluateDay(items: QualityItem[], opts: {
     : 'Lo de hoy alimenta poco: hay que compensar en la próxima comida.';
 
   return { foodScore, hydrationScore, letter, meals, expectedShare, kcal: Math.round(kcal), protein: Math.round(protein), fiber: Math.round(fiber),
-    sugar: Math.round(sugar), sodiumMg: Math.round(sodiumMg), goals, water: { liters: opts.waterLiters ?? 0, expected: waterExpected, sugaryMl },
-    sellos: sellosN, ultraShare, headline, tips: tips.slice(0, 4) };
+    sugar: Math.round(sugar), sodiumMg: Math.round(sodiumMg), satFatG: Math.round(satFatG * 10) / 10, carbsG: Math.round(carbsG),
+    goals, water: { liters: opts.waterLiters ?? 0, expected: waterExpected, sugaryMl },
+    sellos: sellosN, ultraShare, headline, tips: tips.slice(0, 4),
+    parts: { quality: Math.round(quality), coverage: Math.round(coverage * 100), micros: microScore, timing: Math.round(timing * 100) },
+    ...(microLow.length ? { microLow } : {}) };
 }
 
 // ─── Simular un alimento antes de anotarlo ─────────────────────────────────
@@ -543,6 +605,8 @@ export interface FoodFacts {
   group?: string;
   nova?: number;
   nutriscore?: string;
+  /** vitaminas y minerales por 100 g, si el alimento los trae */
+  micros?: Record<string, number>;
 }
 
 /**
@@ -554,6 +618,8 @@ export function toQualityItem(f: FoodFacts, wakeHour?: number): QualityItem {
   const local = localMatch(f.name);
   const factor = local ? 100 / local.serving.grams : 1;
   const p = f.per100;
+  // Las vitaminas y minerales, del alimento o de la base con ESE nombre (no por parecido: «pan con palta» no es la palta)
+  const micros = f.micros && Object.keys(f.micros).length ? f.micros : localExact(f.name)?.micro;
   return {
     name: f.name, grams: f.grams, slot: effectiveSlot(f.mealType, f.at, { wakeHour }), at: f.at,
     per100: {
@@ -562,5 +628,6 @@ export function toQualityItem(f: FoodFacts, wakeHour?: number): QualityItem {
       satFat: p.satFat ?? (local?.serving.satFat != null ? local.serving.satFat * factor : undefined),
     },
     group: (f.group as FoodGroup | undefined) ?? local?.group, nova: f.nova ?? local?.nova, nutriscore: f.nutriscore,
+    ...(micros ? { micros } : {}),
   };
 }

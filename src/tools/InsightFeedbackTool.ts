@@ -16,12 +16,12 @@
 import { z } from "zod";
 import { Tool, type ToolExecutionResult } from "../Tool.js";
 
-const METRIC_KEYS = ["hydrationL", "sleepHours", "proteinG", "steps", "restingHR", "disponible", "savingsRate", "moodScore"] as const;
+const METRIC_KEYS = ["hydrationL", "sleepHours", "proteinG", "steps", "restingHR", "plata", "savingsRate", "moodScore"] as const;
 export type FeedbackMetricKey = typeof METRIC_KEYS[number];
 
 const METRIC_LABELS: Record<FeedbackMetricKey, string> = {
   hydrationL: "Hidratación", sleepHours: "Sueño", proteinG: "Proteína", steps: "Actividad",
-  restingHR: "FC en reposo", disponible: "Disponible", savingsRate: "Tasa de ahorro", moodScore: "Ánimo",
+  restingHR: "FC en reposo", plata: "Tu plata", savingsRate: "Tasa de ahorro", moodScore: "Ánimo",
 };
 
 const DEFAULT_DISMISS_DAYS = 14;

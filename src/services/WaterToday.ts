@@ -15,9 +15,16 @@
 // comparación con tu patrón tiene que ser pareja.
 // ============================================================
 
+//
+// 2026-10-18, el usuario: «no mide en lo que llevamos del día, sino en base a la meta». A las 10:54 Eris le dijo «tu
+// prioridad es reponer esos 3,5 litros que te faltan» (0,5 de 4 L): a esa hora lo esperable era ~1 L, o sea 2 vasos atrás.
+// Ahora cada frase del agua dice primero cómo vas A ESTA HORA (trackGoal, la misma cuenta de los cuadros de Métricas) y la
+// meta del día queda como referencia, repartida hasta la noche.
+
 import { loadTargets } from "./DailyTargets.js";
 import { foodWaterToday } from "./FoodWater.js";
-import { dayCtxFrom, nutritionDayKey } from "./MealSchedule.js";
+import { dayCtxFrom, nutritionDayKey, wakeHourFrom } from "./MealSchedule.js";
+import { trackGoal, type GoalTrack } from "./NutritionQualityCore.js";
 
 export interface WaterToday {
   /** litros de hoy, todo junto: lo bebido + el agua de la comida */
@@ -36,6 +43,8 @@ export interface WaterToday {
   goalNote: string;
   /** por qué no hay meta, si no la hay */
   offReason?: string;
+  /** cómo va A ESTA HORA (lo esperable según las horas que lleva despierta), si hay meta */
+  pace?: GoalTrack;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -61,16 +70,50 @@ export async function waterTotalToday(memory: { get(k: string): Promise<any> }, 
   return { totalL: round2(drinksL + foodL), drinksL, foodL, chatL, phoneL: snap.hydration };
 }
 
-export async function waterToday(memory: { get(k: string): Promise<any>; getProfile?(): Promise<any> }): Promise<WaterToday> {
+export async function waterToday(memory: { get(k: string): Promise<any>; getProfile?(): Promise<any> }, now: Date = new Date()): Promise<WaterToday> {
   const sum = await waterTotalToday(memory);
   try {
     const t = await loadTargets(memory);
     if (t.waterL === null) return { ...sum, goalL: null, goalNote: "", offReason: t.sources.water.replace(/^sin meta: /, "") };
-    return { ...sum, goalL: t.waterL, goalNote: /SGLT2|medicamento/i.test(t.sources.water) ? "ya incluye el +30 % por tu medicamento" : "" };
+    const snap = await memory.get("health_snapshot_latest").catch(() => null);
+    return {
+      ...sum, goalL: t.waterL, goalNote: /SGLT2|medicamento/i.test(t.sources.water) ? "ya incluye el +30 % por tu medicamento" : "",
+      pace: waterPace(sum.totalL, t.waterL, now, wakeHourFrom(snap, now)),
+    };
   } catch {
     return { ...sum, goalL: null, goalNote: "" };
   }
 }
+
+/** Cómo va el agua A ESTA HORA: la misma cuenta que los cuadros de Métricas en la app (trackGoal). */
+export function waterPace(totalL: number, goalL: number, now: Date, wakeHour?: number): GoalTrack {
+  return trackGoal(totalL, goalL, { now, wakeHour, kind: "agua", unit: "L" });
+}
+
+/** Lo que falta para ir al día, en vasos de 250 ml (los mismos de trackGoal y los cuadros de Métricas): «2 vasos (~0,5 L)». */
+export function catchUpText(p: GoalTrack): string {
+  const n = p.vasos ?? Math.max(1, Math.ceil(p.toCatchUp / 0.25 - 1e-9));
+  return `${n} vaso${n > 1 ? "s" : ""} (~${fmtLiters(n * 0.25)})`;
+}
+
+/**
+ * Cómo va A ESTA HORA, en una frase (sin la cifra de lo que lleva): «a esta hora lo esperable es ~1,1 L, así que para ir
+ * al día te faltan 2 vasos (~0,5 L); para la meta de 4 L quedan 3,5 L, repartidos hasta la noche».
+ */
+export function paceText(p: GoalTrack, goalL: number, totalL: number): string {
+  const left = round2(goalL - totalL);
+  const rest = left > 0 ? `para la meta de ${fmtLiters(goalL)} quedan ${fmtLiters(left)}, repartidos hasta la noche` : "";
+  switch (p.state) {
+    case "cumplida": return `meta del día (${fmtLiters(goalL)}) cumplida`;
+    case "temprano": return `recién empieza tu día: la meta de ${fmtLiters(goalL)} se reparte hasta la noche`;
+    case "adelantado": return `vas adelantado (a esta hora lo esperable es ~${fmtLiters(round1(p.expectedNow))}); ${rest}`;
+    case "al_dia": return `vas al día (a esta hora lo esperable es ~${fmtLiters(round1(p.expectedNow))}); ${rest}`;
+    default:
+      return `a esta hora lo esperable es ~${fmtLiters(round1(p.expectedNow))}, así que para ir al día te faltan ${catchUpText(p)}; ${rest}`;
+  }
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /** ", contando 0,3 L que trae la comida" (si es algo que valga mencionar) */
 const foodPart = (w: { foodL?: number }) => ((w.foodL ?? 0) >= 0.05 ? `, contando ${fmtLiters(w.foodL!)} que trae la comida` : "");
@@ -78,10 +121,17 @@ const foodPart = (w: { foodL?: number }) => ((w.foodL ?? 0) >= 0.05 ? `, contand
 /** "2,55 L" */
 export const fmtLiters = (n: number) => `${round2(n).toLocaleString("es-CL")} L`;
 
-/** "Hoy llevas 2,55 L de tu meta de 4 L (te faltan 1,45 L)." — la misma frase en todos lados. */
+/**
+ * «Hoy llevas 0,5 L: a esta hora lo esperable es ~1,1 L, así que para ir al día te faltan 2 vasos (~0,5 L); para la meta
+ * de 4 L quedan 3,5 L, repartidos hasta la noche.» — la misma frase en todos lados. Primero cómo va A ESTA HORA.
+ */
 export function waterLine(w: WaterToday): string {
   // Sin meta (enfermedad renal): se informa lo tomado, sin empujar a tomar más
   if (w.goalL === null) return `Hoy llevas ${fmtLiters(w.totalL)}${foodPart(w)}.${w.offReason ? ` No te fijo meta de agua: ${w.offReason}.` : ""}`;
+  if (w.pace) {
+    const txt = paceText(w.pace, w.goalL, w.totalL);
+    return `Hoy llevas ${fmtLiters(w.totalL)}${foodPart(w)}: ${txt}.${w.pace.state === "cumplida" ? " ¡Bien!" : ""}`;
+  }
   const left = round2(w.goalL - w.totalL);
   return `Hoy llevas ${fmtLiters(w.totalL)} de tu meta de ${fmtLiters(w.goalL)}${foodPart(w)}` +
     (left > 0 ? ` (te faltan ${fmtLiters(left)}).` : ". ¡Meta cumplida!");

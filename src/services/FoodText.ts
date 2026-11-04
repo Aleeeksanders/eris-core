@@ -5,8 +5,8 @@
 // producto. Antes cada buscador comparaba a su manera (subcadena exacta, sonido, palabras en orden) y bastaba una tilde,
 // un guion, un plural, el orden o una letra cambiada para "no lo encontré" (2026-10-09: "chocapig"). Acá vive UNA
 // normalización estándar y UN índice que usan todos los buscadores: el servidor (base chilena, catálogo, envasados,
-// registro por chat) y la app (eris-mobile/src/services/foodText.ts es COPIA EXACTA de este archivo: si cambia acá,
-// cambia allá).
+// registro por chat) y la app. Se edita en la app (eris-mobile/src/services/foodText.ts) y el servidor recibe la COPIA
+// EXACTA con `bun scripts/sync_copias.ts` (--revisar avisa si difieren).
 //
 // Cada palabra calza en uno de estos niveles, de más a menos confiable:
 //   igual (sin tildes, mayúsculas, símbolos, espacios de más ni plural) → suena igual (z/s/c, v/b, h muda, ll/y, letras
@@ -196,8 +196,12 @@ export class FoodIndex<T> {
 
   get size(): number { return this.items.length; }
 
-  /** Las palabras del índice que pueden ser `q`, con su peso. Lo fonético y lo con errores solo si no hay nada igual. */
-  private expand(q: string, prefix: boolean, fuzzy: boolean): Map<string, number> {
+  /**
+   * Las palabras del índice que pueden ser `q`, con su peso. Lo fonético y lo con errores solo si no hay nada igual.
+   * `raw`: la palabra tal como se escribió (sin pasar a singular), para buscar por el comienzo: «manz» es «manc» en
+   * singular estándar y no encontraba «manzana» mientras se escribía (2026-10-23).
+   */
+  private expand(q: string, prefix: boolean, fuzzy: boolean, raw?: string): Map<string, number> {
     const m = new Map<string, number>();
     const put = (t: string, w: number) => { if ((m.get(t) ?? 0) < w) m.set(t, w); };
     if (this.post.has(q)) put(q, EXACT);
@@ -205,6 +209,7 @@ export class FoodIndex<T> {
     for (const t of this.byPhon.get(pq) ?? []) put(t, SOUND);
     if (prefix && q.length >= 1) {
       for (const t of range(this.sorted, q)) put(t, PREFIX);
+      if (raw && raw !== q) for (const t of range(this.sorted, raw)) put(t, PREFIX);
       if (pq.length >= 2) for (const p of range(this.sortedPhon, pq)) for (const t of this.byPhon.get(p) ?? []) put(t, PREFIX * 0.95);
     }
     if (fuzzy && ![...m.values()].some((w) => w >= SOUND)) {
@@ -227,7 +232,10 @@ export class FoodIndex<T> {
     const { limit = 20, prefix = false, partial = false, fuzzy = true } = opts;
     let Q = foodTokens(query);
     if (!Q.length) return [];
-    let E = Q.map((q, i) => this.expand(q, prefix && i === Q.length - 1, fuzzy));
+    const words = normText(query).split(" ").filter(Boolean);
+    const kept = words.filter((w) => !STOP.has(w));
+    const rawLast = (kept.length ? kept : words)[(kept.length ? kept : words).length - 1];
+    let E = Q.map((q, i) => this.expand(q, prefix && i === Q.length - 1, fuzzy, i === Q.length - 1 ? rawLast : undefined));
     // "coca cola" contra "Cocacola": dos palabras que solas no calzan pero juntas sí
     for (let i = 0; i + 1 < Q.length; i++) {
       if (E[i].size && E[i + 1].size) continue;
@@ -376,6 +384,42 @@ export function correctText(text: string, indexes: Array<FoodIndex<unknown>>): s
     return best.word.toLowerCase();
   });
   return changed ? out.join(" ") : null;
+}
+
+// ─── Lo natural primero ───────────────────────────────────────────────────────
+// «manzana» es la fruta (2026-10-23): el jugo de manzana anotado la semana pasada, o la «Manzana» de Watt's (un néctar),
+// salían antes que la fruta. Estas palabras hacen de un alimento base un derivado cuando no se buscaron.
+const DERIVED = new Set([
+  "jugo", "nectar", "zumo", "bebida", "gaseosa", "refresco", "sabor", "saborizada", "saborizado", "agua", "te", "infusion",
+  "kuchen", "torta", "pie", "queque", "pastel", "tarta", "galleta", "helado", "postre", "flan", "budin", "muffin",
+  "mermelada", "compota", "conserva", "almibar", "deshidratada", "deshidratado", "confitada", "confitado",
+  "vinagre", "salsa", "aceite", "chips", "snack", "barra", "barrita", "cereal", "polvo", "harina",
+  "condensada", "manjar", "dulce", "caramelo", "chocolate", "licor", "yogur", "yogurt", "crema", "frita", "frito", "apanado", "apanada",
+].map(stemWord));
+
+/** Las palabras de un texto en su forma estándar, sin sacar las cortas ni las de relleno («sabor» es STOP para buscar). */
+const allWords = (s: string) => normText(s).split(" ").filter(Boolean).map(stemWord);
+const tokenSet = (s: string) => [...foodTokens(s)].sort().join(" ");
+
+/**
+ * Cuánto sube o baja un resultado para que lo natural salga primero: −2 si su nombre trae una palabra de derivado que no
+ * se buscó («Jugo de manzana» al buscar «manzana»), +1 si es genérico (sin marca: la fruta antes que la manzana de Watt's).
+ * Solo ordena: no saca nada. La usan el buscador de la app y los del servidor.
+ */
+export function naturalBoost(query: string, name: string, brand?: string): number {
+  const q = new Set(allWords(query));
+  const derived = allWords(name).some((w) => DERIVED.has(w) && !q.has(w));
+  return (derived ? -2 : 0) + (brand ? 0 : 1);
+}
+
+/**
+ * ¿Es exactamente lo buscado? Las mismas palabras, sin importar orden, plural ni tildes («Palta / Aguacate» es «palta» y
+ * es «aguacate»). Un producto con marca, solo si también se nombró la marca: «manzana» no es la «Manzana» de Watt's.
+ */
+export function sameFood(query: string, name: string, brand?: string): boolean {
+  const q = tokenSet(query);
+  if (!q) return false;
+  return nameKeys(name).some((k) => tokenSet(brand ? `${k.text} ${brand}` : k.text) === q);
 }
 
 /** Elementos de una lista ordenada que empiezan con `p` (búsqueda binaria). */

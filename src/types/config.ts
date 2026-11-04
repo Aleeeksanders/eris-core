@@ -1,3 +1,4 @@
+import { esAnalisisDia } from "../services/AnalisisDia.js";
 // ============================================================
 // Eris — Tipos de Configuración
 // Incluye sistema de modos de pensamiento (Flash / Deep / Auto)
@@ -104,6 +105,8 @@ const FLASH_PATTERNS = [
  */
 export function classifyQuery(query: string): "flash" | "deep" {
   const normalized = query.toLowerCase().trim();
+  // «Analiza mi día»: el código ya calculó todo, el modelo solo redacta (Deep tardaba 85-192 s; revisión 2026-11-04, R1)
+  if (esAnalisisDia(query)) return "flash";
 
   // Si es muy corto y simple → Flash
   if (normalized.length < 30) {

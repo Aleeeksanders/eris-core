@@ -81,13 +81,26 @@ export function parseSleepStatement(message: unknown): SleepStatement | null {
   if (/\bno (dormi|he dormido|pude dormir)\b/.test(t) && !/\bno (dormi|he dormido|pude dormir) (mas|ni) /.test(t)) return null;
   const day = /\b(anteanoche|antenoche|ante anoche)\b/.test(t) ? "ayer" : "hoy";
   // «3 horas más», «otras 2 horas», «una siesta», «aparte» (no «más o menos 7 horas» ni «más de 7 horas»)
-  const extra = /\b(horas?|h|hrs)\s+mas\b(?!\s+o\s+menos)|\b(adicional\w*|extra|aparte|siesta|ademas)\b|\botras?\s+(\d|una|dos|tres|cuatro|cinco|seis)/.test(t) || undefined;
+  const extra = /\b(horas?|h|hrs)\s+mas\b(?!\s+o\s+menos)|\b(adicional\w*|extra|aparte|siesta|ademas)\b|\botras?\s+(\d|una|dos|tres|cuatro|cinco|seis)|\b(\d{1,2}|una|dos|tres|cuatro|cinco|seis)\s+mas\b(?!\s+(o\s+menos|de)\b)/.test(t) || undefined;
   // «de 8:15 a 11:15»: la duración sale del tramo (antes la sacaba el modelo y se equivocaba: 4,25 h por 3 h)
   const tr = tramoEn(t);
   if (tr) return { hours: tr.hours, day, rango: tr.rango, ...(extra ? { extra } : {}) };
   // «anoche dormí 4 horas y después dormí 3 horas más»: base + lo de más
   const todas = [...t.matchAll(new RegExp(WITH_UNIT.source, "g"))].map((m) => hoursIn(m[0])).filter((h): h is number => h != null);
   if (todas.length >= 2 && extra) return { hours: todas[todas.length - 1], base: todas[0], day, extra: true };
+  // Sueño 2.0 · S4: «dormí 4 horas y en la tarde una siesta de 2» / «… y después 3 más»: la segunda cifra sin «horas»
+  if (todas.length === 1 && extra) {
+    const first = t.match(WITH_UNIT)!;
+    const rest = t.slice((first.index ?? 0) + first[0].length);
+    // «una siesta de 20 minutos»
+    const mMin = rest.match(new RegExp(`\\bsiesta\\s+(?:de\\s+)?(?:como\\s+|unos\\s+)?${NUM}\\s*(?:min|minutos)\\b`));
+    const nMin = mMin ? WORD_NUM[mMin[1]] ?? parseFloat(mMin[1].replace(",", ".")) : NaN;
+    if (nMin >= 5 && nMin <= 180) return { hours: Math.round((nMin / 60) * 100) / 100, base: todas[0], day, extra: true };
+    const m2 = rest.match(new RegExp(`\\bsiesta\\s+(?:de\\s+)?(?:como\\s+|unas?\\s+)?${NUM}\\b(?!\\s*(?::|am\\b|pm\\b|de la))`))
+      ?? rest.match(new RegExp(`\\b${NUM}\\s*(?:horas?\\s*)?mas\\b`));
+    const second = m2 ? hoursIn(`${m2[1]} horas${/y medi[ao]/.test(m2[0]) ? " y media" : ""}`) ?? (WORD_NUM[m2[1]] === 1 || m2[1] === "1" ? 1 : null) : null;
+    if (second != null) return { hours: second, base: todas[0], day, extra: true };
+  }
   const hours = hoursIn(t);
   if (hours === null) return null;
   return { hours, day, ...(extra ? { extra } : {}) };

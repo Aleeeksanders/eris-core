@@ -9,7 +9,7 @@
 
 import { looksLikeSymptom } from "./SymptomGuide.js";
 
-export type Intent = "food" | "water" | "glucose" | "train" | "axs" | "symptom" | "advisor" | "finance";
+export type Intent = "food" | "water" | "glucose" | "train" | "axs" | "symptom" | "advisor" | "finance" | "inventory" | "supplement";
 
 const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
@@ -21,6 +21,9 @@ const RX: Record<Exclude<Intent, "symptom">, RegExp> = {
   axs: /\b(axs|boveda|vault|notas?|proyectos?|pendientes?|roadmap|briefing|lander|toji)\b/,
   advisor: /\b(que como|que comer|que compro|receta\w*|dieta|tengo hambre|despensa)\b/,
   finance: /\b(gaste|gastamos|pague|compre|lucas?|luquitas?|palos?|pesos|plata|efectivo|cajero|saque|gire|transferi|deposit\w*|abon\w*|preste|devolvio|ahorre|sueldo|finanzas|saldos?|tarjeta)\b|\$\s?\d/,
+  inventory: /\b(inventario|despensa|refri\w*|botiquin|stock|lista de (las )?compras?|se (me )?(acabo|acabaron|termino|agoto|vencio)|por vencer|bote|tire|repuse)\b/,
+  // Suplementos (fase I5)
+  supplement: /\b(suplement\w*|creatina|omega ?3|vitamina\w*|magnesio|zinc|hierro|b12|whey|cafeina|electrolitos|calcio|colageno|multivitaminico)\b/,
 };
 
 /** Qué tipos de pedido aparecen en el mensaje. */

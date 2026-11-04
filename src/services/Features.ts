@@ -14,10 +14,14 @@ import os from "node:os";
 export interface Features {
   /** Módulo de glucosa: lectura del sensor, alertas, registro de insulina, pestaña en la app y consultas por chat. */
   glucose: boolean;
+  /** ⚡ Modo Rendimiento (día exigente) en «¿Qué recomienda Eris?»: empuja contra el cansancio, así que primero solo Ikaros. */
+  rendimiento: boolean;
+  /** «Eris administra» Finanzas: anota sola lo que avisa el banco (2026-10-30). Primero solo Ikaros (lo decide la app con su rol). */
+  finanzasAuto: boolean;
 }
 
-export const FEATURE_DEFAULTS: Features = { glucose: false };
-export const FEATURE_LABELS: Record<keyof Features, string> = { glucose: "Módulo de glucosa e insulina" };
+export const FEATURE_DEFAULTS: Features = { glucose: false, rendimiento: false, finanzasAuto: false };
+export const FEATURE_LABELS: Record<keyof Features, string> = { glucose: "Módulo de glucosa e insulina", rendimiento: "Modo Rendimiento (día exigente)", finanzasAuto: "Finanzas en automático (avisos del banco)" };
 
 const file = () => join(os.homedir(), ".eris", "features.json");
 let cache: { at: number; value: Features } | null = null;
@@ -28,7 +32,7 @@ export async function getFeatures(): Promise<Features> {
   let value: Features = { ...FEATURE_DEFAULTS };
   try {
     const raw = JSON.parse(await readFile(file(), "utf-8"));
-    value = { glucose: raw?.glucose === true };
+    value = { glucose: raw?.glucose === true, rendimiento: raw?.rendimiento === true, finanzasAuto: raw?.finanzasAuto === true };
   } catch { /* sin archivo: valores por defecto */ }
   cache = { at: Date.now(), value };
   return value;

@@ -13,7 +13,9 @@
 import { simulateAdd, evaluateDay, toQualityItem, type QualityItem, type QualitySim, type Letter, type ItemQuality } from "./NutritionQualityCore.js";
 import { MEAL_NAME, fitsSlot, slotIsPast, slotAt, typicalTimeOf, nutritionDayOf, type DayCtx } from "./MealSchedule.js";
 import { itemKey, type PhoneFoodLog } from "./NutritionLog.js";
-import { dayCtxOf, todayKeyOf, wakeHourOf } from "./NutritionDay.js";
+import { dayCtxOf, todayKeyOf, todayIsoOf, wakeHourOf } from "./NutritionDay.js";
+import { aporteDelDia, microRef } from "./SupplementCore.js";
+import { contrapartida, contraLineas, STRICT_KEY, type Contrapartida } from "./Antojo.js";
 import { loadTargets } from "./DailyTargets.js";
 import { FOODS, NEVER_RECOMMEND, conditionPenalty, unparsedAllergyIds, recommendMeals, loadFoodAffinity, type CatalogFood, type Moment, type Plate, type PlateComponent } from "./MealRecommender.js";
 import { isAllowed } from "./DietaryRestrictions.js";
@@ -55,7 +57,7 @@ export function qualityItemsToday(chatLog: unknown, phone: unknown, day: string,
         name: i.name, grams: i.grams, mealType: i.meal ?? "", at: new Date(i.t),
         per100: q ? { kcal: q.kcal, protein: q.protein, carbs: q.carbs, fat: q.fat, fiber: q.fiber, sugar: q.sugar, sodium: q.sodium, satFat: q.satFat }
           : { kcal: i.kcal * f, protein: i.protein * f, carbs: i.carbs * f, fat: i.fat * f, fiber: (i.fiber ?? 0) * f },
-        group: q?.group, nova: q?.nova, nutriscore: q?.nutriscore,
+        group: q?.group, nova: q?.nova, nutriscore: q?.nutriscore, micros: q?.micros,
       }, wakeHour));
     }
   }
@@ -191,6 +193,10 @@ export interface WhatIfResult {
   expectedShare: number;
   alts: WhatIfAlt[];
   tone: Tone;
+  /** el antojo no calza con el día: la contrapartida concreta (fase I7); null = calza */
+  contra: Contrapartida | null;
+  /** el modo estricto (Perfil): se recomienda solo si acepta la contrapartida */
+  strict: boolean;
 }
 
 /** Junta lo de hoy (teléfono + chat), las metas y el perfil, y simula. No guarda nada. */
@@ -210,7 +216,12 @@ export async function buildWhatIf(memory: any, foods: WhatIfFood[], opts: { meal
     const t = await loadTargets(memory);
     goals = { kcal: t.kcal ?? stored.calories, protein: t.proteinG ?? stored.protein, fiber: t.fiberGGoal ?? stored.fiber, water: t.waterL ?? undefined };
   } catch {}
-  const o: Opts = { now, goals, wakeHour };
+  // Calidad v2 (fase I6): vitaminas y minerales según su edad y sexo (Forge), con lo de sus suplementos de hoy (el último
+  // estado que mandó el teléfono). Igual que la tarjeta de la app.
+  const body0: any = await safe("body_profile");
+  const supState = (await safe("supplements_state"))?.state;
+  const supMicros = supState && Array.isArray(supState.items) ? aporteDelDia(supState, await todayIsoOf(memory, now)) : {};
+  const o: Opts = { now, goals, wakeHour, microRef: microRef({ sex: body0?.sex ?? null, age: body0?.age ?? null }), supMicros };
 
   const when = whenFor(opts.meal, now, wakeHour, dayCtx);
   const cands = foods.map((f) => toQualityItem({ name: f.name, grams: f.grams, mealType: when.mealType, at: when.at, per100: f.per100 }, wakeHour));
@@ -228,7 +239,18 @@ export async function buildWhatIf(memory: any, foods: WhatIfFood[], opts: { meal
     } catch { return null; }
   } : undefined;
   const alts = alternatives(today, cands, sim, o, ctx, { dayIndex: Math.floor(now.getTime() / 86400000), goal: body?.goal, tone, plateFor });
-  return { sim, foods, goals: { kcal: sim.after.goals.kcal, protein: sim.after.goals.protein, fiber: sim.after.goals.fiber }, expectedShare: sim.after.expectedShare, alts, tone };
+  // ¿Calza con el día? Si no, la contrapartida concreta (fase I7): la próxima comida más liviana y/o minutos de caminata
+  const before = sim.before.foodScore ?? sim.after.foodScore ?? 0;
+  const contra = contrapartida({
+    goalKcal: sim.after.goals.kcal, kcalAntes: sim.before.kcal,
+    kcalAntojo: foods.reduce((a, f) => a + (f.per100.kcal * f.grams) / 100, 0),
+    slot: sim.meal.slot, at: when.at, wakeHour, weightKg: body0?.weightKg ?? null,
+    conditions: (ctx?.medical?.conditions ?? []).map((c: any) => String(c?.id ?? "")),
+    caidaNota: before - (sim.after.foodScore ?? before), letraDespues: sim.after.letter,
+    mejorCambio: alts.find((x) => x.kind === "agua" || x.kind === "lado")?.text,
+  });
+  const strict = (await safe(STRICT_KEY)) === true;
+  return { sim, foods, goals: { kcal: sim.after.goals.kcal, protein: sim.after.goals.protein, fiber: sim.after.goals.fiber }, expectedShare: sim.after.expectedShare, alts, tone, contra, strict };
 }
 
 // ─── El texto ────────────────────────────────────────────────────────────────
@@ -317,8 +339,19 @@ export function formatWhatIf(r: WhatIfResult, t: WhatIfTextOpts = {}): string {
   } else if (shown.length > 1) {
     lines.push("", `${conv} (${tu.toLowerCase()} día, en vez de ${grade(a.foodScore, a.letter)})`);
     for (const x of shown) lines.push(`• ${x.text} → **${grade(x.after, x.letter)}**`);
-  } else if (good && !risky.some((x) => x.level === "blocked")) {
+  } else if (good && !r.contra && !risky.some((x) => x.level === "blocked")) {
     lines.push("", "✅ Buena elección para esta hora.");
+  }
+
+  // La contrapartida (fase I7): sin modo estricto es una sugerencia; con él, se recomienda solo si la acepta
+  if (r.contra) {
+    const ls = contraLineas(r.contra, usted).map((l) => `• ${l}`);
+    if (r.strict) {
+      lines.push("", `🔒 **Modo estricto:** ${usted ? "se lo recomiendo" : "te lo recomiendo"} solo con esta contrapartida:`, ...ls,
+        `¿${usted ? "La acepta" : "La aceptas"}?`, "[Opción: Acepto la contrapartida]", "[Opción: Mejor no]");
+    } else {
+      lines.push("", `⚖️ **Si ${usted ? "se lo come" : "te lo comes"}, para compensar:**`, ...ls, "[Opción: Acepto la contrapartida]");
+    }
   }
 
   if (t.missing?.length) lines.push(`(No encontré ${t.missing.map((m) => `«${m}»`).join(" ni ")} en mis bases, así que no entra en la cuenta.)`);

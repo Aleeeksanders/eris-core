@@ -48,9 +48,22 @@ export const ROLES: Record<Role, RoleDefinition> = {
       'metabolic_advisor',   // análisis metabólico + qué comer (respeta restricciones)
       'symptom_guide',       // orientación ante síntomas, según el perfil médico (detecta emergencias)
       'finance_tracker',     // anota gastos/préstamos/giros en SU Finanzas (vive en su teléfono) y resume saldos
+      'inventory_tracker',   // el Inventario de SU casa (vive en su teléfono): compras, lo que se acabó, por vencer, lista de compras
+      'supplement_tracker',  // SUS suplementos (viven en su teléfono): «me tomé la creatina», qué le falta hoy, y las fichas (sin indicar dosis)
       'manage_user_profile', // Control total de perfil de usuario
       'sleep_log',           // horas dormidas de una noche (cuando el reloj no las midió)
+      'training_today',      // «hoy entreno / hoy descanso»: metas según el día (Forge 2.0)
+      'training_plan',       // la rutina de Forge (leer, guardar, armarla, cargar el plan de hoy)
       'lab_results',         // exámenes que cuenta el usuario (HbA1c, colesterol…), con fecha
+      'day_agenda',          // «¿qué tengo para hoy?»: el día cruzando Forge, Nutrición, agua, suplementos, Inventario y Finanzas
+      'day_plan',            // «¿qué recomienda Eris?» / «decide tú»: Eris arma el día en 3 caminos (estricto, óptimo, flexible) o con su caso
+      // Revisión 2026-11-04 (R5): la app ya tiene «Sobre mí», el diario y «Analizar métricas» para todos; sin estas, Eris
+      // público no podía leer ni guardar nada de eso. Todas trabajan solo con la memoria del perfil.
+      'personal_baseline',   // su línea base (lo normal de ESA persona) y lo que se sale del patrón
+      'get_live_context',    // sus datos de hoy (salud, comida, sueño) cuando la conversación los necesita
+      'manage_user_context', // «Sobre mí»: lo que la persona pide recordar
+      'personal_journal',    // su diario personal
+      'insight_feedback',    // «esto me sirvió / no me sirvió» sobre un consejo
       // AXS explícitamente excluido: knowledge_search, log_management,
       // vault_audit, vault_healer, executive_report, crystallize,
       // file_read, file_write, bash, system_info, open

@@ -251,3 +251,54 @@ export async function leerBoletaFoto(base64: string, run: (path: string) => Prom
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
+
+// ─── Eris administra (A2): el saldo de una captura de la app del banco ─────────────────────────
+// Para cuadrar: la persona sube una captura de su banco y vuelven SOLO los saldos que muestra (y los 4 dígitos de la cuenta,
+// para elegirla). Se aceptan las líneas que dicen «saldo» o «disponible» (no la línea de crédito ni el cupo).
+
+export interface SaldosCaptura { ok: true; saldos: Array<{ etiqueta: string; monto: number }>; last4: string[] }
+
+export function armarSaldos(o: OcrSalida): SaldosCaptura | BoletaError {
+  const lines = (o.lines ?? []).map((l) => String(l.text ?? "").trim()).filter(Boolean);
+  const out: Array<{ etiqueta: string; monto: number; orden: number }> = [];
+  const ORDEN: Record<string, number> = { "Saldo disponible": 0, "Saldo": 1, "Saldo contable": 2 };
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const m = l.match(/\$\s?(\d{1,3}(?:[.,]\d{3})+|\d{4,})(?![\d.,]*%)/);
+    if (!m || /-\s?\$/.test(l)) continue;
+    const v = Number(m[1].replace(/[.,]/g, ""));
+    if (!(v >= 0) || v > 10_000_000_000) continue;
+    const antes = fold(l.slice(0, m.index ?? 0)).trim();
+    const label = antes || fold(lines[i - 1] ?? "");
+    if (/linea|cupo|credito|deuda|pagar|minimo|facturado/.test(label)) continue;
+    const etiqueta = /disponible/.test(label) ? "Saldo disponible" : /contable/.test(label) ? "Saldo contable" : /\bsaldo\b/.test(label) ? "Saldo" : null;
+    if (!etiqueta || out.some((x) => x.monto === v && x.etiqueta === etiqueta)) continue;
+    out.push({ etiqueta, monto: v, orden: ORDEN[etiqueta] });
+  }
+  const last4 = [...new Set(lines.flatMap((l) => [...l.matchAll(/(?:\*+|x{2,}|n[°º]\s?)\s?(\d{4})\b/gi)].map((x) => x[1])))].slice(0, 4);
+  if (!out.length) return { ok: false, code: "sin_productos", msg: "No encontré un saldo en la captura: escríbelo tú." };
+  return { ok: true, saldos: out.sort((a, b) => a.orden - b.orden).slice(0, 5).map(({ etiqueta, monto }) => ({ etiqueta, monto })), last4 };
+}
+
+/** La captura (base64, JPEG o PNG) → los saldos. La imagen se guarda un momento en una carpeta temporal y se borra al terminar. */
+export async function leerSaldoCaptura(base64: string, run: (path: string) => Promise<OcrSalida> = correrOcr): Promise<SaldosCaptura | BoletaError> {
+  let buf: Buffer;
+  try { buf = Buffer.from(base64, "base64"); } catch { return { ok: false, code: "imagen", msg: "No pude abrir la captura." }; }
+  if (buf.length > MAX_BYTES) return { ok: false, code: "grande", msg: "La imagen es muy pesada." };
+  const jpg = buf[0] === 0xff && buf[1] === 0xd8, png = buf[0] === 0x89 && buf[1] === 0x50;
+  if (!jpg && !png) return { ok: false, code: "imagen", msg: "Eso no parece una imagen (JPEG o PNG)." };
+  if (ocupado) return { ok: false, code: "ocupado", msg: "Estoy leyendo otra imagen: intenta en unos segundos." };
+  ocupado = true;
+  let dir: string | null = null;
+  try {
+    dir = await mkdtemp(join(tmpdir(), "eris-saldo-"));
+    const path = join(dir, jpg ? "saldo.jpg" : "saldo.png");
+    await writeFile(path, buf);
+    const o = await run(path);
+    if (!o.ok) return { ok: false, code: "ocr", msg: "No pude leer la captura en el PC (el lector de texto de Windows falló)." };
+    return armarSaldos(o);
+  } finally {
+    ocupado = false;
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}

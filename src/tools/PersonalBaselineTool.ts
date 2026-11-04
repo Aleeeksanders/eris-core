@@ -3,6 +3,7 @@ import { Tool, type ToolExecutionResult } from "../Tool.js";
 import { diagnoseBaseline, formatDiagnosisForLLM } from "../services/BaselineEngine.js";
 import { getDismissals, getOverrides } from "./InsightFeedbackTool.js";
 import { dayCtxFrom } from "../services/MealSchedule.js";
+import { esAnalisisDia } from "../services/AnalisisDia.js";
 
 const PersonalBaselineInputSchema = z.object({
   focus: z.enum(["auto", "sleep", "hydration", "nutrition", "steps", "restingHR", "finance"])
@@ -45,6 +46,11 @@ export class PersonalBaselineTool extends Tool<PersonalBaselineInput> {
     "(su médico, su nutricionista), usa la herramienta 'insight_feedback' — nunca ignores el comentario ni le digas " +
     "que no puedes hacer nada al respecto.";
   readonly inputSchema = PersonalBaselineInputSchema;
+
+  /** «Analiza mi día» / «Analizar con Eris →» (R1): el cálculo va antes del modelo, que solo lo redacta */
+  async preroute(message: string): Promise<Record<string, unknown> | null> {
+    return esAnalisisDia(message) ? { focus: "auto" } : null;
+  }
 
   async execute(_input: PersonalBaselineInput, context?: any): Promise<ToolExecutionResult> {
     try {

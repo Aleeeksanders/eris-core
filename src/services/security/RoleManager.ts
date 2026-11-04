@@ -63,7 +63,7 @@ class RoleManager {
 
   /**
    * Asignar un rol a un perfil.
-   * Solo se puede llamar si el solicitante tiene rol 'hestia'.
+   * Solo se puede llamar si el solicitante tiene rol 'ikaros'.
    */
   async assignRole(profileId: string, role: Role, requestingRole: Role): Promise<void> {
     if (requestingRole !== 'ikaros') {
@@ -75,7 +75,7 @@ class RoleManager {
   }
 
   /**
-   * Listar todas las asignaciones (solo para Hestia).
+   * Listar todas las asignaciones (solo para Ikaros).
    */
   async listAssignments(requestingRole: Role): Promise<Record<string, Role>> {
     if (requestingRole !== 'ikaros') {

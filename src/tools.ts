@@ -22,8 +22,13 @@ import { CarbOptionsTool } from "./tools/CarbOptionsTool.js";
 import { MetabolicAdvisorTool } from "./tools/MetabolicAdvisorTool.js";
 import { SymptomGuideTool } from "./tools/SymptomGuideTool.js";
 import { SleepLogTool } from "./tools/SleepLogTool.js";
+import { TrainingTodayTool } from "./tools/TrainingTodayTool.js";
 import { LabResultsTool } from "./tools/LabResultsTool.js";
 import { FinanceTrackerTool } from "./tools/FinanceTrackerTool.js";
+import { InventoryTrackerTool } from "./tools/InventoryTrackerTool.js";
+import { SupplementTrackerTool } from "./tools/SupplementTrackerTool.js";
+import { DayAgendaTool } from "./tools/DayAgendaTool.js";
+import { DayPlanTool } from "./tools/DayPlanTool.js";
 
 /**
  * Registro centralizado de todas las herramientas de Eris.
@@ -52,8 +57,17 @@ export class ToolRegistry {
       new FileWriteTool(),
       new OpenTool(),
       new KnowledgeTool(),
+      // «¿Qué tengo para hoy?», «planifícame el resto del día»: el día cruzando los módulos (antes que Finanzas: «qué tengo» no es un saldo)
+      // «¿Qué recomienda Eris?» / «decide tú»: Eris arma el día en 3 caminos (antes que la agenda: «qué me recomiendas hoy» no es «qué tengo hoy»)
+      new DayPlanTool(),
+      new DayAgendaTool(),
       // Antes que nutrición: su preroute reconoce "gasté 5 lucas en almuerzo" (el almuerzo es la descripción, no una comida a registrar)
       new FinanceTrackerTool(),
+      // Después de Finanzas («compré leche en 2 lucas» es un gasto) y antes de Nutrición: «me quedan 3 huevos» o «compré
+      // 2 L de leche» son del Inventario, no comidas a registrar
+      new InventoryTrackerTool(),
+      // Antes que Nutrición: «me tomé la creatina» es un suplemento, no una comida (y «compré creatina» ya lo vio el Inventario)
+      new SupplementTrackerTool(),
       new NutritionTool(),
       new TrainingPlanTool(),
       new PersonalBaselineTool(),
@@ -66,6 +80,7 @@ export class ToolRegistry {
       new SymptomGuideTool(),
       // Después de la guía de síntomas: "dormí 4 horas y me duele la cabeza" primero es el síntoma
       new SleepLogTool(),
+      new TrainingTodayTool(),
       new LabResultsTool(),
     ];
 

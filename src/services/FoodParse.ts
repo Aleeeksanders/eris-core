@@ -95,8 +95,8 @@ export async function unmentionedItems(message: unknown, names: string[], lookup
 // ─── Preguntas por el día ─────────────────────────────────────────
 // "¿qué he comido hoy?", "¿cuántas calorías llevo?", "¿cuánta agua llevo?": antes pasaban por el modelo (~7-10 s) solo para
 // que llamara a get_daily_log. Se reconocen por código y responden al instante. "cuánto llevo" a secas NO (puede ser plata).
-const DAY_FOOD_Q = /\b(?:que (?:he comido|comi|llevo comido|he desayunado|he almorzado|cene|almorce|desayune)(?: hoy)?|cuant[oa]s? (?:calorias|kcal|proteinas?|carbos?|carbohidratos|grasas?) (?:llevo|he comido|he consumido|comi|voy)|(?:cuanto|como) (?:llevo|voy)(?: hoy)? (?:de|con) (?:las |la |los |el )?(?:calorias|kcal|comida|proteinas?|carbohidratos|dieta)|(?:muestrame |ver |dame )?(?:mi|el) (?:registro|log|resumen) (?:de (?:hoy|comida|comidas|nutricion|lo que comi)))\b/;
-const DAY_WATER_Q = /\b(?:cuant[ao]s? (?:agua|litros|vasos)(?: de agua)? (?:llevo|he tomado|tome|voy)|(?:cuanto|como) (?:llevo|voy)(?: hoy)? (?:de|con) (?:el )?agua)\b/;
+const DAY_FOOD_Q = /\b(?:que (?:he comido|comi|llevo comido|he desayunado|he almorzado|cene|almorce|desayune)(?: hoy)?|cuant[oa]s? (?:calorias|kcal|proteinas?|carbos?|carbohidratos|grasas?) (?:llevo|he comido|he consumido|comi|voy|me (?:quedan|queda|faltan|falta))|(?:cuanto|como) (?:llevo|voy)(?: hoy)? (?:de|con) (?:las |la |los |el )?(?:calorias|kcal|comida|proteinas?|carbohidratos|dieta)|(?:muestrame |ver |dame )?(?:mi|el) (?:registro|log|resumen) (?:de (?:hoy|comida|comidas|nutricion|lo que comi)))\b/;
+const DAY_WATER_Q = /\b(?:cuant[ao]s? (?:agua|litros|vasos)(?: de agua)? (?:llevo|he tomado|tome|voy|me (?:quedan?|faltan?))|(?:cuanto|como) (?:llevo|voy)(?: hoy)? (?:de|con) (?:el )?agua)\b/;
 /** ¿Pregunta por lo comido o tomado hoy? "food" = el día completo, "water" = solo el agua. */
 export function dayQueryOf(message: unknown): "food" | "water" | null {
   if (typeof message !== "string" || message.length > 120) return null;
@@ -139,11 +139,19 @@ const DRINK = /\b(agua|cerveza|vino|pisco|ron|whisky|batido|smoothie|ml|cc|litro
 const DOUBT = /\b(sin|pero|no|casi|mitad de|algo de|un poco|poquito|harto|mucho|mucha|varios|varias|algunos|algunas|como|aprox\w*|masomenos|mas o menos)\b/;
 
 // ─── Tipo de comida ───────────────────────────────────────────────
+/** «colación de la mañana», «de media mañana», «colación AM», «colación mañanera», «a media mañana» */
+const COLACION_AM = /\b(colacion (de )?(la )?(media )?manana|colacion am|colacion mananera|(de|a) media manana)\b/;
+/** «colación de la tarde», «colación PM» */
+const COLACION_PM = /\b(colacion (de )?(la )?tarde|colacion pm)\b/;
 const MEAL_RX: Array<[RegExp, MealType | "colacion"]> = [
   [/\b(desayuno|desayune|desayunamos|desayunara)\b/, "desayuno"],
   [/\b(almuerzo|almorce|almorzamos|almorzara|al ?mor[csz]e)\b/, "almuerzo"],
   [/\b(onces?|tomamos once|tome once)\b/, "once"],
   [/\b(cena|cene|cenamos|ceno|cenara)\b/, "cena"],
+  // «colación de la mañana» a las 17:00 es la de la mañana (antes la hora mandaba y quedaba como de la tarde; banco de chat
+  // 2026-11-04). Van antes de la colación genérica.
+  [COLACION_AM, "colacion_am"],
+  [COLACION_PM, "colacion_pm"],
   [/\b(colacion|merienda|merende|snack|picoteo)\b/, "colacion"],
 ];
 
@@ -156,7 +164,7 @@ export function mealByHour(d: Date = new Date(), wakeHour?: number): MealType {
 // "a las 8", "a las 13:30", "a las ocho y media de la mañana", "8 pm", "hace una hora", "hace 20 minutos"
 const HOUR_WORDS: Record<string, number> = { una: 1, uno: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12 };
 const HOUR_TOKEN = "(\\d{1,2}|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)";
-const CLOCK_RX = new RegExp(`\\b(?:a las|a la|como a las|cerca de las|tipo las)\\s+${HOUR_TOKEN}(?:[:.](\\d{2})|\\s+y\\s+(media|cuarto))?(?:\\s*(am|pm|a\\.m\\.|p\\.m\\.|hrs?|horas)(?![a-z]))?(?:\\s+de la (manana|tarde|noche))?`);
+const CLOCK_RX = new RegExp(`\\b(?:a las|a la(?!\\s+onces?\\b)|como a las|cerca de las|tipo las)\\s+${HOUR_TOKEN}(?:[:.](\\d{2})|\\s+y\\s+(media|cuarto))?(?:\\s*(am|pm|a\\.m\\.|p\\.m\\.|hrs?|horas)(?![a-z]))?(?:\\s+de la (manana|tarde|noche))?`);
 const CLOCK_RX2 = /\b(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)\b/;
 const AGO_RX = /\bhace\s+(un|una|media|dos|tres|\d+(?:[.,]\d+)?)\s*(horas?|hrs?|minutos?|mins?|rato)\b/;
 const CLOCK_STRIP = new RegExp(`${CLOCK_RX.source}|${CLOCK_RX2.source}|${AGO_RX.source}`, "g");
@@ -213,10 +221,16 @@ export function mentionedMeal(message: string, now: Date = new Date()): MealType
 export function mentionedMeals(message: string, now: Date = new Date()): MealType[] {
   const t = fold(message).replace(CLOCK_STRIP, " ");
   const found: Array<[number, MealType]> = [];
+  // «colación de la mañana» ya la nombró la regla específica: la genérica no la cuenta otra vez por la hora
+  const nombradas = new Set<number>();
   for (const [re, meal] of MEAL_RX) {
     const g = new RegExp(re.source, "g");
     let m: RegExpExecArray | null;
-    while ((m = g.exec(t))) found.push([m.index, meal === "colacion" ? (now.getHours() < 15 ? "colacion_am" : "colacion_pm") : meal]);
+    while ((m = g.exec(t))) {
+      if (meal === "colacion" && nombradas.has(m.index)) continue;
+      if (re === COLACION_AM || re === COLACION_PM) nombradas.add(m.index);
+      found.push([m.index, meal === "colacion" ? (now.getHours() < 15 ? "colacion_am" : "colacion_pm") : meal]);
+    }
   }
   return [...new Set(found.sort((a, b) => a[0] - b[0]).map((f) => f[1]))];
 }
@@ -503,7 +517,9 @@ export async function parseFoodMessage(message: unknown, lookup: LocalFoodLookup
   let t = req.replace(/[?¿]/g, " ").replace(/\s+/g, " ").trim();
   // "como once" / "como almuerzo" dice en qué comida va, no es una duda ("como 200 g" sí lo es)
   const sinComida = t.replace(/\bcomo\s+(?:el\s+|la\s+|mi\s+)?(?=(?:desayuno|almuerzo|onces?|cena|colacion|merienda|snack)\b)/g, "");
-  if (!(VERB.test(t) || EAT.test(t)) || NOT_LOG.test(t) || OTHER.test(t) || DRINK.test(t) || DOUBT.test(sinComida)) return null;
+  // «colación de la mañana» no es «mañana» (otro día): para NOT_LOG se mira sin el nombre de la colación
+  const sinColacion = fold(t).replace(new RegExp(COLACION_AM.source, "g"), " colacion ").replace(new RegExp(COLACION_PM.source, "g"), " colacion ");
+  if (!(VERB.test(t) || EAT.test(t)) || NOT_LOG.test(sinColacion) || OTHER.test(t) || DRINK.test(t) || DOUBT.test(sinComida)) return null;
   // "una y media", "2 y medio" → número, antes de separar alimentos por "y"
   t = t.replace(/\b(\d+|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+y\s+(medio|media)\b/g,
     (_, n: string) => String((/^\d+$/.test(n) ? Number(n) : NUM_WORDS[n]) + 0.5));
@@ -517,6 +533,7 @@ export async function parseFoodMessage(message: unknown, lookup: LocalFoodLookup
     .replace(/\b(por favor|porfa|porfis|eris|oye|hola|bueno)\b/g, " ")
     .replace(VERB, " ")
     .replace(/\b(que|lo que)?\s*(me\s+|nos\s+)?(comi|comimos|desayune|desayunamos|almorce|almorzamos|cene|cenamos|merende|tome once|tomamos once|acabo de comer|acabamos de comer|servi|estoy comiendo)\b/g, " ")
+    .replace(new RegExp(COLACION_AM.source, "g"), " colacion ").replace(new RegExp(COLACION_PM.source, "g"), " colacion ")
     .replace(/\b(en|a|al|para|de|como|por|mi|el|la)?\s*(el|la|mi)?\s*(desayuno|almuerzo|onces?|cena|colacion|merienda|snack|picoteo)\b/g, " ")
     .replace(/\b(hoy|ahora|recien|esto|lo siguiente|tambien|ya)\b/g, " ")
     .replace(/\s+/g, " ")
@@ -526,7 +543,9 @@ export async function parseFoodMessage(message: unknown, lookup: LocalFoodLookup
     .trim();
   if (!t) return null;
 
-  const parsed = await parseItemsText(t, lookup);
+  // Sin cantidades («añade lechuga, repollo y choclo al almuerzo»): si PIDIÓ anotar (no si solo contó que comió), la porción
+  // típica de cada uno, avisando para que corrija (revisión 2026-11-04, C3: el mensaje se iba al modelo y terminó en Suplementos)
+  const parsed = (await parseItemsText(t, lookup)) ?? (VERB.test(req) ? await parseItemsText(t, lookup, true) : null);
   if (!parsed) return null;
   const { items, assumedNames, corrected } = parsed;
   const assumed = assumedNames.length
@@ -554,7 +573,7 @@ export interface MultiMealParse {
 
 const MEAL_MENTION = /\b(?:(?:en|a|al|para|de|como|por)\s+)?(?:(?:el|la|mi|las)\s+)?(desayun[oe]|almuerzo|almorce|onces?|cena|cene|colacion|merienda|snack)\b/g;
 const SOLO_CANTIDAD = /^(\d+(?:\.\d+)?|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|media|medio)$/;
-const MEAL_SAID: Record<MealType, string> = {
+export const MEAL_SAID: Record<MealType, string> = {
   desayuno: "para el desayuno", colacion_am: "de colación", almuerzo: "para el almuerzo", once: "para la once", cena: "para la cena", colacion_pm: "de colación",
 };
 function mealOfWord(w: string, now: Date): MealType {
@@ -668,6 +687,13 @@ const WHATIF_RX = new RegExp("^(?:(?:oye|hola|eris|ya|bueno|pero|entonces|y)[\\s
   "simula(?:r|me)?(?:\\s+que\\s+(?:me\\s+)?(?:como|tomo))?",
   "(?:me\\s+)?voy\\s+a\\s+(?:comer|comerme|tomar|tomarme)",
   "(?:estoy\\s+)?pensando\\s+en\\s+(?:comer|comerme|tomar|tomarme)",
+  // Antojos (fase I7): «tengo antojo de una pizza», «me tinca un completo», «quiero comerme un kuchen»
+  "(?:tengo|me\\s+dio|me\\s+da|ando\\s+con)\\s+(?:un\\s+)?antojo\\s+de",
+  "se\\s+me\\s+antoj(?:a|o|an|aron)",
+  "me\\s+tincan?",
+  "(?:quiero|quisiera)\\s+(?:comer|comerme|tomar|tomarme)",
+  "me\\s+muero\\s+(?:de\\s+ganas\\s+de\\s+(?:comer|comerme)|por)",
+  "me\\s+(?:comeria|tomaria)",
 ].join("|") + ")\\b");
 // La pregunta que suele ir al final ("…, ¿cómo quedo?", "¿qué pasa con mi día?") no es parte del alimento
 const WHATIF_TAIL = /[\s,]*(?:(?:como|que tal|cuanto|en que)\s+(?:quedo|quedaria|me\s+(?:afecta|afectaria|va|iria|sube|subiria|baja|bajaria|queda)|queda(?:ria)?\s+(?:mi|el)\s+dia|va\s+mi\s+dia)|que\s+pasa(?:ria)?(?:\s+con\s+mi\s+dia)?|se\s+puede|esta\s+bien|me\s+conviene)\b.*$/;
@@ -698,6 +724,8 @@ export async function parseWhatIfMessage(message: unknown, lookup: LocalFoodLook
     .replace(/\b(?:hoy|ahora|ahorita|mas tarde|despues|luego|por favor|porfa|eris)\b/g, " ")
     .replace(/\s+/g, " ").replace(/^[\s,.]+|[\s,.]+$/g, "").replace(/^(?:con|de)\s+/, "").trim();
   if (!t) return null;
+  // «Quiero comer algo», «se me antoja algo dulce»: no es un alimento (por sonido, «algo» calzaba con «algas»: cochayuyo)
+  if (/^algo\b/.test(t)) return null;
   const parsed = await parseItemsText(t, lookup, true);
   if (!parsed) return null;
   const meal = mentionedMeal(message, now);
@@ -767,6 +795,55 @@ export function saidGramsFor(
 /** Marca de "lo último que se registró" (la herramienta borra la comida más reciente de hoy). */
 export const LAST_ENTRY = "__ultimo__";
 export interface DeleteParse { action: "delete_entry"; searchQuery: string }
+
+/**
+ * «Son 250g, no 150g» justo después de anotar UN alimento: la misma comida y el mismo alimento, con la cantidad corregida.
+ * 2026-10-18 (chat real): sin esto lo resolvía el modelo, que borró la carne mongoliana y anotó «pechuga de pollo a la
+ * plancha (150 g)». Solo con un alimento en la última confirmación (con varios no se sabe cuál) y con la unidad dicha.
+ */
+/**
+ * «Te faltó la carne molida, unos 150 g», «también un vaso de jugo» justo después de anotar una comida: va a ESA comida.
+ * Devuelve la frase para anotarlo («anota la carne molida, unos 150 g para el almuerzo») y la comida. 2026-10-21 (banco de
+ * pruebas): sin verbo de registro iba al modelo con 9 herramientas, el prompt llenaba los 8192 tokens y se cortaba.
+ */
+export function addToLastMeal(message: unknown, lastAssistant: unknown): { text: string; mealType: MealType } | null {
+  const head = String(lastAssistant ?? "").match(/✅\s*\*\*[^*]*?(Desayuno|Colaci[oó]n AM|Almuerzo|Once|Cena|Colaci[oó]n PM)[^*]*?registrad[oa]\*\*/i);
+  if (!head) return null;
+  const raw = String(message ?? "").trim();
+  if (raw.length > 120 || raw.includes("?")) return null;
+  const m = raw.match(/^(?:oye,?\s+)?(?:te |se te )?(?:falt[oó]|faltaron|olvidaste|se te (?:olvid[oó]|pas[oó])|tambi[eé]n|adem[aá]s|y tambi[eé]n|agrega(?:le)?|s[uú]male)\s*:?\s+(.+)$/i);
+  if (!m) return null;
+  const mealType = MEAL_OF_LABEL.find(([re]) => re.test(head[1]))?.[1];
+  if (!mealType) return null;
+  let what = m[1].replace(/[.!]+$/, "").trim();
+  // «la carne molida, unos 150 g» → «150 g de carne molida» (con la cantidad al final no lo entiende parseFoodMessage)
+  const tail = what.match(/^(?:el |la |los |las |un |una )?(.+?),?\s+(?:unos?|unas?|como|aprox(?:imadamente)?|cerca de)?\s*(\d+(?:[.,]\d+)?)\s*(g|gr|grs|gramos|ml|cc)$/i);
+  if (tail) what = `${tail[2]} ${tail[3]} de ${tail[1]}`;
+  return { text: `anota ${what} ${MEAL_SAID[mealType]}`, mealType };
+}
+
+export interface AmountFix { name: string; grams: number; from: number; unit: "g" | "ml"; mealType: MealType }
+const MEAL_OF_LABEL: Array<[RegExp, MealType]> = [[/desayuno/i, "desayuno"], [/colaci[oó]n am/i, "colacion_am"], [/almuerzo/i, "almuerzo"], [/once/i, "once"], [/cena/i, "cena"], [/colaci[oó]n pm/i, "colacion_pm"]];
+export function parseAmountFix(message: unknown, lastAssistant: unknown): AmountFix | null {
+  const last = String(lastAssistant ?? "");
+  const head = last.match(/✅\s*\*\*[^*]*?(Desayuno|Colaci[oó]n AM|Almuerzo|Once|Cena|Colaci[oó]n PM)[^*]*?registrad[oa]\*\*/i);
+  const items = [...last.matchAll(/^•\s+\*\*(.+?)\*\*\s+\((\d+(?:[.,]\d+)?)\s*(g|ml)\)/gm)];
+  if (!head || items.length !== 1) return null;
+  const t = fold(String(message ?? "")).replace(/\s+/g, " ").trim();
+  if (t.length > 80 || t.includes("?")) return null;
+  const U = "(?:g|gr|grs|gramos|ml|cc)";
+  const n = (s: string) => Number(s.replace(",", "."));
+  // «son 250 g», «eran 250g, no 150», «fueron 250 gramos», «en realidad son 250 g», «250 g no 150 g», «no 150 sino 250 g»
+  const m = t.match(new RegExp(`^(?:no,?\\s*)?(?:en realidad\\s+)?(?:son|eran|era|fueron|fue|es)\\s+(\\d+(?:[.,]\\d+)?)\\s*${U}\\b`))
+    ?? t.match(new RegExp(`^(\\d+(?:[.,]\\d+)?)\\s*${U}\\s*,?\\s*no\\b`))
+    ?? t.match(new RegExp(`^no\\s+(?:\\d+(?:[.,]\\d+)?)\\s*${U}?\\s*(?:,\\s*)?sino\\s+(\\d+(?:[.,]\\d+)?)\\s*${U}?\\b`));
+  if (!m) return null;
+  const grams = n(m[1]);
+  const from = n(items[0][2]);
+  if (!(grams > 0 && grams <= 3000) || grams === from) return null;
+  const mealType = MEAL_OF_LABEL.find(([re]) => re.test(head[1]))?.[1];
+  return mealType ? { name: items[0][1], grams, from, unit: items[0][3] === "ml" ? "ml" : "g", mealType } : null;
+}
 
 const DEL_VERB = /^(?:(?:oye|eris|ya|no|chuta|uy|ups|perdon|bueno|me equivoque|te equivocaste|esta malo|quedo mal)[\s,]+)*(?:por favor\s+|porfa\s+)?(?:borra|borrame|borralo|borrala|borralos|borralas|elimina|eliminame|eliminalo|eliminala|quita|quitame|quitalo|quitala|saca|sacame|sacalo|sacala|deshaz|deshace|anula|anulalo|anulala)\b\s*/;
 const LAST_RX = /^(?:(?:lo|el|la)\s+)?(?:ultimo|ultima)(?:\s+(?:registro|comida|que (?:te )?(?:dije|anote|registre|comi)|que (?:anotaste|registraste)))?$|^(?:eso|esto|ese registro|esa comida|lo que (?:anotaste|registraste|anote|registre))$/;

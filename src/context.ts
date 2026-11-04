@@ -166,7 +166,12 @@ export async function loadSystemPrompt(
 
     if (role === 'ikaros') {
       try {
-        memoryLayer1 = await readFile("c:/Proyectos/AXS/MEMORY.md", "utf-8");
+        // Sin rutas del PC: nombres lógicos (Hestia citó una ruta interna en una respuesta de salud; revisión 2026-11-04, P1)
+        memoryLayer1 = (await readFile("c:/Proyectos/AXS/MEMORY.md", "utf-8"))
+          .replace(/`?[A-Za-z]:[\\/]Proyectos[\\/]eris-mobile[\\/]?`?/gi, "la app (eris-mobile)")
+          .replace(/`?[A-Za-z]:[\\/]Proyectos[\\/]eris[\\/]?`?/gi, "el servidor (eris)")
+          .replace(/`?[A-Za-z]:[\\/]Proyectos[\\/]AXS[\\/]?`?/gi, "la bóveda")
+          .replace(/`?~[\\/]\.eris[\\/]?([^\s`]*)`?/g, "los datos de Eris");
       } catch { }
     }
 

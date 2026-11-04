@@ -7,7 +7,7 @@
 // ============================================================
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { NEW_FOODS, ENRICH, ALIAS_MOVES, ALIAS_ADDS, CATALOG_SAME, MERGE_INTO, CATALOG_ALIAS_MOVES, type FoodSpec, type RecipeSpec } from "./food_db_spec.ts";
+import { NEW_FOODS, ENRICH, ALIAS_MOVES, ALIAS_ADDS, CATALOG_SAME, MERGE_INTO, CATALOG_ALIAS_MOVES, MICRO_FROM, type FoodSpec, type RecipeSpec, type Ingredient } from "./food_db_spec.ts";
 
 const ROOT = resolve(import.meta.dir, "..");
 const OUT = [resolve(ROOT, "src/data/chilean-foods.json"), resolve(ROOT, "../eris-mobile/src/data/chilean-foods.json")];
@@ -44,6 +44,62 @@ function per100From(nutrients: any[]): Per100 {
     kcal: v(1008, 2047, 2048), protein: v(1003), carbs: v(1005), fat: v(1004), fiber: v(1079),
     sugar: v(2000, 1063), sodium: v(1093), satFat: v(1258),
   };
+}
+
+// ─── Vitaminas y minerales (fase I5, 2026-10-23) ───────────────
+// Por 100 g, con las claves del núcleo de suplementos (eris-mobile/src/services/supplements/supplementCore.ts). Se piden
+// por fdcId a FDC (el detalle trae todos los nutrientes) y quedan en scripts/data/usda_micro_cache.json.
+type Micro = Partial<Record<string, number>>;
+const MICRO_IDS: Record<string, number[]> = {
+  vA: [1106], vC: [1162], vD: [1114], vE: [1109], vK: [1185], b1: [1165], b2: [1166], b3: [1167], b6: [1175], b12: [1178],
+  fol: [1190, 1177], ca: [1087], fe: [1089], mg: [1090], k: [1092], zn: [1095], p: [1091],
+};
+const MICRO_KEYS = Object.keys(MICRO_IDS);
+const rm = (n: number) => (n >= 100 ? Math.round(n) : n >= 10 ? Math.round(n * 10) / 10 : Math.round(n * 100) / 100);
+function microFrom(nutrients: any[]): Micro {
+  const val = (id: number) => {
+    const n = nutrients.find((x: any) => (x.nutrientId ?? x.nutrient?.id) === id);
+    const v = n ? Number(n.value ?? n.amount) : NaN;
+    return Number.isFinite(v) ? v : undefined;
+  };
+  const out: Micro = {};
+  for (const [k, ids] of Object.entries(MICRO_IDS)) for (const id of ids) { const v = val(id); if (v !== undefined) { out[k] = rm(v); break; } }
+  // Vitamina D solo en UI en algunos alimentos: 40 UI = 1 µg
+  if (out.vD === undefined) { const iu = val(1110); if (iu !== undefined) out.vD = rm(iu / 40); }
+  return out;
+}
+const MCACHE = resolve(ROOT, "scripts/data/usda_micro_cache.json");
+const mcache: Record<string, Micro> = existsSync(MCACHE) ? JSON.parse(readFileSync(MCACHE, "utf8")) : {};
+async function microOf(fdcId: number): Promise<Micro> {
+  const k = String(fdcId);
+  if (mcache[k]) return mcache[k];
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const res = await fetch(`https://api.nal.usda.gov/fdc/v1/food/${fdcId}?api_key=${KEY}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const f: any = await res.json();
+      mcache[k] = microFrom(f.foodNutrients ?? []);
+      writeFileSync(MCACHE, JSON.stringify(mcache));
+      return mcache[k];
+    } catch { await sleep(3000 * attempt); }
+  }
+  throw new Error(`USDA no respondió el detalle de ${fdcId}`);
+}
+/** Micronutrientes por 100 g de una receta: cada uno solo si se conoce en ingredientes que suman ≥ 80 % del peso sólido. */
+async function recipeMicro(recipe: Ingredient[], yieldG?: number): Promise<Micro> {
+  const total: Record<string, number> = {}, known: Record<string, number> = {};
+  let grams = 0, solid = 0;
+  for (const [ing, g] of recipe) {
+    grams += g;
+    if (ing === "agua" || ing === "sal") continue;
+    solid += g;
+    const m = await microOf((await usda(ing)).fdcId);
+    for (const k of MICRO_KEYS) if (m[k] !== undefined) { total[k] = (total[k] ?? 0) + (m[k]! * g) / 100; known[k] = (known[k] ?? 0) + g; }
+  }
+  const w = yieldG ?? grams;
+  const out: Micro = {};
+  for (const k of MICRO_KEYS) if (total[k] !== undefined && (known[k] ?? 0) >= 0.8 * solid) out[k] = rm((total[k] / w) * 100);
+  return out;
 }
 
 const DATA_TYPES: Record<string, string[]> = { sr: ["SR Legacy"], fndds: ["Survey (FNDDS)"], foundation: ["Foundation"] };
@@ -132,8 +188,11 @@ const ids = new Set(existing.map((f) => f.id));
 
 // 1) Lo que ya estaba: grupo, procesamiento, bebida, sodio y grasa saturada (sin tocar calorías ni macros)
 for (const f of existing) {
+  // Alias que ahora son otro alimento (o que se suman): también en lo que se agregó después del primer enriquecimiento
+  const drop = new Set((ALIAS_MOVES[f.id] ?? []).map((a) => a.toLowerCase()));
+  f.aliases = [...new Set([...(f.aliases ?? []).filter((a: string) => !drop.has(a.toLowerCase())), ...(ALIAS_ADDS[f.id] ?? [])])];
   const e = ENRICH[f.id];
-  if (!e) { warnings.push(`${f.id}: sin datos de enriquecimiento`); continue; }
+  if (!e) continue; // agregado desde NEW_FOODS: ya tiene grupo, procesamiento, sodio y grasa saturada
   f.group = e.group; f.nova = e.nova;
   if (e.liquid) f.liquid = true;
   let sodium100 = e.sodium100, satFat100 = e.satFat100;
@@ -147,8 +206,6 @@ for (const f of existing) {
     if (sodium100 !== undefined) s.sodium = Math.round((sodium100 * s.grams) / 100);
     if (satFat100 !== undefined) s.satFat = r1((satFat100 * s.grams) / 100);
   }
-  const drop = new Set((ALIAS_MOVES[f.id] ?? []).map((a) => a.toLowerCase()));
-  f.aliases = [...new Set([...(f.aliases ?? []).filter((a: string) => !drop.has(a.toLowerCase())), ...(ALIAS_ADDS[f.id] ?? [])])];
 }
 
 // Catálogo del asesor metabólico: lo nuevo que ya tenía se alinea a su id y nombre; sus alias que ahora son otro alimento se sacan
@@ -196,6 +253,25 @@ for (const raw of NEW_FOODS) {
   added.push(entry);
   ids.add(spec.id);
 }
+
+// 3) Vitaminas y minerales de TODOS (lo de antes y lo nuevo), sin tocar calorías ni macros
+const specById = new Map<string, FoodSpec>();
+for (const raw of NEW_FOODS) specById.set(CATALOG_SAME[raw.id] ? `cl:${CATALOG_SAME[raw.id]}` : raw.id, raw);
+let withMicro = 0;
+for (const f of [...existing, ...added]) {
+  let micro: Micro | null = null;
+  const fdc = /USDA FDC (\d+)/.exec(f.ref ?? "");
+  const spec = specById.get(f.id);
+  const mf = MICRO_FROM[f.id];
+  try {
+    if (fdc) micro = await microOf(Number(fdc[1]));
+    else if (spec && "recipe" in spec) micro = await recipeMicro(spec.recipe, spec.yield);
+    else if (ENRICH[f.id]?.usda !== undefined) micro = await microOf((await usda(ENRICH[f.id].usda!)).fdcId);
+    else if (mf) micro = "recipe" in mf ? await recipeMicro(mf.recipe, mf.yield) : await microOf((await usda(mf.usda, mf.src)).fdcId);
+  } catch (e) { warnings.push(`${f.id}: sin vitaminas (${(e as Error).message})`); }
+  if (micro && Object.keys(micro).length) { f.micro = micro; withMicro++; } else { delete f.micro; if (!micro) warnings.push(`${f.id}: sin vitaminas ni minerales`); }
+}
+console.log(`Vitaminas y minerales: ${withMicro} de ${existing.length + added.length}`);
 
 // Alias repetidos entre alimentos distintos (base + catálogo): la búsqueda no sabría cuál elegir
 const owner = new Map<string, string>();

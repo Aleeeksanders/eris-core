@@ -55,6 +55,10 @@ export interface Recommendation {
   unmatched: string[];
   usedPantry: boolean;
   tierCap?: 1 | 2 | 3;
+  /** la despensa salió del Inventario (fase I7), no de lo que dijo */
+  fromInventory?: string;
+  /** la comida va más liviana por el trato de un antojo (kcal menos) */
+  kcalMenos?: number;
 }
 
 // ─── Sinónimos → ids del catálogo (para la despensa y la afinidad) ───────────
@@ -214,7 +218,7 @@ function targetFor(moment: Moment, ctx: MetabolicContext, a: Analysis, minutes?:
 }
 
 function baseTarget(moment: Moment, ctx: MetabolicContext, a: Analysis, minutes?: number): Target {
-  const hour = a.hour;
+  const hour = a.dayHour; // la de su día (normDayHour), no la del reloj
   const proteinNeed = ctx.goals.protein ? a.needs.proteinG : 25;
   const ckd = ctx.goals.protein === null && ctx.medical?.conditions?.some((c) => c.id === "ckd");
   const mealsLeft = hour < 15 ? 2 : 1;
@@ -272,7 +276,8 @@ export function unparsedAllergyIds(r: { unparsed: string[] }): Set<string> {
 }
 
 /** Existen en el catálogo (para registrar y evaluar lo que el usuario comió) pero Eris no los propone como comida. */
-export const NEVER_RECOMMEND = new Set(["papas_fritas", "coca_cola", "chorrillana", "mayonesa", "ketchup", "azucar", "miel"]);
+// limón: es aliño, no una fruta para comer sola (2026-10-21: un snack con fibra salió «2 limones con semillas de maravilla»)
+export const NEVER_RECOMMEND = new Set(["papas_fritas", "coca_cola", "chorrillana", "mayonesa", "ketchup", "azucar", "miel", "limon"]);
 
 // ─── Recomendador ────────────────────────────────────────────────────────────
 
@@ -286,7 +291,35 @@ export interface RecommendInput {
   limit?: number;
   /** Con despensa nunca se aplica presupuesto; sin despensa, el nivel máximo de precio. */
   tierCap?: 1 | 2 | 3;
+  /** No puede cocinar (en el trabajo, saliendo): solo lo listo o de preparación simple */
+  noCook?: boolean;
+  /** Pidió fibra («un snack con fibra», «¿qué hago para la fibra que me falta?»): suben los platos con más fibra */
+  preferFiber?: boolean;
+  /** Preguntó cuánta proteína le falta / cómo completarla (2026-10-23): suben los platos con más proteína */
+  preferProtein?: boolean;
+  /** Lo que vence pronto en el Inventario (ids del catálogo): se usa primero (fase I7) */
+  prefer?: Set<string>;
+  /** Pidió cocinar CON lo que vence («¿qué cocino con eso?» tras «por vencer»): manda sobre el resto */
+  usePrefer?: boolean;
+  /** La despensa es la del Inventario: cuándo la mandó el teléfono («el 23-10 a las 14:05») */
+  fromInventory?: string;
+  /** El trato de un antojo: esta comida va más liviana (kcal menos; fase I7) */
+  kcalMenos?: number;
+  /**
+   * El tamaño de ESTA comida dentro de un plan del día (Eris al timón, DayPlan): kcal y proteína que le tocan. Manda sobre
+   * el reparto automático por «comidas que quedan»; con enfermedad renal la proteína sigue con su tope.
+   */
+  slotTarget?: { kcal: number; protein?: number | null };
+  /** Desayuno u once (DayPlan): proteína y carbohidrato de desayuno (huevo, yogur, quesillo + pan, avena, fruta) y palta o tomate */
+  breakfast?: boolean;
 }
+
+// Desayuno y once (DayPlan, 2026-10-29: el plan proponía «pechuga con avena y lechuga» de desayuno)
+const BREAKFAST_PROTEIN = new Set(["huevo", "huevo_cocido", "clara_huevo", "jamon_cocido", "pavo_pechuga", "yogur_natural", "yogur_griego", "yogur_descremado", "quesillo", "queso_cottage", "queso_fresco", "queso_gauda", "leche_descremada", "leche_entera"]);
+const BREAKFAST_CARB = new Set(["marraqueta", "hallulla", "pan_integral", "pan_molde_blanco", "pan_pita", "avena", "avena_cocida", "tortilla_maiz", "granola", "platano", "manzana", "frutilla"]);
+const BREAKFAST_SIDE = ["palta", "tomate", "mantequilla_mani"];
+const BREAKFAST_ONLY = new Set(["avena", "avena_cocida", "granola", "cereal_hojuelas_maiz"]);
+const BREAKFAST_SALTY = new Set(["huevo", "huevo_cocido", "clara_huevo", "jamon_cocido", "pavo_pechuga", "quesillo", "queso_fresco", "queso_gauda", "queso_cottage", "marraqueta", "hallulla", "pan_integral", "pan_molde_blanco", "pan_pita", "tortilla_maiz"]);
 
 const MULTS = [0.5, 1, 1.5, 2];
 const PROTEIN_ROLES = new Set<Role>(["proteina", "legumbre"]);   // en una comida principal; los lácteos van en colaciones
@@ -325,16 +358,43 @@ export function recommendMeals(input: RecommendInput): Recommendation {
     pool = pool.filter((f) => f.priceTier <= input.tierCap!);
   }
 
-  // Cerca del entreno no hay tiempo de cocinar.
-  const noTime = minutesToWorkout !== undefined && minutesToWorkout < 45;
+  // Cerca del entreno no hay tiempo de cocinar; tampoco si está en el trabajo o saliendo (2026-10-19: «estoy en el trabajo,
+  // así que no puedo cocinar» y le propuso carne molida con avena y alcachofa cocida, «hay que cocinar»)
+  const noTime = (minutesToWorkout !== undefined && minutesToWorkout < 45) || !!input.noCook;
   if (noTime) pool = pool.filter((f) => f.prep !== "cocinar");
+  // Sin cocina (trabajo, calle) tampoco hay sartén ni olla: solo lo listo para comer, si alcanza para armar algo
+  if (input.noCook) { const ready = pool.filter((f) => f.prep === "listo"); if (ready.filter((f) => PROTEIN_ROLES.has(f.role) || f.role === "lacteo").length >= 2) pool = ready; }
 
-  const target = targetFor(moment, ctx, analysis, minutesToWorkout);
+  let target = targetFor(moment, ctx, analysis, minutesToWorkout);
+  // El tamaño que le toca a esta comida en el plan del día (DayPlan)
+  if (input.slotTarget && input.slotTarget.kcal > 0) {
+    const k = input.slotTarget.kcal, p = input.slotTarget.protein;
+    const ckd = ctx.goals.protein === null;
+    const diab = ctx.medical?.conditions?.some((c) => ["diabetes_t1", "diabetes_t2", "prediabetes"].includes(c.id));
+    target = { ...target, kcal: [Math.round(k * 0.85), Math.round(k * 1.15)],
+      carbs: [Math.round((k * 0.3) / 4), Math.min(diab ? 60 : 999, Math.round((k * 0.55) / 4))],
+      ...(p && p > 0 && !ckd ? { protein: [Math.round(p * 0.75), Math.round(p * 1.5)] as [number, number] } : {}),
+      text: `~${Math.round(k)} kcal${p && p > 0 && !ckd ? ` con ~${Math.round(p)} g de proteína` : ""}` };
+  }
+  // El trato de un antojo: la comida compensada va más liviana (sin bajar de la mitad ni tocar la proteína)
+  if (input.kcalMenos && input.kcalMenos > 0) {
+    const k = input.kcalMenos;
+    target = { ...target, kcal: [Math.max(Math.round(target.kcal[0] / 2), target.kcal[0] - k), Math.max(Math.round(target.kcal[1] / 2), target.kcal[1] - k)],
+      text: `${target.text}, más liviana por tu trato de hoy (−${k} kcal)` };
+  }
+  // Pidió completar la proteína: el plato apunta a más (30–45 g), sin pasarse de lo que le falta
+  if (input.preferProtein && moment !== "colacion" && moment !== "pre_entreno") {
+    const falta = Math.max(0, analysis.needs.proteinG);
+    if (falta >= 30) target = { ...target, protein: [Math.max(target.protein[0], 30), Math.max(target.protein[1], Math.min(55, falta))] };
+  }
   const closeToWorkout = moment === "pre_entreno" || moment === "post_entreno";
 
   // Componentes por rol
-  const proteins = pool.filter((f) => PROTEIN_ROLES.has(f.role) && f.protein >= 5);
-  const carbs = pool.filter((f) => CARB_ROLES.has(f.role));
+  const bk = !!input.breakfast;
+  const proteins = bk ? pool.filter((f) => BREAKFAST_PROTEIN.has(f.id) && f.protein >= 3) : pool.filter((f) => PROTEIN_ROLES.has(f.role) && f.protein >= 5);
+  // La avena, la granola y el cereal son de desayuno: en el plan del día no van al almuerzo ni a la cena
+  const carbs = bk ? pool.filter((f) => BREAKFAST_CARB.has(f.id))
+    : pool.filter((f) => CARB_ROLES.has(f.role) && !(input.slotTarget && BREAKFAST_ONLY.has(f.id)));
   const veggies = pool.filter((f) => f.role === "verdura" && f.id !== "ajo");
   const platos = pool.filter((f) => f.role === "plato");
   const light = pool.filter((f) => (["fruta", "lacteo", "grasa", "snack", "carbo"].includes(f.role) || f.id === "jugo_naranja" || f.id === "leche_platano") && f.kcal > 20);
@@ -366,7 +426,8 @@ export function recommendMeals(input: RecommendInput): Recommendation {
     const pref = veggies.filter((v) => v.moments.includes(moment));
     return (pref[0] ?? veggies.sort((a, b) => b.fiber - a.fiber)[0]);
   };
-  const veg = moment === "pre_entreno" ? undefined : bestVeg();
+  const veg = moment === "pre_entreno" ? undefined
+    : bk ? BREAKFAST_SIDE.map((id) => pool.find((f) => f.id === id)).find(Boolean) : bestVeg();
 
   type Scored = { plate: Plate; key: string; main: string };
   const scored: Scored[] = [];
@@ -376,7 +437,9 @@ export function recommendMeals(input: RecommendInput): Recommendation {
     const idx = combo.map(() => 0);
     while (true) {
       const parts = combo.map((c, i) => ({ f: c.f, mult: c.mults[idx[i]] }));
-      const s = scorePlate(parts, veg, isMeal && parts.length >= 1 && !platos.includes(parts[0].f));
+      // En el desayuno, la palta o el tomate van con lo salado (huevo, quesillo, jamón), no con el yogur ni la leche
+      const side = bk && !parts.some((x) => BREAKFAST_SALTY.has(x.f.id)) ? false : isMeal && parts.length >= 1 && !platos.includes(parts[0].f);
+      const s = scorePlate(parts, veg, side);
       if (s) scored.push(s);
       let k = combo.length - 1;
       while (k >= 0 && ++idx[k] >= combo[k].mults.length) { idx[k] = 0; k--; }
@@ -391,16 +454,24 @@ export function recommendMeals(input: RecommendInput): Recommendation {
     for (const { f, mult } of items) { t.kcal += f.kcal * mult; t.protein += f.protein * mult; t.carbs += f.carbs * mult; t.fat += f.fat * mult; t.fiber += f.fiber * mult; }
 
     let s = 0;
+    // En el plan del día (slotTarget) el tamaño de la comida pesa más: si no, el día quedaba en ~60 % de la meta
+    const kcalW = input.slotTarget ? 2 : 1;
     s += 1.2 * dist(t.protein, target.protein);
     s += 1.0 * dist(t.carbs, target.carbs);
-    s += 1.0 * dist(t.kcal, target.kcal);
+    s += kcalW * dist(t.kcal, target.kcal);
     if (target.fatMax !== undefined && t.fat > target.fatMax) s += 0.8 * ((t.fat - target.fatMax) / Math.max(target.fatMax, 5));
     if (target.fiberMax !== undefined && t.fiber > target.fiberMax) s += 0.4 * ((t.fiber - target.fiberMax) / target.fiberMax);
+    // Pidió fibra (2026-10-19, dos veces, y le salió plátano con leche): hasta ~8 g suma
+    if (input.preferFiber) s -= Math.min(0.5, 0.06 * t.fiber);
+    // hasta ~40 g de proteína suma (con 136 g por delante, unas lentejas con tomate de 24 g no son lo mejor)
+    if (input.preferProtein) s -= Math.min(0.5, 0.0125 * t.protein);
 
     const reasons: string[] = []; const warnings: string[] = [];
     let bonus = 0; let flagged = false;
     for (const { f } of items) {
       if (f.moments.includes(moment)) bonus += 0.08;
+      // Lo que vence pronto en el Inventario se usa primero (fase I7)
+      if (input.prefer?.has(f.id)) { bonus += input.usePrefer ? 0.6 : 0.12; const nm = `${f.name.split(" (")[0]}: vence pronto, úsalo hoy`; if (!reasons.includes(nm)) reasons.push(nm); }
       const aff = affinity.get(f.id)?.score || 0;
       if (aff > 0) { bonus += Math.min(0.25, 0.05 * aff); reasons.push(`${f.name.split(" (")[0]}: ${affinity.get(f.id)!.reason}`); }
       const cp = conditionPenalty(f, ctx, { closeToWorkout });
@@ -421,6 +492,7 @@ export function recommendMeals(input: RecommendInput): Recommendation {
     const totals: Macros = { kcal: Math.round(t.kcal), protein: round1(t.protein), carbs: round1(t.carbs), fat: round1(t.fat), fiber: round1(t.fiber) };
 
     if (totals.protein >= target.protein[0]) reasons.unshift(`aporta ${totals.protein} g de proteína`);
+    if (input.preferFiber && totals.fiber >= 3) reasons.unshift(`${totals.fiber} g de fibra`);
     if (moment === "pre_entreno") reasons.push(`${totals.carbs} g de carbohidratos como combustible`);
     return {
       plate: { components: comps, totals, score: s, reasons, warnings, prep, flagged },
@@ -442,7 +514,8 @@ export function recommendMeals(input: RecommendInput): Recommendation {
     if (picked.length >= limit) break;
   }
 
-  return { moment, targetText: target.text, plates: picked.map((p) => p.plate), excluded, unmatched, usedPantry, tierCap: input.tierCap };
+  return { moment, targetText: target.text, plates: picked.map((p) => p.plate), excluded, unmatched, usedPantry, tierCap: input.tierCap,
+    ...(input.fromInventory ? { fromInventory: input.fromInventory } : {}), ...(input.kcalMenos ? { kcalMenos: input.kcalMenos } : {}) };
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -460,7 +533,8 @@ export function formatRecommendation(rec: Recommendation, ctx: MetabolicContext)
   if (ctx.restrictions.unparsed.length) lines.push(`⚠ No pude interpretar esto de tus alergias: "${ctx.restrictions.unparsed.join('", "')}" — revisa las etiquetas de todo lo que comas.`);
 
   lines.push(`Objetivo (${MOMENT_LABEL[rec.moment]}): ${rec.targetText}.`);
-  if (rec.usedPantry) lines.push("Solo uso lo que dijiste que tienes en casa.");
+  if (rec.fromInventory) lines.push(`Con lo que hay en tu Inventario (Alimentos y Despensa, actualizado ${rec.fromInventory}): no agrego nada que no tengas.`);
+  else if (rec.usedPantry) lines.push("Solo uso lo que dijiste que tienes en casa.");
   else if (rec.tierCap) lines.push(`Filtrado por presupuesto: nivel de precio hasta ${["", "económico", "medio", "caro"][rec.tierCap]}.`);
 
   if (!rec.plates.length) {

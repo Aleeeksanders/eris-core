@@ -115,7 +115,7 @@ export function financeFactLines(texts: string[]): string[] {
   for (const t of texts) {
     for (const line of t.split("\n")) {
       const l = line.trim();
-      if (/^[-·•]\s*(Gastos [a-záéíóú]+ \d{4}|Disponible|Plata a mano|Sueldo esperado|Ingresos extra)\b[^\n]*\$/i.test(l) && !out.includes(l)) out.push(l);
+      if (/^[-·•]\s*(Gastos [a-záéíóú]+ \d{4}|Su plata|Para gastar hasta|Plata a mano|Sueldo esperado|Ingresos extra)\b[^\n]*\$/i.test(l) && !out.includes(l)) out.push(l);
     }
   }
   return out.slice(0, 5);

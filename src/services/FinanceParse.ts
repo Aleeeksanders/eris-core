@@ -14,7 +14,9 @@
 
 export type Categoria = "vivienda" | "alimentacion" | "transporte" | "salud" | "entretenimiento" | "deuda" | "educacion" | "hogar" | "otros";
 export type FinanceAction =
-  | "gasto" | "prestamo" | "cobro" | "abono" | "giro" | "transferencia" | "pago_tarjeta" | "ahorro" | "deshacer" | "resumen";
+  | "gasto" | "prestamo" | "cobro" | "abono" | "giro" | "transferencia" | "pago_tarjeta" | "ahorro" | "deshacer" | "resumen"
+  /** Eris administra (A2): ¿calza con el banco? / «mi BCI tiene 412 lucas» */
+  | "cuadre" | "saldo_banco";
 
 export interface FinanceOp {
   action: FinanceAction;
@@ -36,6 +38,10 @@ export interface FinanceOp {
   objeto?: string;
   /** gasto en cuotas (tarjeta de crédito) */
   cuotas?: number;
+  /** resumen: qué pregunta («¿en qué gasté más?» → categorías; «¿cuándo me pagan?» → el ingreso) */
+  foco?: "categorias" | "ingreso";
+  /** cuadre: «arregla mi BCI» (lo que calza exacto) o «ajusta mi BCI al banco» (la diferencia como ajuste) */
+  aplicar?: "mejor" | "ajuste";
 }
 
 /** Minúsculas sin acentos, con el MISMO largo que el original (los índices sirven para recortar el texto original). */
@@ -223,7 +229,12 @@ const SUELDO_RX = /\b(sueldo|quincena|anticipo)\b/;
 const QUINCENA_RX = /\b(quincena|anticipo)\b/;
 const V_AHORRO = /\b(ahorre|ahorramos|guarde|separe|aparte)\b/;
 const V_UNDO = /\b(borra\w*|elimina\w*|deshace\w*|deshaz|anula\w*|quita\w*)\s+(?:el\s+|ese\s+|lo\s+|mi\s+)?(?:ultimo\s+)?(gasto|prestamo|giro|abono|movimiento|ahorro|transferencia|pago)\b(?:\s+(?:de|del|de la|en)\s+([a-zñ ]{2,30}))?/;
-const V_RESUMEN = /\b(cuanta plata (?:tengo|me queda)|cuanto (?:dinero|plata) (?:tengo|me queda)|cuanto me queda (?:de plata|en la|en el|este mes)|cuanto tengo en (?:la|el|mi)|mi saldo|mis saldos|saldo de (?:la|el|mi)|como estoy de plata|como voy (?:con la plata|con las finanzas|este mes con la plata)|cuanto (?:he |llevo )?gastad[oa]|cuanto gaste este mes)\b/;
+/** «¿En qué gasté más?», «¿en qué se me va la plata?», «¿cuánto llevo gastado en comida?», «mis gastos por categoría» */
+const V_CATEGORIAS = /\b(en que (?:gaste|gasto|he gastado|se me va|se me fue|se me esta yendo)|donde (?:gaste|se me va|se me fue)|gastos? por categoria|cuanto (?:llevo |he )?(?:gastad[oa]|gaste) en (?:comida|alimentacion|super|supermercado|transporte|micro|uber|salud|farmacia|ocio|salidas|delivery|ropa|hogar|cuentas|educacion)|cuanto (?:me )?queda (?:del|de mi) presupuesto)\b/;
+const V_EN_CAT = /\ben (comida|alimentacion|super|supermercado|transporte|micro|uber|salud|farmacia|ocio|salidas|delivery|ropa|hogar|cuentas|educacion)\b/;
+/** «¿Cuándo me pagan?», «¿cuándo llega el sueldo?», «¿cuánto falta para el sueldo?» */
+const V_PAGO = /\b(cuando (?:me )?pagan|cuando (?:me )?(?:llega|cae|depositan) (?:el |mi )?(?:sueldo|pago|la quincena)|cuanto falta para (?:el |mi )?(?:sueldo|pago|fin de mes)|que dia (?:me )?pagan|dia de pago)\b/;
+const V_RESUMEN = /\b(cuanta plata (?:tengo|me queda)|cuanto (?:dinero|plata) (?:tengo|me queda)|cuanto me queda (?:de plata|en la|en el|este mes)|cuanto tengo en (?:la|el|mi)|mi saldo|mis saldos|saldo de (?:la|el|mi)|como estoy de plata|como (?:vengo|ando|voy|estoy) (?:con la plata|de plata|con las finanzas|con mis finanzas|con mi plata)|como voy (?:con la plata|con las finanzas|este mes con la plata)|cuanto (?:he |llevo )?gastad[oa]|cuanto gaste este mes)\b/;
 
 const FILLER = /\b(eris|oye|porfa|porfis|por favor|anota|anotame|anotalo|registra|registrame|apunta|apuntame|agrega|agregame|suma|sumale|ingresa|ingresame|ingresalo|carga|cargame|un gasto de|gasto de|que|hoy|ayer|anteayer|antes de ayer|recien|recién|ya|como|aprox\w*|mas o menos)\b/g;
 const LEADING = /^(?:y|en|de|del|por|para|el|la|los|las|un|una|unos|unas|al|a|mi|me|se|le)\b\s*/;
@@ -269,6 +280,41 @@ function personaAfter(original: string, t: string, from: number): { persona?: st
   return { persona: raw.charAt(0).toUpperCase() + raw.slice(1), span: { start: m.index!, end: startPersona + words.join(" ").length } };
 }
 
+// ─── Cuadre con el banco (Eris administra, A2) ─────────────────────
+const V_CUADRE = /\b(calza\w*|cuadra\w*|cuadre|descuadr\w*)\b/;
+const V_ARREGLA = /^(?:eris[, ]+)?(?:por favor |porfa )?(arregla\w*|cuadra\w*|corrige\w*)\b/;
+const V_AJUSTA = /\b(ajusta\w*|iguala\w*)\b.*\b(banco|lo que dice)\b/;
+const V_SALDO_VERB = /\b(tiene|tengo|hay|marca|dice|esta en|quedo en|me queda\w*|saldo|es|son)\b/;
+const FINANZAS_WORD = /\b(finanzas|cuentas?|plata|banco|saldos?|lo anotado|numeros)\b/;
+
+/** La cuenta que nombra sin preposición de pago: «mi BCI», «el Santander», «en la cuenta rut», «en efectivo» */
+function cuentaNombrada(t: string, extra: string[]): string | undefined {
+  const own = extra.filter((x) => x.length >= 3).map(escapeRx).join("|");
+  const bank = own ? `${own}|${BANK}` : BANK;
+  const m = t.match(new RegExp(`\\b(?:mi|mis|el|la|del|de la|de mi|en (?:el|la|mi)|en|al)\\s+(?:cuenta (?:del?|de la)\\s+)?(efectivo|(?:${bank})(?:\\s+(?:debito|credito))?|cuenta (?:corriente|vista|rut))\\b`));
+  return m?.[1];
+}
+
+/** ¿Calza? / arregla / ajusta al banco / «mi BCI tiene 412 lucas» (antes que el resumen: «mi saldo en la BCI es…» no es una pregunta) */
+function parseCuadre(t: string, extra: string[]): FinanceOp | null {
+  const cuenta = cuentaNombrada(t, extra);
+  const pregunta = /[?¿]/.test(t);
+  if (V_CUADRE.test(t) && (FINANZAS_WORD.test(t) || cuenta)) {
+    const aplicar = V_AJUSTA.test(t) ? "ajuste" : !pregunta && V_ARREGLA.test(t) ? "mejor" : undefined;
+    return { action: "cuadre", ...(cuenta ? { cuenta } : {}), ...(aplicar ? { aplicar } : {}) };
+  }
+  if (V_AJUSTA.test(t) && cuenta) return { action: "cuadre", cuenta, aplicar: "ajuste" };
+  if (!pregunta && /^(?:eris[, ]+)?(arregla\w*)\b/.test(t) && cuenta && !findAmounts(t).length) return { action: "cuadre", cuenta, aplicar: "mejor" };
+  // «mi BCI tiene 412 lucas», «en el Santander tengo 1,2 palos», «tengo 20 lucas en efectivo», «el banco dice 412.300»
+  if (pregunta || /\bcuant/.test(t) || /\btengo que\b/.test(t) || NEG.test(t)) return null;
+  const distinct = [...new Set(findAmounts(t).map((a) => a.value))];
+  if (distinct.length !== 1 || !V_SALDO_VERB.test(t)) return null;
+  if (V_GASTO.test(t) || V_ABONO.test(t) || V_TRANSF.test(t) || V_GIRO.test(t) || V_PREST.test(t) || V_AHORRO.test(t) || V_PAGO_TC.test(t) || /\b(debo|deuda|cupo)\b/.test(t)) return null;
+  const c = cuenta ?? (/\befectivo\b/.test(t) ? "efectivo" : undefined);
+  if (!c && !/\b(el banco|mi banco|saldo)\b/.test(t)) return null;
+  return { action: "saldo_banco", monto: distinct[0], ...(c ? { cuenta: c } : {}) };
+}
+
 export interface ParseOptions { now?: Date; accountNames?: string[] }
 
 /**
@@ -283,7 +329,18 @@ export function parseFinanceMessage(message: unknown, opts: ParseOptions = {}): 
   const t = foldAligned(original);
   const extra = (opts.accountNames ?? []).flatMap((n) => fold(n).split(/\s*·\s*/)).map((x) => x.trim()).filter(Boolean);
 
-  // Consultas de saldo: se aceptan con signo de pregunta
+  // Cuadre con el banco (A2): «¿mis finanzas calzan?», «arregla mi BCI», «mi BCI tiene 412 lucas»
+  const opCuadre = parseCuadre(t, extra);
+  if (opCuadre) return opCuadre;
+
+  // Consultas de saldo: se aceptan con signo de pregunta. «¿En qué gasté más?» y «¿cuándo me pagan?» van al resumen con su
+  // foco (2026-10-23: el modelo contestaba «necesito revisar tu historial» sin llamar a nada)
+  if (V_CATEGORIAS.test(t)) {
+    const cat = t.match(V_EN_CAT);
+    const categoria = cat ? categoryFor(cat[1]) : undefined;
+    return { action: "resumen", foco: "categorias", ...(categoria ? { categoria } : {}) };
+  }
+  if (V_PAGO.test(t)) return { action: "resumen", foco: "ingreso" };
   if (V_RESUMEN.test(t)) return { action: "resumen" };
   if (/[?¿]/.test(t)) return null;
   if (NEG.test(t)) return null;

@@ -8,6 +8,7 @@
     "eris": "src/main.tsx"
   },
   "scripts": {
+    "pruebas": "bun scripts/pruebas.ts",
     "dev": "bun run src/main.tsx",
     "gui": "bun run src/server.ts",
     "start": "bun run src/main.tsx",

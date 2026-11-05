@@ -17,7 +17,7 @@ import { deriveRestrictions, medicationTypes, type Restrictions } from "./Dietar
 import { getDismissals, getOverrides } from "../tools/InsightFeedbackTool.js";
 import { localDateKey, type MedicalProfile, type UserProfile } from "../memory.js";
 import { dayEntries } from "./NutritionLog.js";
-import { computeTargets, activityLabel, type ActivityToday } from "./DailyTargets.js";
+import { computeTargets, activityLabel, actividadDeHoy, type ActivityToday } from "./DailyTargets.js";
 import { waterTotalToday, waterPace, catchUpText } from "./WaterToday.js";
 import { dayCtxFrom, normDayHour, isoDayKey, nutritionDayKey, nutritionDayOf, wakeHourFor } from "./MealSchedule.js";
 import { sleepSummaryText, sleepReading, fmtSleep, hhmmOf, sleepDayTip, sleepReadiness, lateCaffeine, type SleepEpisode, type SleepInsights } from "./SleepCore.js";
@@ -304,7 +304,9 @@ export async function gatherMetabolicContext(memory: any, opts: GatherOptions = 
   const calToday = isoDayKey(now);
   const body = await safeGet("body_profile");
   // + la actividad que el teléfono detectó con el reloj sin «modo entrenamiento» (pulso + pasos + kcal; incluye las sesiones)
-  const activity: ActivityToday | null = snapshotIsToday && snap?.activity?.day === calToday && snap.activity.minutes > 0 ? snap.activity : null;
+  // El día de la actividad: el del calendario o el de comida (1.84+: hasta que te duermes)
+  const act0: ActivityToday | null = snapshotIsToday ? actividadDeHoy<ActivityToday>(snap?.activity, snap, now) : null;
+  const activity: ActivityToday | null = act0 && act0.minutes > 0 ? act0 : null;
   const sessionMin = fromSnap<number>(typeof snap?.activeMinutes === "number" && snap.activeMinutes > 0 ? snap.activeMinutes : undefined);
   const exerciseMinutes = Math.max(sessionMin ?? 0, activity?.minutes ?? 0) || undefined;
   const forgeToday = snap?.trainedDay === calToday || (body?.date === calToday && ((body?.trainingSets ?? 0) > 0 || (body?.trainingKcal ?? 0) > 0));

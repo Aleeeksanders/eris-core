@@ -15,6 +15,7 @@ import type { MedicalProfile } from "../memory.js";
 import { byDaySpend, ghostKcal, intentPhrase, minutesToWorkout, type TrainingIntent } from "./forge/forgeTrain.js";
 import { dailyLimits, medicationTypes } from "./DietaryRestrictions.js";
 import { getNumericAdjustment } from "./MedicalKnowledgeBase.js";
+import { dayCtxFrom, nutritionDayOf, isoDayKey } from "./MealSchedule.js";
 
 /** Lo que el usuario cargó en Forge (CUERPO) + su entreno de hoy. Lo manda el teléfono (sync_body_profile). */
 export interface BodyProfile {
@@ -212,6 +213,8 @@ export function computeTargets(input: {
   intent?: TrainingIntent | null;
   /** la hora (para el fantasma: se apaga si pasó la hora y no entrenó) */
   now?: Date;
+  /** el día de COMIDA de ahora (YYYY-MM-DD): la actividad del teléfono puede venir con ese día (1.84+) */
+  foodDay?: string;
 }): DailyTargets {
   const stored = input.stored || {};
   const body = input.body || null;
@@ -227,7 +230,7 @@ export function computeTargets(input: {
   const trainingSets = today ? body?.trainingSets ?? 0 : 0;
   // Lo que gastó hoy según el reloj (básquet sin modo entrenamiento, una caminata larga…). Se toma el MAYOR entre esto y el
   // entreno de Forge, no la suma: una sesión de gimnasio anotada en Forge también la ve el reloj y se contaría dos veces.
-  const act = input.activity && input.activity.day === input.today && input.activity.minutes > 0 ? input.activity : null;
+  const act = input.activity && (input.activity.day === input.today || (input.foodDay && input.activity.day === input.foodDay)) && input.activity.minutes > 0 ? input.activity : null;
   const actKcal = act ? Math.min(2500, Math.max(0, Math.round(act.kcal))) : 0;
   const trainingKcal = Math.max(forgeKcal, actKcal);
   const fromWatch = actKcal > forgeKcal;
@@ -340,6 +343,17 @@ export function computeTargets(input: {
 }
 
 /** Día local YYYY-MM-DD (el mismo formato que usa Forge). */
+/**
+ * ¿La actividad que mandó el teléfono es de hoy? Desde la 1.84 el teléfono la cuenta en el día de COMIDA (termina al
+ * dormir; pedido del usuario, 2026-11-05): a la 1:30 sin haber dormido sigue siendo la de ayer y va con lo comido ayer.
+ * Vale el día del calendario (apps anteriores) o el día de comida de ahora.
+ */
+export function actividadDeHoy<T extends { day?: string; minutes?: number }>(activity: T | null | undefined, snap: any, now: Date = new Date()): T | null {
+  if (!activity || typeof activity.day !== "string") return null;
+  const deComida = isoDayKey(nutritionDayOf(now, dayCtxFrom(snap)));
+  return activity.day === localDay(now) || activity.day === deComida ? activity : null;
+}
+
 export const localDay = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
@@ -353,7 +367,7 @@ export async function loadTargets(memory: { get(k: string): Promise<any>; getPro
   ]);
   return computeTargets({
     stored, body, medical: profile?.medical ?? null, snapWeightKg: typeof snap?.weight === "number" ? snap.weight : undefined,
-    today: localDay(), trainsRegularly: !!routine?.md, activity: snap?.activity ?? null, autoLevel: snap?.activityLevel ?? null,
+    today: localDay(), foodDay: isoDayKey(nutritionDayOf(new Date(), dayCtxFrom(snap))), trainsRegularly: !!routine?.md, activity: snap?.activity ?? null, autoLevel: snap?.activityLevel ?? null,
     intent: intents && typeof intents === "object" ? intents[localDay()] ?? null : null,
   });
 }

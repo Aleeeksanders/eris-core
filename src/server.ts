@@ -1417,18 +1417,20 @@ async function startServer() {
                 }
               } catch {}
               try {
-                // Sueño, pulso, pasos y entreno: el día calendario
+                // Sueño, pulso y entreno: el día calendario
                 await memory.upsertDailyRollup({
                   sleepHours: merged.sleep?.durationHours,
                   sleepNightHours: typeof merged.sleep?.nightHours === "number" ? merged.sleep.nightHours : undefined,
                   restingHR: merged.heartRate?.resting,
-                  steps: merged.steps,
                   // Solo si Forge dijo que fue HOY: `trained` a secas quedaba en true para siempre y marcaba todos los días
                   trained: merged.trainedDay === isoDayKey(new Date()) || undefined,
                 });
                 // Comida y agua: el día de COMIDA (termina al dormir; services/MealSchedule.ts). A las 2 AM sin haber dormido
                 // los totales del teléfono son los de ayer y van a ayer.
                 await memory.upsertDailyRollup({
+                  // Los pasos también (pedido del usuario, 2026-11-05): desde la 1.84 el teléfono los cuenta hasta que te duermes;
+                  // en el día del calendario, los de después de medianoche caían en la fila de hoy y se pisaban al día siguiente
+                  steps: merged.steps,
                   // La cuenta única del agua (teléfono + lo del chat que el teléfono aún no contó); solo lo BEBIDO: los días
                   // anteriores del historial no tienen el agua de la comida y el análisis compara contra ellos
                   hydrationL: (await waterTotalToday(memory).catch(() => null))?.drinksL ?? merged.hydration,

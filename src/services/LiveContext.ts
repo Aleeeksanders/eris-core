@@ -13,7 +13,7 @@ import type { MemoryAdapter } from "../memory.js";
 import { formatGuidanceForLLM, getGuidance } from "./MedicalKnowledgeBase.js";
 import { getFeatures } from "./Features.js";
 import { getUserNotes, formatNotesForLLM } from "../tools/UserContextTool.js";
-import { loadTargets, localDay, GOALS, activityLabel } from "./DailyTargets.js";
+import { loadTargets, localDay, GOALS, activityLabel, actividadDeHoy } from "./DailyTargets.js";
 import { rollupFieldsOf } from "./NutritionLog.js";
 import { waterTotalToday, waterPace, paceText } from "./WaterToday.js";
 import { todayKeyOf, todayIsoOf, internalClockLine } from "./NutritionDay.js";
@@ -100,7 +100,8 @@ export async function buildTodayBrief(memory: MemoryAdapter, userMessage?: strin
       lines.push(`- Agua A ESTA HORA: ${paceText(p, targets.waterL, water)}. Habla del agua así (cómo va para la hora); lo que falta para la meta del día NO es una deuda ni algo que «reponer»: no lo presentes como urgencia.`);
     }
     // Actividad del reloj (detectada sin «modo entrenamiento»): ya suma a la meta de kcal y agua (DailyTargets)
-    const act = snapToday && snap?.activity?.day === isoDayKey(new Date()) && snap.activity.minutes >= 10 ? snap.activity : null;
+    const act0 = snapToday ? actividadDeHoy(snap?.activity, snap) : null;
+    const act = act0 && act0.minutes >= 10 ? act0 : null;
     if (act) lines.push(`- Actividad de hoy (reloj): ${activityLabel(act)}, ~${fmtN(act.kcal)} kcal${act.vigorousMin ? ` (${fmtN(act.vigorousMin)} min intensa)` : ""}. La meta de hoy ya suma ese gasto; no le pidas moverse más.`);
     const clock = internalClockLine(snap);
     if (clock) lines.push(clock);
@@ -223,7 +224,7 @@ export async function buildHealthContext(memory: MemoryAdapter): Promise<string>
     if (snap.hrv)       parts.push(`- HRV: ${snap.hrv}ms`);
     if (snap.steps)     parts.push(`- Pasos hoy: ${snap.steps.toLocaleString()}`);
     // Lo que los pasos no cuentan (pesas, básquet, bici): antes Eris solo veía pasos y pedía caminar a quien ya entrenó
-    if (snap.activity?.minutes > 0 && snap.activity.day === isoDayKey(new Date())) parts.push(`- Actividad de hoy (reloj, sin modo entrenamiento): ${activityLabel(snap.activity)}, ~${snap.activity.kcal} kcal: ya suma a su meta de calorías y agua`);
+    if (snap.activity?.minutes > 0 && actividadDeHoy(snap.activity, snap)) parts.push(`- Actividad de hoy (reloj, sin modo entrenamiento): ${activityLabel(snap.activity)}, ~${snap.activity.kcal} kcal: ya suma a su meta de calorías y agua`);
     else if (snap.activeMinutes > 0) parts.push(`- Ejercicio hoy (sesiones del reloj): ${snap.activeMinutes} min`);
     if (snap.trainedDay === isoDayKey(new Date())) parts.push(`- Entrenó hoy (Forge): no le pidas caminar ni moverse más`);
     if (snap.distance)  parts.push(`- Distancia: ${snap.distance} km`);

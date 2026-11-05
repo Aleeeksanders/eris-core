@@ -13,7 +13,9 @@
 // ============================================================
 
 export const CONTEXT_LEVELS = [8192, 10240, 12288, 16384] as const;
-const MIN_RATIO = 2.8, MAX_RATIO = 3.9;
+// Medido el 2026-11-05 en los recortes de Ollama: ~3,1 caracteres por token (español + esquemas JSON de herramientas).
+// Antes empezaba en 3,4 y podía subir a 3,9 aprendiendo de envíos YA recortados (ver observe): estimaba de menos.
+const MIN_RATIO = 2.6, MAX_RATIO = 3.6;
 
 export interface PlanInput {
   /** Caracteres de todo lo que se envía: mensajes + definiciones de herramientas. */
@@ -27,8 +29,8 @@ export interface PlanInput {
 export class ContextPlanner {
   private current = 0;
   private lastUse = 0;
-  /** caracteres por token; empieza en un valor medido (3,6 público / 3,9 con historial) y se corrige con cada respuesta */
-  private ratio = 3.4;
+  /** caracteres por token; empieza en el valor medido (3,1) y se corrige con cada respuesta que NO se recortó */
+  private ratio = 3.1;
   /**
    * Tope por memoria de video. Un contexto más grande también ocupa más VRAM: en la RTX 3050 de 6 GB, con otras apps
    * usando ~1,8 GB (fondo animado, grabador, navegadores), el modelo a 16384 (6,2 GB) no cabía y Ollama lo corría ENTERO
@@ -92,11 +94,14 @@ export class ContextPlanner {
    * (señal de que Ollama descartó parte de la conversación): en ese caso sube el nivel para el siguiente envío.
    */
   observe(chars: number, promptTokens: number, ctx: number): { truncated: boolean; next: number } {
-    if (promptTokens > 0 && chars > 3000) {
+    const lleno = promptTokens > 0 && promptTokens >= ctx - 24;
+    // Un envío recortado reporta tokens = el contexto, no los reales: aprender de él hacía creer que caben más caracteres
+    // por token y el siguiente se estimaba aún más corto (2026-11-05)
+    if (promptTokens > 0 && chars > 3000 && !lleno) {
       const measured = chars / promptTokens;
       this.ratio = Math.min(MAX_RATIO, Math.max(MIN_RATIO, this.ratio * 0.7 + measured * 0.3));
     }
-    const truncated = promptTokens > 0 && promptTokens >= ctx - 24;
+    const truncated = lleno;
     if (truncated) {
       const up = CONTEXT_LEVELS.find((l) => l > ctx);
       const cap = this.maxLevel;

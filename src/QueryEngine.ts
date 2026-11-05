@@ -17,6 +17,7 @@ import { getAuditLog, type AuditDecision } from "./services/security/AuditLog.js
 import { createMessage } from "./types/message.js";
 import { resolveMode } from "./types/config.js";
 import { plannerFor, parseKeepAlive, CONTEXT_LEVELS } from "./services/llm/ContextPlanner.js";
+import { encajar } from "./services/llm/ContextFit.js";
 import { asksToLog, claimsLogged } from "./services/FoodParse.js";
 import { TOOL_GROUP, groupsFor } from "./services/ToolRouter.js";
 import { getFeatures } from "./services/Features.js";
@@ -239,6 +240,8 @@ Reglas:
     // Herramientas guardadas hasta que otra diga que no encontró algo (al anotar comida: la búsqueda web; ver ToolRouter)
     let deferredDefs: typeof toolDefinitions = [];
     let routeReason = "";
+    // Las que eligió la INTENCIÓN del mensaje: si no cabe, no se sacan (ver services/llm/ContextFit.ts)
+    let protegidas: Set<string> = new Set();
     if (this.router) {
       const prevUsers = conversationHistory.filter((m) => m.role === "user").map((m) => m.content).slice(0, -1).slice(-3);
       const routing = this.router(rawUserMessage ?? userMessage, prevUsers, toolDefinitions.map((d) => d.name));
@@ -247,6 +250,7 @@ Reglas:
       topics = routing.groups;
       deferredDefs = toolDefinitions.filter((d) => routing.deferred?.includes(d.name));
       toolDefinitions = toolDefinitions.filter((d) => routing.tools.has(d.name));
+      if (routing.intent) protegidas = new Set(routing.tools);
       console.log(`[Router] ${routing.reason}: ${routing.groups.join("+")}${routing.intent ? ` (${routing.intent})` : ""} → ${toolDefinitions.length}/${this.toolRegistry.getAll().length} herramientas`);
     } else {
       topics = [...groupsFor(String(rawUserMessage ?? userMessage))];
@@ -560,9 +564,27 @@ ${b.text}`;
         // Una orden de anotar comida no necesita razonamiento: con él, el modelo de 4B pensó 7 minutos (en inglés, a 51 % en
         // la GPU) sobre "anota 2 porciones de carne roja…" y la persona terminó deteniéndolo sin respuesta (2026-10-11).
         const thinking = iterations > 1 || asksToLog(rawUserMessage ?? userMessage) ? false : modeConfig.enableThinking;
-        const chars = llmMessages.reduce((a, m) => a + m.content.length + (m.toolCalls ? JSON.stringify(m.toolCalls).length : 0), 0)
+        const reserve = thinking ? 2500 : 700;
+        let chars = llmMessages.reduce((a, m) => a + m.content.length + (m.toolCalls ? JSON.stringify(m.toolCalls).length : 0), 0)
           + (toolDefinitions.length > 0 ? JSON.stringify(toolDefinitions).length : 0);
-        let ctx = planner.pick({ chars, reserve: thinking ? 2500 : 700, floor: Math.max(modeConfig.contextLength, this.minContext) });
+        let ctx = planner.pick({ chars, reserve, floor: Math.max(modeConfig.contextLength, this.minContext) });
+        // Que quepa (2026-11-05): si no, Ollama corta el COMIENZO (las instrucciones y las herramientas). Se recorta acá lo
+        // viejo de la conversación, después las herramientas menos útiles y al final el resumen del día. Si ni así cabe,
+        // se pide el contexto que alcanza (más lento, pero con sus reglas).
+        {
+          const enc = encajar(llmMessages, toolDefinitions, { ctx, reserve, ratio: Math.min(planner.charsPerToken, 3.2), protegidas });
+          if (enc.quitados.mensajes || enc.quitados.sistema || enc.quitados.herramientas.length || enc.quitados.compactadas) {
+            console.log(`[Contexto] No cabía en ${ctx}: saqué ${enc.quitados.mensajes} mensajes viejos${enc.quitados.compactadas ? ", herramientas en corto" : ""}${enc.quitados.sistema ? `, ${enc.quitados.sistema} de sistema` : ""}${enc.quitados.herramientas.length ? `, herramientas ${enc.quitados.herramientas.join(",")}` : ""} (≈${enc.tokens} tokens)`);
+            llmMessages.splice(0, llmMessages.length, ...enc.msgs);
+            toolDefinitions = enc.tools;
+            chars = llmMessages.reduce((a, m) => a + m.content.length + (m.toolCalls ? JSON.stringify(m.toolCalls).length : 0), 0)
+              + (toolDefinitions.length > 0 ? JSON.stringify(toolDefinitions).length : 0);
+          }
+          if (!enc.cabe) {
+            const alcanza = CONTEXT_LEVELS.find((l) => l >= enc.tokens + reserve) ?? CONTEXT_LEVELS[CONTEXT_LEVELS.length - 1];
+            if (alcanza > ctx) { console.warn(`[Contexto] Ni recortando cabe en ${ctx} (≈${enc.tokens} tokens): se pide ${alcanza}.`); ctx = alcanza; }
+          }
+        }
         // De qué está hecho lo que se manda (ERIS_DEBUG_PROMPT=1): para achicar el prompt con datos, no a ojo
         if (process.env.ERIS_DEBUG_PROMPT === "1" && iterations === 1) {
           const sys = llmMessages.filter((m) => m.role === "system").map((m) => m.content.length);

@@ -735,6 +735,8 @@ export class FileSystemAdapter implements MemoryAdapter {
   /**
    * Rellena el historial con días anteriores que manda el teléfono (Health Connect): solo días y campos que faltan; lo que
    * ya está no se toca. Va en la misma fila que upsertDailyRollup. Devuelve cuántos días se agregaron o completaron.
+   * Excepción: 16 h o más de sueño en un día no es creíble (el 1-11 quedó con 17,68 h, dos días sumados; ver sleepDay): ese
+   * sueño se descarta y vale lo de Health Connect, si lo trae. Si no, el día queda sin sueño: mejor eso que inflar los promedios.
    */
   fillDailyRollupGaps(entries: Array<Partial<DailyRollupEntry> & { date: string }>): Promise<number> {
     const run = this.rollupQueue.then(async () => {
@@ -744,10 +746,12 @@ export class FileSystemAdapter implements MemoryAdapter {
       let changed = 0;
       for (const raw of entries) {
         if (!raw?.date || !/^\d{4}-\d{2}-\d{2}$/.test(raw.date) || raw.date >= today) continue;
-        const cur = byDate.get(raw.date);
+        const stored = byDate.get(raw.date);
+        const impossibleSleep = typeof stored?.sleepHours === 'number' && stored.sleepHours >= 16;
+        const cur = impossibleSleep ? { ...stored, sleepHours: undefined, sleepNightHours: undefined } : stored;
         const add = Object.fromEntries(Object.entries(raw).filter(([k, v]) => k !== 'date' && v !== undefined && v !== null && (cur as any)?.[k] === undefined));
-        if (!Object.keys(add).length) continue;
-        byDate.set(raw.date, { ...(cur ?? { date: raw.date }), ...add, updatedAt: cur?.updatedAt ?? new Date().toISOString() } as DailyRollupEntry);
+        if (!impossibleSleep && !Object.keys(add).length) continue;
+        byDate.set(raw.date, { ...(cur ?? { date: raw.date }), ...add, updatedAt: stored?.updatedAt ?? new Date().toISOString() } as DailyRollupEntry);
         changed++;
       }
       if (changed) await this.set('daily_rollup_log', [...byDate.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 180));

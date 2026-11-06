@@ -76,7 +76,7 @@ export async function buildTodayBrief(memory: MemoryAdapter, userMessage?: strin
     if (targets) {
       const waterGoal = targets.waterL === null ? "sin meta de agua (la define su médico)" : `agua ${fmtL(targets.waterL)}${/SGLT2|medicamento/i.test(targets.sources.water) ? " (YA incluye el +30 % por su medicamento: no le sumes nada)" : ""}`;
       const protRange = targets.proteinRange ? ` (rango ${fmtN(targets.proteinRange[0])}–${fmtN(targets.proteinRange[1])} g)` : "";
-      const goalTxt = targets.goal ? ` · objetivo en Forge: ${GOALS[targets.goal].label}` : "";
+      const goalTxt = targets.goal ? ` · objetivo en Forge: ${GOALS[targets.goal].label}${targets.goal === "recomp" ? " (= bajar grasa y ganar músculo a la vez; NO perder músculo)" : ""}` : "";
       lines.push(`- Metas de hoy: ${fmtN(targets.kcal)} kcal · proteína ${fmtN(targets.proteinG)} g${protRange}${targets.proteinIsCap ? " (TOPE, no meta)" : ""} · ${waterGoal}${goalTxt}`);
       // Solo cuando el mensaje toca el tema: cada línea suma al prompt y un registro de comida sin intención clara ya llega al
       // borde de 8192 tokens (2026-10-21: «Te faltó la carne molida» se cortó y respondió «no recibiste ningún mensaje»)

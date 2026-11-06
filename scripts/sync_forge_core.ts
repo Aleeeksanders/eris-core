@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
-export const FORGE_FILES = ["forgeLegacy.ts", "forgeCatalog.ts", "forgeCore.ts", "forgeTrain.ts", "forgeStrength.ts", "forgeRoutine.ts", "forgeProgress.ts", "forgeMdRoutine.ts", "forgeSkillsExt.ts", "forgeAthletic.ts"];
+export const FORGE_FILES = ["forgeLegacy.ts", "forgeCatalog.ts", "forgeCore.ts", "forgeTrain.ts", "forgeRecovery.ts", "forgeStrength.ts", "forgeRoutine.ts", "forgeProgress.ts", "forgeMdRoutine.ts", "forgeSkillsExt.ts", "forgeAthletic.ts"];
 export const APP_FORGE_DIR = "C:/Proyectos/eris-mobile/src/services/forge";
 export const SRV_FORGE_DIR = join(import.meta.dir, "..", "src", "services", "forge");
 
@@ -19,7 +19,7 @@ if (import.meta.main) {
   for (const f of FORGE_FILES) {
     const app = readFileSync(join(APP_FORGE_DIR, f), "utf-8");
     const imports = [...app.matchAll(/^\s*import\s[^;]*from\s+['"]([^'"]+)['"]/gm)].map((m) => m[1]);
-    const outside = imports.filter((p) => !/^\.\/forge(Legacy|Catalog|Core|Train|Strength|Routine|MdRoutine|SkillsExt|Athletic)$/.test(p));
+    const outside = imports.filter((p) => !/^\.\/forge(Legacy|Catalog|Core|Train|Recovery|Strength|Routine|MdRoutine|SkillsExt|Athletic)$/.test(p));
     if (outside.length) { console.error(`${f} importa algo fuera del núcleo (${outside.join(", ")}): ya no puede ser copia exacta.`); process.exit(1); }
     if (process.argv.includes("--revisar")) {
       let have = "";

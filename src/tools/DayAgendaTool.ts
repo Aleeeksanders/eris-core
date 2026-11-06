@@ -223,7 +223,9 @@ export class DayAgendaTool extends Tool<Input> {
       "Pídeme «¿qué como?» y te lo armo con lo de tu casa.",
     ];
     const reply = out.join("\n");
-    return { output: reply, metadata: { quickReply: reply } };
+    // Tono «brígida» (services/Brigida.ts): una línea de veredicto
+    const veredicto = orden.length ? `Te ${orden.length === 1 ? "queda 1 cosa" : `quedan ${orden.length} cosas`} hoy. A darle.` : undefined;
+    return { output: reply, metadata: { quickReply: reply, ...(veredicto ? { veredicto } : {}) } };
   }
 
   /**

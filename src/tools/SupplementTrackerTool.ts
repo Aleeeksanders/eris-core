@@ -119,7 +119,7 @@ ${reply}`, metadata: { quickReply: pure ? reply : undefined } };
         partes.push(r1.msg ?? "");
       }
       const reply = partes.filter(Boolean).join("\n");
-      return { output: `${alguno ? "HECHO" : "NO SE ANOTÓ"} (tomar ${input.sups!.length}): ${reply}`, metadata: { quickReply: quick ? reply : undefined, supplementOk: alguno } };
+      return { output: `${alguno ? "HECHO" : "NO SE ANOTÓ"} (tomar ${input.sups!.length}): ${reply}`, metadata: { quickReply: quick ? reply : undefined, supplementOk: alguno, ...(alguno ? { veredicto: "Listo, tomados. Constancia es lo que funciona." } : {}) } };
     }
     const op = { action: input.action, sup: input.sup };
     let r: SupplementResult;
@@ -147,7 +147,7 @@ ${reply}`, metadata: { quickReply: pure ? reply : undefined } };
     const dudoso = !r.ok && r.code === "no_encontrado" && input.action !== "estado";
     return {
       output: `${r.ok ? "HECHO" : "NO SE ANOTÓ"} (${input.action}): ${reply}`,
-      metadata: { quickReply: quick && !dudoso ? reply : undefined, supplementOk: r.ok && input.action !== "estado" },
+      metadata: { quickReply: quick && !dudoso ? reply : undefined, supplementOk: r.ok && input.action !== "estado", ...(r.ok && input.action === "tomar" ? { veredicto: "Listo, tomado. Constancia es lo que funciona." } : {}) },
     };
   }
 }

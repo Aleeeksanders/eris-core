@@ -31,7 +31,17 @@ export interface ForgeProjection {
   progress?: any;
   /** lo que toca hoy (forge/forgeRoutine.routineToday): el día, cada ejercicio con su objetivo y el orden desde el que toca */
   today?: { day: string; rest: boolean; dayId: string | null; name: string | null; doneSets: number; items: Array<{ name: string; text: string }>; order: string[] } | null;
+  /** los últimos días entrenados (forge/forgeRoutine.diasRecientes): «¿qué hice ayer?», «50 kilos de esta que se empuja» */
+  recent?: RecentDay[];
+  /** cómo vienen los músculos (forge/forgeRecovery.recoverySummary): «¿estoy recuperado?», «tengo agujetas» */
+  recovery?: RecoveryContext;
 }
+export interface RecoveryContext {
+  musculos: Array<{ nombre: string; state: string; hoursAgo: number; sets: number; fallo: number; habitual: boolean; range: [number, number]; soreness: string | null }>;
+  personal: string;
+  pares: number;
+}
+export interface RecentDay { day: string; label: string; items: Array<{ name: string; group: string; text: string; kg: number | null }> }
 
 export async function getIntents(memory: Mem): Promise<Record<string, TrainingIntent>> {
   const v = await memory.get(INTENT_KEY).catch(() => null);
@@ -54,6 +64,19 @@ export async function getProjection(memory: Mem): Promise<ForgeProjection | null
   return p && typeof p === "object" ? (p as ForgeProjection) : null;
 }
 
+/** Los días entrenados que manda el teléfono, acotados (14 días, 20 ejercicios, textos cortos) */
+function sanitizeRecent(xs: unknown[]): RecentDay[] {
+  const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
+  return xs.slice(0, 14).flatMap((d: any) => {
+    if (!d || typeof d !== "object" || typeof d.day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(d.day) || !Array.isArray(d.items)) return [];
+    const items = d.items.slice(0, 20).filter((x: any) => x && typeof x.name === "string").map((x: any) => ({
+      name: str(x.name, 60), group: str(x.group, 12), text: str(x.text, 140),
+      kg: typeof x.kg === "number" && Number.isFinite(x.kg) && x.kg > 0 && x.kg < 1000 ? x.kg : null,
+    }));
+    return items.length ? [{ day: d.day, label: str(d.label, 40) || d.day, items }] : [];
+  });
+}
+
 export function sanitizeProjection(raw: unknown): ForgeProjection | null {
   const r = raw as any;
   if (!r || typeof r !== "object") return null;
@@ -69,6 +92,8 @@ export function sanitizeProjection(raw: unknown): ForgeProjection | null {
     ...(r.routine && typeof r.routine === "object" && JSON.stringify(r.routine).length < 30000 ? { routine: r.routine } : {}),
     ...(r.progress && typeof r.progress === "object" && JSON.stringify(r.progress).length < 12000 ? { progress: r.progress } : {}),
     ...(r.today && typeof r.today === "object" && typeof r.today.day === "string" && JSON.stringify(r.today).length < 6000 ? { today: r.today } : {}),
+    ...(Array.isArray(r.recent) ? { recent: sanitizeRecent(r.recent) } : {}),
+    ...(r.recovery && typeof r.recovery === "object" && Array.isArray(r.recovery.musculos) && JSON.stringify(r.recovery).length < 4000 ? { recovery: r.recovery } : {}),
   };
 }
 

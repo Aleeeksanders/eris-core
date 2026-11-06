@@ -11,7 +11,8 @@ import { z } from "zod";
 import { Tool, type ToolExecutionResult } from "../Tool.js";
 import { parseFinanceMessage, parseFinanceWhatIf, accountNamesFromContext, categoryFor, findAmounts, fold, type FinanceOp } from "../services/FinanceParse.js";
 import { canFinance, requestFinanceOp } from "../services/FinanceBridge.js";
-import { formatFinanceReply, financeToolOutput, formatWhatIfReply } from "../services/FinanceReply.js";
+import { formatFinanceReply, financeToolOutput, formatWhatIfReply, veredictoFinanzas } from "../services/FinanceReply.js";
+import { veredictoSimulacion } from "../services/Brigida.js";
 import { pullFinanceBackup } from "../services/FinanceBackup.js";
 import { fromHwKeys, draft, aplicarProgramados, estado, hwResolve, simularCompra, limpiarEfectivoVacio, tablero, cuadre } from "../services/FinanceCore.js";
 import { intentsIn } from "../services/Intent.js";
@@ -169,7 +170,7 @@ export class FinanceTrackerTool extends Tool<FinanceInput> {
 
     return {
       output: financeToolOutput(op, r, reply),
-      metadata: { quickReply: quick ? reply : undefined, financeOk: r.ok },
+      metadata: { quickReply: quick ? reply : undefined, financeOk: r.ok, ...(quick ? { veredicto: veredictoFinanzas(op, r) } : {}) },
     };
   }
 
@@ -209,7 +210,7 @@ export class FinanceTrackerTool extends Tool<FinanceInput> {
     return {
       output: `SIMULACIÓN (NO se anotó nada). Usa SOLO estas cifras:
 ${reply}`,
-      metadata: { quickReply: quick ? reply : undefined, financeOk: true },
+      metadata: { quickReply: quick ? reply : undefined, financeOk: true, ...(quick ? { veredicto: veredictoSimulacion(sim.veredicto) } : {}) },
     };
   }
 }

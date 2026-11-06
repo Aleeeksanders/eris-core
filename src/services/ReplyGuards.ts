@@ -76,7 +76,8 @@ export function chileanNumbers(text: string): string {
 // ─── 2. Cifras de dinero inventadas ───────────────────────────────────────────
 
 // "$12.650", "$ 850.000", "12,650 CLP", "~10.842 pesos", "5 lucas", "$5 mil"
-const MONEY_RE = /(?:\$\s?~?\s?(\d{1,3}(?:[.,\s]\d{3})+|\d+(?:[.,]\d{1,2})?)(\s?(?:mil|lucas?|luquitas?)\b)?)|(?:~?\b(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d{1,2})?)\s?(clp|pesos|lucas?|luquitas?|mil pesos)\b)/gi;
+// «$408k», «$1,2M», «2 palos» (banco brígida 2026-11-05: el modelo abreviaba cifras reales y la guardia las borraba)
+const MONEY_RE = /(?:\$\s?~?\s?(\d{1,3}(?:[.,\s]\d{3})+|\d+(?:[.,]\d{1,2})?)(\s?(?:(?:millones?|mil|lucas?|luquitas?|palos?)\b|[km](?![\wáéíóúñÁÉÍÓÚÑ])))?)|(?:~?\b(\d{1,3}(?:[.,]\d{3})+|\d+(?:[.,]\d{1,2})?)\s?(clp|pesos|lucas?|luquitas?|mil pesos|millones de pesos|palos)\b)/gi;
 
 function toAmount(num: string, unit?: string): number | null {
   const n = num.replace(/\s/g, "");
@@ -84,8 +85,10 @@ function toAmount(num: string, unit?: string): number | null {
   if (/^\d{1,3}([.,]\d{3})+$/.test(n)) v = Number(n.replace(/[.,]/g, ""));
   else v = Number(n.replace(",", "."));
   if (!Number.isFinite(v)) return null;
-  if (unit && /mil|luca|luquita/i.test(unit) && !/mil pesos/i.test(unit) && v < 10000) v *= 1000;
+  if (unit && /mil|luca|luquita/i.test(unit) && !/mil pesos|millon/i.test(unit) && v < 10000) v *= 1000;
   if (unit && /mil pesos/i.test(unit) && v < 10000) v *= 1000;
+  if (unit && /^\s?k$/i.test(unit) && v < 10000) v *= 1000;
+  if (unit && /^\s?(m|millones?( de pesos)?|palos?)$/i.test(unit) && v < 10000) v *= 1_000_000;
   return Math.round(v);
 }
 

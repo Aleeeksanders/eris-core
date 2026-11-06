@@ -66,6 +66,8 @@ export class TrainingTodayTool extends Tool<Input> {
         + (t ? ` Tu meta de hoy queda en ${fmt(t.kcal)} kcal${t.kcalGhost ? `: incluye ~${fmt(t.kcalGhost)} del entreno, así que puedes comer para entrenar` : ""}.` : "")
         + " Si al final no entrenas, dime «al final no entreno».";
     }
-    return { output: reply, metadata: { quickReply: reply } };
+    // Tono «brígida» (services/Brigida.ts): una línea de veredicto
+    const veredicto = intent?.answer === "no" ? "Descanso anotado. Mañana se vuelve." : intent ? "Anotado. Ahora a cumplir." : undefined;
+    return { output: reply, metadata: { quickReply: reply, ...(veredicto ? { veredicto } : {}) } };
   }
 }

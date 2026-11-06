@@ -232,3 +232,46 @@ export function formatWhatIfReply(s: WhatIfReplyInput, now: Date = new Date()): 
   }
   return [titulo, veredicto, ...s.lineas.map((l) => `• ${l}`), footer].join("\n");
 }
+
+/**
+ * El veredicto de una operación de Finanzas para el tono «brígida» (2026-11-05, services/Brigida.ts): una línea, con los
+ * mismos datos de la respuesta. Nunca mueve plata ni la inventa: si no hay dato, no hay veredicto.
+ */
+export function veredictoFinanzas(op: FinanceOp, r: FinanceResult): string | undefined {
+  if (!r.ok) return undefined;
+  const d: any = r.data ?? {};
+  switch (op.action) {
+    case "gasto": {
+      if (d.cuenta && d.cuenta.tipo !== "credito" && d.cuenta.saldo < 0) return `Ojo: ${d.cuenta.nombre} quedó en rojo.`;
+      const mc = d.mesCat;
+      if (mc?.presup > 0) {
+        const pct = Math.round((mc.gastado / mc.presup) * 100);
+        if (pct >= 100) return `Te pasaste en ${String(d.catLabel ?? "esa categoría").toLowerCase()}: ${pct} % del presupuesto. Frena ahí.`;
+        if (pct >= 85) return `Ojo con ${String(d.catLabel ?? "esa categoría").toLowerCase()}: vas en ${pct} % del mes.`;
+      }
+      return "Listo, anotado.";
+    }
+    case "resumen": {
+      if (op.foco === "categorias") {
+        const top = ((d.porCat ?? []) as Array<{ nombre: string; monto: number; presup: number }>)[0];
+        if (!top || op.categoria) return undefined;
+        return top.presup > 0 && top.monto > top.presup ? `Lo que más se te va: ${top.nombre.toLowerCase()}, y ya pasaste su presupuesto.` : `Lo que más se te va: ${top.nombre.toLowerCase()}.`;
+      }
+      if (!d.conCuentas || typeof d.libre !== "number") return undefined;
+      if (d.libre < 0) return "No te alcanza para los fijos que vienen: frena los gastos.";
+      if (typeof d.porDia === "number" && d.porDia > 0) return `Te quedan ~${clp(d.porDia)} al día hasta el próximo ingreso. Aguanta.`;
+      return undefined;
+    }
+    case "abono":
+      if (d.fuente === "sueldo" || d.programado) return "Llegó la plata. Ahora no la sueltes al tiro.";
+      return undefined;
+    case "pago_tarjeta":
+      return d.deuda > 0 ? "Bien, un pago menos. Sigue bajando esa deuda." : "Tarjeta en cero. Así se hace.";
+    case "ahorro":
+      return "Bien ahí: ahorro anotado.";
+    case "deshacer":
+      return "Listo, deshecho.";
+    default:
+      return undefined;
+  }
+}

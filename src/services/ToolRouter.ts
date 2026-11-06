@@ -112,7 +112,7 @@ export interface Routing {
 // definiciones): junto al sistema el prompt pasaba los 8192 tokens del contexto, se recortaba y el 4B tardaba 30-90 s y a
 // veces llamaba otra herramienta (banco de pruebas 2026-10-16). Si el mensaje SOLO hace una cosa reconocible, el modelo ve
 // solo lo que sirve para eso (+ la búsqueda web para un plato que no esté en las bases).
-export type Intent = "registrar_comida" | "sueno" | "sintoma" | "ideas_comida" | "panorama" | "entreno_hoy" | "inventario" | "suplementos" | "analisis_dia";
+export type Intent = "registrar_comida" | "sueno" | "sintoma" | "ideas_comida" | "panorama" | "entreno_hoy" | "inventario" | "suplementos" | "analisis_dia" | "seguimiento";
 const INTENT_TOOLS: Record<Intent, string[]> = {
   registrar_comida: ["nutrition_tracker", "web_search"],
   sueno: ["sleep_log", "get_live_context"],
@@ -128,6 +128,8 @@ const INTENT_TOOLS: Record<Intent, string[]> = {
   inventario: ["inventory_tracker"],
   // «¿qué dice la evidencia de la creatina?», «me tomé el magnesio»: la ficha y «Mis suplementos» (la web, si no hay ficha)
   suplementos: ["supplement_tracker", "web_search"],
+  // Las herramientas del turno anterior (ver `seguimiento`): se arman en cada caso
+  seguimiento: [],
 };
 const SUPLE = /\b(suplement\w*|creatina|omega ?3|vitamina\w*|magnesio|zinc|hierro|b12|cafeina|electrolitos|calcio|colageno|multivitaminic\w*)\b/;
 const SUPLE_G = new RegExp(SUPLE.source, "g");
@@ -214,7 +216,30 @@ export const isGeneralAsk = (message: string) => { const t = fold(message); retu
 const BARE_CONFIRM = /^(?:(?:si|sip|dale|ya|ok|okey|oka|bueno|perfecto|listo|claro|obvio|de una|ya po|porfa\w*|por favor)[\s,.!]*)*(?:registr\w*|anot\w*|guard\w*|agreg\w*|ingres\w*|apunt\w*|hazlo|dale)[\s,.!]*(?:porfa\w*|por favor|eso|nomas|no mas|po|entonces)?[\s.!]*$/;
 export const isBareConfirm = (message: string) => { const t = fold(message).trim(); return t.length <= 40 && BARE_CONFIRM.test(t); };
 
-export function routeTools(message: string, previousUserMessages: string[], available: string[]): Routing {
+/** Lo que se sabe del turno anterior: las herramientas que respondieron (Message.trace.tools) */
+export interface RouteHint { prevTools?: string[] }
+
+/** Herramientas que no marcan un tema (no se sigue el hilo por ellas) */
+const SIN_HILO = new Set(["web_search", "insight_feedback", "personal_journal", "manage_user_context", "manage_user_profile"]);
+
+/**
+ * Seguir el hilo (2026-11-05, chat real «¿Qué tan fuerte estoy?»): después de una respuesta con datos de un módulo, la
+ * pregunta siguiente sin tema propio («¿Crees que soy fuerte?», «¿y para alguien que no entrena?», «¿eso es mucho?») se
+ * mandaba con 19 herramientas, no cabía, se recortaba justo la del tema y Eris terminó en «no tengo datos de fuerza».
+ * Ahora sigue con las herramientas del turno anterior (protegidas al recortar), si el mensaje no pide otra cosa.
+ */
+function seguimiento(message: string, groups: Set<ToolGroup>, available: string[], hint?: RouteHint): Routing | null {
+  const prev = (hint?.prevTools ?? []).filter((n) => available.includes(n) && n in TOOL_GROUP && !SIN_HILO.has(n));
+  if (!prev.length) return null;
+  const t = fold(message).trim();
+  if (t.length > 220 || isSmallTalk(message)) return null;
+  const prevGroups = new Set(prev.map((n) => TOOL_GROUP[n]));
+  if (groups.size && ![...groups].some((g) => prevGroups.has(g) || (g === "health" && prevGroups.has("health_extra")) || (g === "health_extra" && prevGroups.has("health")))) return null;
+  // Solo las del tema: con get_live_context, «¿y eso es harto?» después de la plata terminó hablando de sus kcal (banco 2026-11-05)
+  return { groups: [...prevGroups], tools: new Set(prev), reason: "conversación", intent: "seguimiento" };
+}
+
+export function routeTools(message: string, previousUserMessages: string[], available: string[], hint?: RouteHint): Routing {
   let groups = groupsFor(message);
   let reason: Routing["reason"] = "mensaje";
   if (isBareConfirm(message)) {
@@ -227,6 +252,8 @@ export function routeTools(message: string, previousUserMessages: string[], avai
     return { groups: [...groups], tools, reason: "conversación" };
   }
   const webOnly = (r: Routing["reason"]): Routing => ({ groups: ["web"], tools: new Set(available.filter((n) => TOOL_GROUP[n] === "web")), reason: r });
+  const hilo = seguimiento(message, groups, available, hint);
+  if (!groups.size && hilo) return hilo;
   // solo la búsqueda web (para datos actuales); el resto lo sabe el modelo
   if (!groups.size && (isGeneralQuestion(message) || isSmallTalk(message) || isGeneralAsk(message))) return webOnly("mensaje");
   if (groups.size) {
@@ -241,6 +268,8 @@ export function routeTools(message: string, previousUserMessages: string[], avai
       }
       if (tools.size) return { groups: [...groups, "web"], tools, reason: "mensaje", intent };
     }
+    // Un tema que no se reconoce como un pedido concreto, el mismo del turno anterior: sus herramientas, no el grupo entero
+    if (hilo) return hilo;
   }
   if (!groups.size) {
     for (const prev of [...previousUserMessages].reverse().slice(0, 2)) {

@@ -16,6 +16,8 @@ const DESCANSO = /\b(descanso|descanzo|no entreno|dias? (libres?|sin entrenar|qu
 interface Faq { q: RegExp; a: string }
 const FAQ: Record<string, Faq[]> = {
   creatina: [
+    // 2026-11-06: las revisiones narrativas dicen que «puede» acelerar la recuperación; el meta-análisis de ensayos (Northeast y Clifford 2021, 13 estudios) no halló efecto
+    { q: /\b(recuper\w*|agujetas?|adolorid\w*|dolor muscular|dano muscular)\b/, a: "Para ganar fuerza y rendir más en series cortas funciona; para recuperarte más rápido, la evidencia no es firme: un meta-análisis de 13 estudios (2021) no encontró diferencias en fuerza ni agujetas hasta 96 horas después, aunque otros trabajos más chicos sí ven algo. Tómala por lo primero, no para acortar tus descansos." },
     { q: CAFE, a: "Sí, puedes tomarla con café. Un par de estudios antiguos, con mucha cafeína durante la fase de «carga», vieron algo menos de efecto, pero otros no lo confirmaron: no hay evidencia de que el café la «elimine» ni le quite lo que hace. Lo que importa es tomarla todos los días. Si te cae pesado al estómago, sepáralas un rato." },
     { q: DESCANSO, a: "Sí, se toma todos los días, también los de descanso: funciona llenando de a poco las reservas del músculo, no como un pre-entreno de ese día. Si un día se te olvida no pasa nada: al día siguiente sigues con tu toma normal, sin duplicarla." },
     { q: HORA, a: "La hora casi no importa: lo que cuenta es tomarla todos los días. Algunos estudios ven una ventaja pequeña tomándola cerca del entreno (antes o después), y con una comida se tolera mejor." },

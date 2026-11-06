@@ -9,7 +9,7 @@ import { isGeneralAsk, groupsFor } from "../services/ToolRouter.js";
 
 const fold = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 /** Preguntas que mejoran con la web: qué conviene usar/comprar, lo mejor, precios, dónde, fechas y noticias. */
-const WEB_WORTHY = /\b(que|cual(es)?)\b[^?]{0,60}\b(debo|deberia|conviene|me recomiendas|recomiendas|sirve|usar|comprar|elegir)\b|\b(mejor(es)?|recomendad[oa]s?|recomiend\w*|precio\w*|cuesta\w*|cuanto (vale|sale)|donde (compro|comprar|venden|queda|hay)|noticia\w*|ultim[oa]s?|este ano|horario\w*|resultado\w*|quien gano)\b/;
+const WEB_WORTHY = /\b(que|cual(es)?)\b[^?]{0,60}\b(debo|deberia|conviene|me recomiendas|recomiendas|sirve|usar|comprar|elegir)\b|\b(mejor(es)?|recomendad[oa]s?|recomiend\w*|precio\w*|cuesta\w*|cuanto (vale|sale)|donde (compro|comprar|venden|queda|hay)|noticia\w*|ultim[oa]s?|este ano|horario\w*|resultado\w*|quien gano|ingredientes|que contiene|composicion)\b/; // + ingredientes de un producto (banco 2026-11-05: «Coca-Cola Zero» de memoria y mal)
 /** «Busca en internet…», «googlea…», «averigua…» */
 const EXPLICIT = /\b(busca(me|lo|la)?|buscar|googlea\w*|investiga\w*|averigua\w*)\b[^?]{0,40}\b(internet|web|google|en linea|online)\b|^(busca(me)?|googlea|averigua)\b/;
 /** «Sí porfa», «dale», «claro, gracias»: un sí sin nada más */

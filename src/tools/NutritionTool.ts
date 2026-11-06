@@ -16,7 +16,8 @@ import { UnifiedFoodService } from "../services/gluco/UnifiedFoodService.js";
 import { formatGuidanceForLLM } from "../services/MedicalKnowledgeBase.js";
 import type { MedicalProfile } from "../memory.js";
 import { parseWaterMessage } from "../services/WaterParse.js";
-import { dayCtxFrom, nutritionDayKey, MEAL_ORDER, MEAL_NAME } from "../services/MealSchedule.js";
+import { dayCtxFrom, nutritionDayKey, MEAL_ORDER, MEAL_NAME, wakeHourFrom } from "../services/MealSchedule.js";
+import { veredictoAgua, veredictoComida } from "../services/Brigida.js";
 import { todayKeyOf } from "../services/NutritionDay.js";
 import { parseFoodMessage, parseMultiMealMessage, parseDeleteMessage, parseAmountFix, addToLastMeal, MEAL_SAID, parseWhatIfMessage, mealTimingOf, pastDayOf, pastMealTimingOf, mentionedMeals, type MealType, saidGramsFor, asksToLog, unmentionedItems, otherDayOf, foodNameMatches, dayQueryOf, LAST_ENTRY } from "../services/FoodParse.js";
 import { buildWhatIf, formatWhatIf, type WhatIfFood } from "../services/WhatIfFood.js";
@@ -892,9 +893,11 @@ export class NutritionTool extends Tool<NutritionInput> {
       `Prot: ${totals.protein}g | Carbos: ${totals.carbs}g | Grasas: ${totals.fat}g`;
 
     // Cuánto lleva en el día (chat + lo anotado a mano en la app) contra su meta: antes había que preguntarlo aparte
+    let veredicto: string | undefined;
     if (memory && savedLog && !input.noProgress && !pastDay) {
       const view = await this.todayView(memory, medical, savedLog).catch(() => null);
       if (view) output += `\n${this.progressLine(view)}`;
+      if (view) veredicto = await this.veredictoDia(memory, view);
     }
 
     if (drinkNotes.length) output += `\n💧 También sumé ${drinkNotes.join(" y ")} a tu agua de hoy.`;
@@ -932,6 +935,7 @@ export class NutritionTool extends Tool<NutritionInput> {
 
     // Si el mensaje solo pedía este registro, la respuesta sale tal cual, sin otra pasada del modelo (5-10 s menos).
     const quickReply = isPure(userMessage, ["food"]) ? output : undefined;
+    if (unresolvedNames.length || riskNote) veredicto = undefined; // primero lo que no se anotó o el riesgo
 
     // La guía médica es para el MODELO (está escrita en tercera persona: "El usuario vive con diabetes…"). Antes iba dentro
     // de la respuesta rápida y el usuario la leía tal cual como "Nota:".
@@ -941,7 +945,7 @@ export class NutritionTool extends Tool<NutritionInput> {
     // Instrucción para el modelo (se quita sola si hay que mostrar el resultado tal cual): ya está guardado.
     output += "\n\n[Cómo presentarlo: la comida YA quedó guardada en el registro. Confírmalo en una frase con el total y NO preguntes si quieres registrarla o guardarla.]";
 
-    return { output, metadata: quickReply ? { quickReply } : undefined };
+    return { output, metadata: quickReply ? { quickReply, ...(veredicto ? { veredicto } : {}) } : undefined };
   }
 
   // ─── Registrar hidratación ───────────────────────────────────────────────
@@ -979,6 +983,7 @@ export class NutritionTool extends Tool<NutritionInput> {
     };
 
     let totalText = "";
+    let veredicto: string | undefined;
     if (memory) {
       try {
         const today = await todayKeyOf(memory);
@@ -989,7 +994,9 @@ export class NutritionTool extends Tool<NutritionInput> {
         await memory.set(key, nextLog);
         // El total de HOY de verdad (teléfono + chat, services/WaterToday.ts) y la meta de DailyTargets. Antes sumaba solo lo
         // anotado por chat: con 2,55 L en el día, el botón 💧 500 ml respondía "Llevas 1 L" (2026-10-09).
-        totalText = " " + waterLine(await waterToday(memory));
+        const wNow = await waterToday(memory);
+        totalText = " " + waterLine(wNow);
+        if (coef !== 0) veredicto = veredictoAgua(wNow);
         // Igual que al registrar comida: que el motor de baselines vea esto hoy sin depender de la app.
         const nutritionLog = await memory.get(`nutrition_log_${today}`).catch(() => []);
         await upsertChatRollup(memory, nutritionLog, nextLog).catch(() => {});
@@ -1017,7 +1024,7 @@ export class NutritionTool extends Tool<NutritionInput> {
 
     // El total del día (antes había que pedirlo aparte) y una respuesta lista: registrar agua no necesita al modelo.
     const quickReply = isPure(userMessage, ["water"]) ? `${msg}${totalText}${assumed ? ` ${assumed}` : ""}` : undefined;
-    return { output: msg + totalText + (assumed ? ` ${assumed}` : ""), metadata: quickReply ? { quickReply } : undefined };
+    return { output: msg + totalText + (assumed ? ` ${assumed}` : ""), metadata: quickReply ? { quickReply, ...(veredicto ? { veredicto } : {}) } : undefined };
   }
 
   // ─── El día completo y el avance ─────────────────────────────────
@@ -1069,7 +1076,15 @@ export class NutritionTool extends Tool<NutritionInput> {
       : w.totalL <= 0
         ? `💧 Hoy todavía no registras agua. Tu meta es ${w.goalL.toLocaleString("es-CL")} L${w.goalNote ? ` (${w.goalNote})` : ""}.`
         : `💧 ${waterLine(w)}`;
-    return { output: msg, metadata: isPure(userMessage, ["water"]) ? { quickReply: msg } : undefined };
+    const veredicto = veredictoAgua(w);
+    return { output: msg, metadata: isPure(userMessage, ["water"]) ? { quickReply: msg, ...(veredicto ? { veredicto } : {}) } : undefined };
+  }
+
+  /** El veredicto del día de comida (tono «brígida»: services/Brigida.ts), a la hora y con su despertar */
+  private async veredictoDia(memory: any, view: { totals: { calories: number; protein: number }; kcalGoal: number; proteinGoal: number; proteinIsCap?: boolean }): Promise<string | undefined> {
+    const now = new Date();
+    const snap = await memory?.get?.("health_snapshot_latest").catch?.(() => null);
+    try { return veredictoComida(view, now, wakeHourFrom(snap, now)); } catch { return undefined; }
   }
 
   // ─── Log del día ──────────────────────────────────────────────────
@@ -1091,7 +1106,8 @@ export class NutritionTool extends Tool<NutritionInput> {
           ? `En el chat no hay comidas anotadas hoy, pero en la app llevas ${fmt(view.phoneExtraKcal)} kcal (con esta versión de la app no veo el detalle de qué fue).`
           : `No has registrado ninguna comida hoy todavía: te quedan tus ${fmt(view.kcalGoal)} kcal del día` +
             (view.proteinIsCap ? ` (proteína: tope ${Math.round(view.proteinGoal)} g).` : ` y ${Math.round(view.proteinGoal)} g de proteína.`)) + `\n${waterTxt}`;
-        return { output: msg, metadata: isPure(userMessage, ["food", "water"]) ? { quickReply: msg } : undefined };
+        const vacio = view.phoneExtraKcal > 0 ? undefined : "Nada anotado todavía: anota lo que comiste y te digo cómo vas.";
+        return { output: msg, metadata: isPure(userMessage, ["food", "water"]) ? { quickReply: msg, ...(vacio ? { veredicto: vacio } : {}) } : undefined };
       }
 
       const MEAL_LABELS: Record<string, string> = {
@@ -1121,10 +1137,11 @@ export class NutritionTool extends Tool<NutritionInput> {
       if (view.phoneExtraKcal > 0) output += `\n\n*En la app hay ${fmt(view.phoneExtraKcal)} kcal más anotadas a mano; con esta versión de la app no veo el detalle.*`;
 
       const quickReply = isPure(userMessage, ["food", "water"]) ? output : undefined;
+      const veredicto = await this.veredictoDia(memory, view);
       const kbNote = formatGuidanceForLLM(medical, 'nutrition');
       if (kbNote) output += `\n\n[Guía médica para ti, no la copies textual: ${kbNote}]`;
 
-      return { output, metadata: quickReply ? { quickReply } : undefined };
+      return { output, metadata: quickReply ? { quickReply, ...(veredicto ? { veredicto } : {}) } : undefined };
     } catch {
       return { output: "No pude acceder al log de hoy." };
     }

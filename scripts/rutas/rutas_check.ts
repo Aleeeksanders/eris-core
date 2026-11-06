@@ -64,6 +64,24 @@ const FILAS: Fila[] = [
   { frase: "Gasté 5 lucas en almuerzo con la BCI", es: "finance_tracker", por: "Finanzas" },
   { frase: "¿Cuánta plata tengo?", noEs: "finance_tracker", texto: /Finanzas\*\* apagado/, mem: sinFinanzas, por: "A2" },
   { frase: "Anota 2 huevos al desayuno", es: "nutrition_tracker", mem: sinFinanzas, por: "A2 (lo demás sigue)" },
+  // Brígida (chat real 2026-11-05, «¿Qué tan fuerte estoy?»): fuerza y días entrenados por código
+  { frase: "¿Crees que soy fuerte?", es: "training_plan", por: "B1" },
+  { frase: "Eso es para alguien que entrena, pero tú crees que soy fuerte para alguien que no entrena, por ejemplo?", es: "training_plan", por: "B1" },
+  { frase: "Y en base a mi historial, ¿tú crees que soy más fuerte que alguien normal?", es: "training_plan", por: "B1" },
+  { frase: "Pero ojito que yo lo que puedo hacer es 50 kilos de esta huea que se empuja.", es: "training_plan", por: "B1" },
+  { frase: "Pero puedo mirar mi rutina de ayer por ejemplo, donde sí entrené y ahí se ve mi número.", es: "training_plan", por: "B2" },
+  { frase: "¿Qué entrené el domingo?", es: "training_plan", por: "B2" },
+  { frase: "peso 80 kilos", noEs: "training_plan", por: "B1 (no es una carga)" },
+  // Recuperación (2026-11-06): con evidencia y sus datos
+  { frase: "Me dice que ya estoy listo pero aún tengo agujetas del miércoles", es: "training_plan", por: "recuperación" },
+  { frase: "¿Estoy recuperado para entrenar pecho?", es: "training_plan", por: "recuperación" },
+  { frase: "¿Cuánto tardo en recuperarme?", es: "training_plan", por: "recuperación" },
+  { frase: "¿La creatina ayuda a recuperarme más rápido?", es: "supplement_tracker", por: "recuperación → ficha" },
+  { frase: "Se me recuperó la plata del banco", noEs: "training_plan", por: "recuperación (no es del cuerpo)" },
+  { frase: "Me da lata ir al gym hoy, ¿lo dejo para mañana?", es: "training_plan", por: "B4" },
+  { frase: "Me da lata cocinar", noEs: "training_plan", por: "B4 (no es el gym)" },
+  { frase: "¿Qué ingredientes tiene la Coca-Cola Zero?", es: "web_search", por: "producto de marca (banco 11-05)" },
+  { frase: "¿Qué ingredientes tiene mi almuerzo de hoy?", noEs: "web_search", por: "lo suyo no va a internet" },
 ];
 
 let mal = 0;

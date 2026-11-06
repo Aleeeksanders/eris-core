@@ -183,6 +183,8 @@ interface Caso {
 const PLATA_A_MANO = /\$\s?[0-9.]+ que tienes a mano|tu disponible/i;
 const AGUA_DEUDA = /reponer|deshidrat|prioridad[^.]{0,30}agua|vasos?[^.]{0,40}(llegar|completar|cumplir) (a |con )?(la|tu) meta/i;
 /** «Editar información nutricional» en la app: el teléfono manda tus versiones de alimentos (FoodResolve.myFoodFor). */
+/** El tono «brígida» (services/Tone.ts) con Forge sembrado (2026-11-05) */
+const brigida = async () => { ws.send(JSON.stringify({ type: "set_tone", tone: "brigida" })); await sembrarForge(); };
 /** Los módulos encendidos en Perfil, como los manda la app con «Así manejo tu…» (null = todos) */
 const modulos = (m: string[] | null) => async () => {
   ws.send(JSON.stringify({ type: "save_preference", key: "auto_prefs", value: { v: 1, modulos: m } }));
@@ -222,6 +224,20 @@ const suenoPartido = async () => {
   ws.send(JSON.stringify({ type: "update_health_snapshot", snapshot: { lastUpdated: new Date().toISOString(), dayWakeTime: d.dayWake, wakeTime: d.lastWake,
     sleep: { durationHours: d.totalH, nightHours: d.nightH, split: d.split, episodes: d.episodes, startTime: d.night!.start, endTime: d.night!.end },
     sleepInsights: ins, schedule: { usualWake: 7.75, sleepHours: 7.25 } } }));
+  await new Promise((r) => setTimeout(r, 700));
+};
+// El 1-11 del usuario: la noche de ayer (7 h 10) y hoy desde la madrugada hasta pasadas las 14:00 (10 h 31). Salía «17 h 41 en 2
+// partes». Si todavía no son las 15:30, el mismo día de ayer.
+const suenoDosDias = async () => {
+  const base = new Date(); base.setHours(0, 0, 0, 0);
+  if (Date.now() < base.getTime() + 15.5 * 3600_000) base.setDate(base.getDate() - 1);
+  const at = (h: number, m: number) => base.getTime() + (h * 60 + m) * 60_000;
+  const ses = [{ start: at(6 - 24, 40), end: at(13 - 24, 50) }, { start: at(4, 20), end: at(9, 50) }, { start: at(10, 10), end: at(15, 11) }];
+  const o = { usualWake: 8, usualSleepH: 6.25 };
+  const d = SC.sleepDay(ses, o)!;
+  ws.send(JSON.stringify({ type: "update_health_snapshot", snapshot: { lastUpdated: new Date().toISOString(), dayWakeTime: d.dayWake, wakeTime: d.lastWake,
+    sleep: { durationHours: d.totalH, nightHours: d.nightH, split: d.split, episodes: d.episodes, startTime: d.night!.start, endTime: d.night!.end },
+    sleepInsights: SC.sleepInsights(ses, { ...o, now: Date.now() }), sleepPatterns: null, sleepPlan: null, schedule: { usualWake: 8, sleepHours: 6.25 } } }));
   await new Promise((r) => setTimeout(r, 700));
 };
 // Sueño 2.0 · S3: una noche corta (02:00–07:15, 5 h 15) tras 2 semanas normales; `cafeHasta` adelanta la hora límite del café
@@ -404,6 +420,7 @@ const CASOS: Caso[] = [
   // Sueño 2.0 · S0: el sueño partido se cuenta por partes, no como «descanso suficiente»
   // (lo anotado por chat manda sobre el reloj: un caso anterior anota «dormí de 8:15 a 11:15», así que primero se borra)
   { id: "s-partido", cat: "sueño", antes: suenoPartido, turns: ["Borra el sueño que anoté de anoche", "¿Cómo dormí anoche?"], tools: ["sleep_log"], must: [/2 partes/i, /02:33/, /Partida/], mustNot: [/descanso suficiente|dormiste bien/i] },
+  { id: "s-dos-dias", cat: "sueño", antes: suenoDosDias, turns: ["Borra el sueño que anoté de anoche", "¿Cómo dormí anoche?"], tools: ["sleep_log"], must: [/10 h 31/], mustNot: [/17 h/, /2 partes/i, /segundo sueño/i] },
   { id: "s-acuesto", cat: "sueño", antes: suenoPartido, turns: ["¿A qué hora me acuesto hoy?"], tools: ["sleep_log"], must: [/acuéstate/i, /cafeína/i, /07:45/] },
   { id: "s-vengo", cat: "sueño", antes: suenoPartido, turns: ["¿Cómo vengo con el sueño?"], tools: ["sleep_log"], must: [/2 semanas/i, /más tarde cada día/i] },
   { id: "s-partido-entreno", cat: "sueño", antes: async () => { await sembrarForge(); await suenoPartido(); }, turns: ["Dormí mal, ¿igual entreno hoy?"], tools: ["training_plan"], must: [/partid/i, /reserva/i], mustNot: [/descansaste lo suficiente/i] },
@@ -455,6 +472,33 @@ const CASOS: Caso[] = [
   // Revisión V2c (A2): un módulo apagado en Perfil no se toca por chat. Van al final y el segundo lo vuelve a encender.
   { id: "v2c-fin-apagado", cat: "v2", antes: modulos(["pulso", "metricas", "nutri", "toji", "inventario"]), turns: ["¿Cuánta plata tengo?"], noTools: ["finance_tracker"], must: [/Finanzas\*\* apagado/] },
   { id: "v2c-fin-encendido", cat: "v2", antes: modulos(null), turns: ["¿Cuánta plata tengo?"], tools: ["finance_tracker"], must: [/\$\s?\d/] },
+  // ─── Brígida (2026-11-05, chat real «¿Qué tan fuerte estoy?»): el tono con el veredicto primero, la fuerza y los días
+  // entrenados por código, y que no pierda el hilo. Van al final: dejan el tono en «brígida».
+  { id: "b-soy-fuerte", cat: "brígida", antes: brigida, turns: ["¿Qué tan fuerte estoy?", "¿Crees que soy fuerte?"], tools: ["training_plan"],
+    must: [/^(Para la calle|Sí, fuerte|Más o menos|Todavía no)/, /percentil \d+/], mustNot: [/no tengo datos|\bwe[oó]n\b|\bhue[aá]\b/i] },
+  { id: "b-no-entrena", cat: "brígida", antes: brigida, turns: ["¿Qué tan fuerte estoy?", "Eso es para alguien que entrena, pero tú crees que soy fuerte para alguien que no entrena, por ejemplo?"],
+    tools: ["training_plan"], must: [/Lo más probable/, /Strength Level/], mustNot: [/5[–-]10\/100|no tengo datos/i] },
+  { id: "b-normal", cat: "brígida", antes: brigida, turns: ["¿Qué tan fuerte estoy?", "Y en base a mi historial, ¿tú crees que soy más fuerte que alguien normal?"],
+    tools: ["training_plan"], must: [/Lo más probable/], mustNot: [/no tengo datos (espec[ií]ficos )?de fuerza/i] },
+  { id: "b-kilos", cat: "brígida", antes: brigida, turns: ["Pero ojito que yo lo que puedo hacer es 70 kilos de esta huea que se empuja."], tools: ["training_plan"],
+    must: [/press de banca/i], mustNot: [/press militar/i] },
+  { id: "b-dia", cat: "brígida", antes: brigida, turns: [`¿Qué entrené el ${["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"][(now.getDay() + 5) % 7]}?`], tools: ["training_plan"],
+    must: [/press de banca/i, /\d+ series/], mustNot: [/no guard|no tengo (acceso|el historial)/i] },
+  { id: "b-ayer", cat: "brígida", antes: brigida, turns: ["Pero puedo mirar mi rutina de ayer por ejemplo, donde sí entrené y ahí se ve mi número."], tools: ["training_plan"],
+    must: [/no anotaste entreno|hiciste/i], mustNot: [/no guard|no tengo (acceso|el historial)/i] },
+  { id: "b-agua", cat: "brígida", antes: brigida, turns: ["Registra 250 ml de agua"], tools: ["nutrition_tracker"],
+    must: [/^(Vas (muy )?atrasado|Al día|Agua cumplida|Vas sobrado|Buen partido|Recién parte)/] },
+  // Recuperación (2026-11-06): con sus datos y sin el «listo» de 48 h
+  { id: "b-agujetas", cat: "brígida", antes: brigida, turns: ["Me dice que ya estoy listo pero aún tengo agujetas del miércoles"], tools: ["training_plan"],
+    must: [/^Agujetas no es lo mismo/, /proceso normal/, /primera serie/, /orina oscura/], mustNot: [/no tengo (acceso|datos)/i] },
+  { id: "b-recuperado", cat: "brígida", antes: brigida, turns: ["¿Estoy recuperado?"], tools: ["training_plan"], must: [/primera serie/, /estim/i], mustNot: [/orina oscura/] },
+  { id: "b-creatina-rec", cat: "brígida", turns: ["¿La creatina ayuda a recuperarme más rápido?"], tools: ["supplement_tracker"], must: [/meta-an[aá]lisis/i, /no es firme/] },
+  // Lo que redacta el modelo: el veredicto primero y sin perder el hilo de la plata
+  { id: "b-hilo-plata", cat: "brígida", antes: brigida, turns: ["¿Cuánta plata tengo en total?", "¿Y eso es harto o poco?"], must: [/\$\s?\d|plata/i],
+    mustNot: [/no tengo (acceso|informaci|datos)/i] },
+  { id: "b-flojo", cat: "brígida", antes: brigida, turns: ["Me da lata ir al gym hoy, ¿lo dejo para mañana?"], tools: ["training_plan"], must: [/^(No\. Ve aunque sea|Hoy no toca)/, /versión corta|descanso/i] },
+  // El modelo con el tono: una opinión sin rellenos ni «¿quieres que…?»
+  { id: "b-opina", cat: "brígida", antes: brigida, turns: ["¿Vale la pena tomar creatina?"], mustNot: [/¿Quieres que/i], blandas: true },
 ];
 
 // Controles en TODAS las respuestas

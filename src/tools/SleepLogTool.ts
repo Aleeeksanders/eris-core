@@ -11,6 +11,7 @@
 // Si da un tramo y esa noche ya tiene otra cifra, se pregunta si es aparte o si la reemplaza.
 // ============================================================
 
+import { veredictoSueno } from "../services/Brigida.js";
 import { z } from "zod";
 import { Tool, type ToolExecutionResult } from "../Tool.js";
 import { localDay } from "../services/DailyTargets.js";
@@ -196,7 +197,8 @@ export class SleepLogTool extends Tool<Input> {
     else if (sumar && antes != null) reply = `😴 Sumé ${fmtH(hours)}${tramo}: quedan ${fmtH(total)} de sueño ${when} (${fmtH(antes)} ${manual != null ? "que ya estaban anotadas" : "de tu reloj"} + ${fmtH(hours)}).`;
     else if (reloj != null && Math.abs(reloj - total) > 0.25) reply = `😴 Anoté ${fmtH(total)} de sueño ${when}${tramo}; tu reloj marcaba ${fmtH(reloj)}, uso lo que me dices.`;
     else reply = `😴 Anoté ${fmtH(total)} de sueño ${when}${tramo}. Lo uso en tu análisis, en Métricas y en tu puntaje.`;
-    return { output: reply, metadata: { quickReply: reply } };
+    const veredicto = veredictoSueno(total);
+    return { output: reply, metadata: { quickReply: reply, ...(veredicto ? { veredicto } : {}) } };
   }
 
   /**
@@ -204,7 +206,8 @@ export class SleepLogTool extends Tool<Input> {
    * noche y las 2 semanas que calcula el teléfono, sleepCore) o lo anotado. Sin datos, lo dice; no inventa.
    */
   private async report(input: Input, memory: any, log: Record<string, SleepEntry>): Promise<ToolExecutionResult> {
-    const done = (t: string) => ({ output: t, metadata: { quickReply: t } });
+    let ver: string | undefined; // el veredicto de la noche (tono «brígida»: services/Brigida.ts)
+    const done = (t: string) => ({ output: t, metadata: { quickReply: t, ...(ver ? { veredicto: ver } : {}) } });
     const snap: any = await memory.get("health_snapshot_latest").catch(() => null);
     const fresh = snap?.lastUpdated && Date.now() - Date.parse(snap.lastUpdated) < 20 * 3600_000;
     const ins = fresh ? insightsOf(snap) : null;
@@ -216,6 +219,7 @@ export class SleepLogTool extends Tool<Input> {
     }
     const out: string[] = [];
     const manual = log[localDay()];
+    if (!input.semana) ver = veredictoSueno(manual?.hours ?? (fresh && typeof snap?.sleep?.durationHours === "number" ? snap.sleep.durationHours : null));
     if (!input.semana) {
       if (manual) {
         out.push(manual.parts && manual.parts.length > 1

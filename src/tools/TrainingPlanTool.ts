@@ -13,7 +13,9 @@ import * as FC from "../services/forge/forgeCore.js";
 import * as FR from "../services/forge/forgeRoutine.js";
 import * as FM from "../services/forge/forgeMdRoutine.js";
 import * as FX from "../services/forge/forgeSkillsExt.js";
+import { loadTargets } from "../services/DailyTargets.js";
 import { getProjection, intentFor, PROJECTION_KEY } from "../services/TrainingIntent.js";
+import { RECUPERACION_ASK, respuestaRecuperacion, type RecuperacionExtras, DIA_ASK, FUERZA_OPINION, CONTRA_CALLE, parseKilos, respuestaDia, respuestaKilos, fuerzaComparada, veredictoProgreso, veredictoHoy } from "../services/EntrenoChat.js";
 import { fmtSleep, sleepReadiness, lastSleepFrom } from "../services/SleepCore.js";
 
 // ─── Vocabulario fijo de Forge (debe coincidir con MUSCLE_GROUPS en
@@ -38,8 +40,8 @@ const DEFAULT_INTENSITY = { met: 6, min: 2.5 };
 // ─── Schema ───────────────────────────────────────────────────────
 
 const TrainingPlanInputSchema = z.object({
-  action: z.enum(["get_routine", "save_routine", "get_catalog", "apply_plan", "build_routine", "adjust_routine", "get_progress", "load_md_routine", "get_today"])
-    .describe("Acción a ejecutar. build_routine = ARMAR una rutina nueva por código (preferida: usa su equipo, su fuerza y sus cuidados); adjust_routine = cambiar un ejercicio o los días/minutos/objetivo de la rutina que ya tiene; get_progress = su progreso en Forge (récords, fuerza, constancia, «tú hace 3 meses»); get_today = qué le toca hoy según su rutina (o cuándo le toca un día: dayQuery); load_md_routine = convertir SU rutina escrita (la que pegó en Forge) en el plan por días: primero muestra cómo quedaría y pregunta, y con confirm=true la carga."),
+  action: z.enum(["get_routine", "save_routine", "get_catalog", "apply_plan", "build_routine", "adjust_routine", "get_progress", "load_md_routine", "get_today", "get_day", "get_recovery"])
+    .describe("Acción a ejecutar. build_routine = ARMAR una rutina nueva por código (preferida: usa su equipo, su fuerza y sus cuidados); adjust_routine = cambiar un ejercicio o los días/minutos/objetivo de la rutina que ya tiene; get_progress = su progreso en Forge (récords, fuerza, constancia, «tú hace 3 meses»); get_today = qué le toca hoy según su rutina (o cuándo le toca un día: dayQuery); get_recovery = cómo vienen sus músculos y si tener agujetas importa («¿estoy recuperado?», «tengo agujetas»); get_day = lo que ENTRENÓ un día pasado («¿qué hice ayer?», «mi entreno del domingo»: dayQuery con el día); load_md_routine = convertir SU rutina escrita (la que pegó en Forge) en el plan por días: primero muestra cómo quedaría y pregunta, y con confirm=true la carga."),
   /** load_md_routine: el usuario ya dijo que sí (la carga a Forge) */
   confirm: z.boolean().optional().describe("load_md_routine: true solo después de que el usuario confirmó «sí, cárgala»."),
   /** interno: prefiere revisarla en la app */
@@ -47,6 +49,12 @@ const TrainingPlanInputSchema = z.object({
   dayQuery: z.string().optional().describe("get_today: el día de la rutina por el que pregunta («tirón», «pierna») para decir cuándo le toca."),
   cansancio: z.boolean().optional().describe("get_today: true si pregunta si entrenar igual porque durmió mal o está cansado."),
   lugar: z.boolean().optional().describe("get_today: true si pregunta si le conviene ir al gimnasio o entrenar en casa."),
+  flojera: z.boolean().optional().describe("get_today: true si no tiene ganas de ir a entrenar («me da lata ir al gym», «¿lo dejo para mañana?»)."),
+  comparar: z.boolean().optional().describe("get_progress: true si pregunta si es fuerte, o si es más fuerte que alguien que no entrena / el promedio."),
+  /** interno: «50 kilos de esta que se empuja» (EntrenoChat.parseKilos) */
+  kilos: z.number().optional(),
+  patron: z.string().optional(),
+  kilosDicho: z.string().optional(),
 
   days: z.number().optional().describe("build_routine/adjust_routine: días por semana (2–6). Pregúntalo si no lo dijo."),
   minutes: z.number().optional().describe("build_routine/adjust_routine: minutos por sesión (30–120). Si no lo dijo, 60."),
@@ -140,9 +148,17 @@ export class TrainingPlanTool extends Tool<TrainingPlanInput> {
     }
     // «¿Qué me toca hoy?», «¿cuándo me toca tirón?», «¿qué tan fuerte estoy en press de banca?»: con sus datos de Forge, por
     // código (2026-10-23, banco «Jarvis»: el modelo decía «pierna» un día de empuje o «no tengo tu progreso»)
-    if (PROGRESS_ASK.test(t) && !ROUTINE_EDIT.test(t)) return { action: "get_progress", viaCode: true };
+    // Chat real 2026-11-05: «mi rutina de ayer», «¿crees que soy fuerte?», «50 kilos de esta huea que se empuja» (EntrenoChat)
+    if (RECUPERACION_ASK.test(t) && !/\b(creatina|proteina|suplement\w*|magnesio|omega)\b/.test(t)) return { action: "get_recovery", viaCode: true };
+    if (DIA_ASK.test(t) && !ROUTINE_EDIT.test(t)) return { action: "get_day", dayQuery: userMessage, viaCode: true };
+    const kil = parseKilos(userMessage);
+    if (kil) return { action: "get_progress", kilos: kil.kg, ...(kil.patron ? { patron: kil.patron } : {}), kilosDicho: kil.dicho, viaCode: true };
+    if (FUERZA_OPINION.test(t) && !ROUTINE_EDIT.test(t)) return { action: "get_progress", comparar: true, viaCode: true };
+    if (PROGRESS_ASK.test(t) && !ROUTINE_EDIT.test(t)) return { action: "get_progress", ...(CONTRA_CALLE.test(t) && /\bfuert/.test(t) ? { comparar: true } : {}), viaCode: true };
     // «Dormí mal, ¿igual entreno hoy?»: según lo que durmió y lo que toca (el modelo decía «no entres al gimnasio» por 6 h)
     if (TIRED.test(t) && TRAIN_WORD.test(t) && t.length <= 160) return { action: "get_today", cansancio: true, viaCode: true };
+    // «Me da lata ir al gym, ¿lo dejo para mañana?» (banco brígida 2026-11-05: el modelo contestó «Sí, pero no por eso»)
+    if (FLOJERA.test(t) && TRAIN_WORD.test(t) && !ROUTINE_EDIT.test(t) && t.length <= 160) return { action: "get_today", flojera: true, viaCode: true };
     // «¿Me conviene ir al gym o entreno en casa?» (revisión 2026-11-04, C4): lo de hoy, y qué se puede hacer en casa
     if (PLACE_ASK.test(t) && !ROUTINE_EDIT.test(t)) return { action: "get_today", lugar: true, viaCode: true };
     if (TODAY_ASK.test(t) && !ROUTINE_EDIT.test(t) && !ROUTINE_ASK.test(t)) return { action: "get_today", viaCode: true };
@@ -184,7 +200,17 @@ export class TrainingPlanTool extends Tool<TrainingPlanInput> {
       case "adjust_routine":
         return this.handleAdjustRoutine(input, memory, wsClient, medical);
       case "get_progress":
-        return this.handleGetProgress(memory, input.viaCode ? String(context?.userMessage ?? "") : undefined);
+        return this.handleGetProgress(memory, input.viaCode ? String(context?.userMessage ?? "") : undefined, input);
+      case "get_recovery": {
+        const proj = await getProjection(memory).catch(() => null);
+        const r = respuestaRecuperacion(proj?.recovery, String(context?.userMessage ?? ""), await this.extrasRecuperacion(memory));
+        return { output: r.texto, metadata: { quickReply: r.texto, veredicto: r.veredicto } };
+      }
+      case "get_day": {
+        const proj = await getProjection(memory).catch(() => null);
+        const r = respuestaDia(String(input.dayQuery ?? context?.userMessage ?? ""), proj?.recent);
+        return { output: r.texto, metadata: { quickReply: r.texto, veredicto: r.veredicto } };
+      }
       case "load_md_routine":
         return this.handleLoadMdRoutine(input, memory, wsClient);
       case "get_today":
@@ -336,17 +362,40 @@ export class TrainingPlanTool extends Tool<TrainingPlanInput> {
     return { output };
   }
 
+  /** Sueño de las 2 últimas noches y proteína de ayer (el historial del servidor), como aviso: no cambian las horas */
+  private async extrasRecuperacion(memory: any): Promise<RecuperacionExtras> {
+    try {
+      const log: any[] = (await memory?.getDailyRollupLog?.()) ?? [];
+      const hoy = localDayOf(new Date());
+      const dias = [...log].filter((x) => x?.date).sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      const noches = dias.slice(-2).map((x) => Number(x.sleepNightHours ?? x.sleepHours)).filter((h) => h > 0 && h < 14);
+      const ayer = dias.filter((x) => String(x.date) < hoy).pop();
+      const t = await loadTargets(memory).catch(() => null);
+      return { suenoH: noches.length ? noches.reduce((a, b) => a + b, 0) / noches.length : null, proteinaAyer: ayer ? Number(ayer.protein) || null : null, proteinaMeta: t?.proteinIsCap ? null : t?.proteinG ?? null };
+    } catch { return {}; }
+  }
+
   // ─── Progreso (forge/forgeProgress.progressContext, calculado en el teléfono con sus series) ───
-  private async handleGetProgress(memory: any, quickFor?: string): Promise<ToolExecutionResult> {
+  private async handleGetProgress(memory: any, quickFor?: string, input?: TrainingPlanInput): Promise<ToolExecutionResult> {
     const proj = await getProjection(memory).catch(() => null);
     const p = proj?.progress;
+    const listo = (r: { texto: string; veredicto: string }) => ({ output: r.texto, metadata: { quickReply: r.texto, veredicto: r.veredicto } });
+    // «50 kilos de esta que se empuja»: el ejercicio de sus últimos días con esa carga
+    if (input?.kilos) {
+      const r = respuestaKilos({ kg: input.kilos, patron: input.patron ?? null, dicho: input.kilosDicho ?? `${input.kilos} kg` }, proj?.recent, p?.lifts ?? []);
+      if (r) return listo(r);
+      const q = `No encuentro un ejercicio con ~${input.kilosDicho ?? `${Math.round(input.kilos)} kg`} en tus últimos días entrenados en Forge. ¿Cuál era? Si no lo anotaste, anótalo en Forge y lo cuento.`;
+      return listo({ texto: q, veredicto: "No lo veo anotado." });
+    }
+    // «¿Crees que soy fuerte?», «¿más que alguien que no entrena?»: con sus cifras (sin inventar una escala)
+    if (input?.comparar && p) return listo(fuerzaComparada(p, CONTRA_CALLE.test(foldText(quickFor ?? ""))));
     if (!p) {
       const q = "Todavía no me llega tu progreso de Forge: se sincroniza al abrir Forge en la app con conexión. Ábrelo una vez y te lo cuento con tus cifras.";
       return quickFor !== undefined ? { output: q, metadata: { quickReply: q } } : { output: "No tengo su progreso de Forge todavía (se sincroniza al abrir la app con Forge). No inventes cifras: dile que abra Forge una vez o que mire PROGRESO › Gráficos." };
     }
     if (quickFor !== undefined) {
       const q = progressReply(p, foldText(quickFor), proj?.e1rm);
-      return { output: q, metadata: { quickReply: q } };
+      return { output: q, metadata: { quickReply: q, veredicto: veredictoProgreso(p) } };
     }
     const n = (x: number) => String(Math.round(x * 10) / 10).replace(".", ",");
     const d = (k: string) => { const [, m, dd] = String(k).split("-"); return `${dd}/${m}`; };
@@ -374,7 +423,8 @@ export class TrainingPlanTool extends Tool<TrainingPlanInput> {
 
   // ─── Lo que toca hoy / cuándo toca un día (forge/forgeRoutine.routineToday, calculado en el teléfono) ───
   private async handleGetToday(input: TrainingPlanInput, memory: any): Promise<ToolExecutionResult> {
-    const done = (q: string) => ({ output: q, metadata: { quickReply: q } });
+    let ver: string | undefined;
+    const done = (q: string) => ({ output: q, metadata: { quickReply: q, ...(ver ? { veredicto: ver } : {}) } });
     const proj = await getProjection(memory).catch(() => null);
     const r = proj?.routine;
     if (!r?.days?.length) return done("Todavía no tienes una rutina en Forge, así que no hay un día que «toque». Si quieres, te armo una con tu equipo y tus días.\n\n[Opción: Ármame una rutina]");
@@ -384,6 +434,7 @@ export class TrainingPlanTool extends Tool<TrainingPlanInput> {
     const now = new Date();
     const today = localDayOf(now);
     const td = proj?.today && proj.today.day === today ? proj.today : null;
+    if (!input.cansancio && !input.lugar && !input.dayQuery && !input.flojera) ver = veredictoHoy(td);
     const intent = await intentFor(memory, today).catch(() => null);
     const dayName = (d: any) => cleanDayName(d?.name ?? "");
     const itemsOf = (d: any): string[] => (d?.items ?? []).map((it: any) => `• ${nameOf(it.exId)}: ${FR.targetText(s, it)}${it.optional ? " (opcional)" : ""}`);
@@ -434,6 +485,25 @@ export class TrainingPlanTool extends Tool<TrainingPlanInput> {
       }
       if (hoyToca) out.push(`Hoy te toca **${hoyToca}**${td?.items?.length ? `: ${td.items.slice(0, 3).map((x: any) => x.name.replace(/\s*\([^)]*\)/g, "")).join(", ")}` : ""}.`);
       out.push("Si además te sientes enfermo (fiebre, mareo), mejor descansa. Y esta noche, a dormir un poco antes: es lo que más te va a ayudar mañana.");
+      return done(out.join("\n"));
+    }
+
+    // «Me da lata ir»: lo de hoy en versión corta (los 2 primeros ejercicios), sin culpa si de verdad está enfermo
+    if (input.flojera) {
+      const descanso = td?.rest || (!td && wk && FR.isRestDay(r, now)) || intent?.answer === "no";
+      if (descanso) {
+        ver = "Hoy no toca: descansa sin culpa.";
+        return done("Hoy tu rutina es de descanso, así que no tienes que ir. Si te sobran ganas, una caminata suave.");
+      }
+      const nombre = td?.items?.length ? cleanDayName(td.name ?? "") : null;
+      const primeros = (td?.items ?? []).slice(0, 2).map((x: any) => String(x.name).replace(/\s*\([^)]*\)/g, ""));
+      const mes = (proj as any)?.progress?.month?.sessions;
+      const out = [
+        `Hoy toca **${nombre ?? "entrenar"}**. Si te da lata, haz la versión corta: ${primeros.length ? `solo ${primeros.join(" y ")}` : "los 2 primeros ejercicios"} (~25 min) y te vas; muchas veces, una vez allá, sale el resto.`,
+        ...(typeof mes === "number" && mes < 8 ? [`Llevas ${mes} ${mes === 1 ? "entreno" : "entrenos"} en 30 días: saltarte hoy te deja más lejos de lo que quieres.`] : []),
+        "Si estás enfermo o con dolor, eso sí es motivo: descansa y vuelves mañana.",
+      ];
+      ver = "No. Ve aunque sea a la versión corta.";
       return done(out.join("\n"));
     }
 
@@ -664,6 +734,8 @@ export const NEXT_ASK = /\b(cuando|que dia)\b[^?.!]{0,40}\b(me toca|toca|es mi|s
 /** «Dormí mal», «estoy reventado», «no pude dormir» + entrenar */
 const TIRED = /\b(dormi (mal|poco|poquito|muy poco|re poco|pesimo|fatal|nada|re mal|super mal|como las weas|horrible)|no (pude )?dormi\w*|casi no dormi|estoy (muy )?(cansad\w*|reventad\w*|muert\w*|agotad\w*|sin energia|hecho bolsa)|ando (cansad\w*|sin energia)|tengo sueno|con sueno)\b/;
 const TRAIN_WORD = /\b(entren\w*|entreno|gym|gimnasio|rutina|ejercicio|pesas)\b/;
+/** Sin ganas de ir (no cansancio): «me da lata», «no tengo ganas», «¿lo dejo para mañana?», «me lo salto» */
+const FLOJERA = /\b(me da (lata|paja|flojera)|que lata|flojera|no tengo ganas|sin ganas|no me dan ganas|me cuesta ir|lo dejo (para|pa) manana|me (lo )?salto|saltarme|faltar al|no ir al)\b/;
 /** «¿Qué tan fuerte estoy?», «¿cómo voy en el gym?», «mis récords» */
 export const PROGRESS_ASK = /\b((analiza\w*|revisa\w*|evalua\w*|como va|como ha ido|como viene|resumen de|resumeme) (mi|el) (entreno|entrenamiento|progreso( en (el )?(gym|gimnasio|forge))?|rendimiento en el (gym|gimnasio))|que tan fuerte|cuan fuerte|cuanto levanto|cuanto (es )?mi (maximo|1 ?rm|rm)|mis records|mi progreso (en|de) (forge|el gym|el gimnasio|fuerza)|como voy (en el (gym|gimnasio)|con (el|mi) (entreno|entrenamiento|fuerza))|como va mi (progreso|fuerza)|he progresado|estoy progresando|estoy mas fuerte|mi score de fuerza|cuanto he subido)\b/;
 const localDayOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

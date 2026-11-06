@@ -139,7 +139,7 @@ const PEEL = new Set(["pera", "manzana", "durazno"]);
 /** Un dato útil (y cierto) para acompañar la sugerencia, en el tono de la persona. */
 function tipFor(f: CatalogFood, need: NudgeNeed, tone: Tone): string {
   const usted = tone === "usted";
-  const drink = usted ? "Acompáñelo con un vaso de agua." : "Acompáñalo con un vaso de agua.";
+  const drink = usted ? "Acompáñelo con un vaso de agua." : tone === "brigida" ? "Y un vaso de agua, sin cuento." : "Acompáñalo con un vaso de agua.";
   if (NUTS.has(f.id)) return tone === "humor" ? "Eso sí, acompáñalo con agua, que por algo se llaman frutos secos 🫰🏻" : drink;
   if (SEEDS_DRIED.has(f.id)) return drink;
   if (PEEL.has(f.id) && need !== "proteina") return `Con cáscara, que ahí va buena parte de la fibra${tone === "humor" ? " 😉" : "."}`;

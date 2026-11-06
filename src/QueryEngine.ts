@@ -27,7 +27,7 @@ import { buildTodayBrief } from "./services/LiveContext.js";
 import { isPure, intentsIn } from "./services/Intent.js";
 import { leerAutoPrefs, autoPrefsDe, modulosApagados, MODULO_HERRAMIENTAS } from "./services/AutoPrefs.js";
 import { parseInventoryMessage } from "./services/InventoryParse.js";
-import { getTone, toneInstruction } from "./services/Tone.js";
+import { getTone, toneInstruction, usaGarabatos } from "./services/Tone.js";
 import { promptForTools } from "./services/PromptSections.js";
 
 /** Cuánto dura el modelo cargado en Ollama (mismo ERIS_KEEP_ALIVE del proveedor): el planificador lo usa para saber cuándo "empezó de cero". */
@@ -45,7 +45,7 @@ const MAX_APPROVALS_PER_TURN = 6;
  * Selector de herramientas por mensaje (ver services/ToolRouter.ts). Recibe el mensaje y los mensajes previos del usuario
  * y devuelve qué herramientas ve el modelo en este turno. Las demás quedan fuera de las definiciones Y se rechazan si se llaman.
  */
-export type ToolRouterFn = (message: string, previousUserMessages: string[], available: string[]) => { tools: Set<string>; groups: string[]; reason: string; intent?: string; deferred?: string[] };
+export type ToolRouterFn = (message: string, previousUserMessages: string[], available: string[], hint?: { prevTools?: string[] }) => { tools: Set<string>; groups: string[]; reason: string; intent?: string; deferred?: string[] };
 
 /** Lo que se le muestra a la persona para que apruebe o rechace. */
 export interface ApprovalRequest {
@@ -207,7 +207,13 @@ Reglas:
 
     // El tono que eligió la persona (services/Tone.ts): se lee en cada consulta, así un cambio en Perfil se nota al tiro
     const tone = await getTone((toolContext as any)?.memory);
-    if (tone) llmMessages.push({ role: "system", content: toneInstruction(tone) });
+    if (tone) {
+      // «Brígida» (2026-11-05): garabatos solo si la persona los usó en esta conversación; ante síntomas, seria
+      const dichos = (conversationHistory ?? []).filter((m) => m.role === "user").slice(-12).map((m) => String(m.content ?? ""));
+      const ahora = String(rawUserMessage ?? userMessage ?? "");
+      const serio = detectRedFlags(ahora).length > 0 || matchSymptoms(ahora, 1).length > 0;
+      llmMessages.push({ role: "system", content: toneInstruction(tone, { garabatos: usaGarabatos([...dichos, ahora]), serio }) });
+    }
 
     // Ambos callers (server.ts, ui-readline.ts) ya incluyen el turno actual del
     // usuario como último elemento de conversationHistory (lo empujan ahí antes
@@ -244,7 +250,14 @@ Reglas:
     let protegidas: Set<string> = new Set();
     if (this.router) {
       const prevUsers = conversationHistory.filter((m) => m.role === "user").map((m) => m.content).slice(0, -1).slice(-3);
-      const routing = this.router(rawUserMessage ?? userMessage, prevUsers, toolDefinitions.map((d) => d.name));
+      // Las herramientas que respondieron el turno anterior (si fue hace poco): para seguir el hilo (ToolRouter.seguimiento)
+      const hist0 = conversationHistory ?? [];
+      let k0 = hist0.length - 1;
+      if (k0 >= 0 && hist0[k0].role === "user") k0--;
+      const prevReply = k0 >= 0 && hist0[k0].role === "assistant" ? hist0[k0] : null;
+      const fresco = prevReply && Date.now() - new Date(prevReply.timestamp as any).getTime() <= 30 * 60_000;
+      const prevTools = fresco ? [...new Set(prevReply!.trace?.tools ?? [])] : [];
+      const routing = this.router(rawUserMessage ?? userMessage, prevUsers, toolDefinitions.map((d) => d.name), { prevTools });
       routeReason = routing.reason;
       allowedTools = routing.tools;
       topics = routing.groups;
@@ -330,6 +343,8 @@ ${b.text}`;
     const untrustedCalls = new Set<string>();
     // Lo que ya hicieron las herramientas (para poder responder algo útil si el modelo no alcanza a redactar)
     const doneTools: Array<{ name: string; output: string; human?: string }> = [];
+    /** lo que dijo cada herramienta como veredicto de una línea (lo muestra el tono «brígida»: Tone.ts) */
+    const veredictos: string[] = [];
     // Herramientas del PC usadas en este turno: ahí sí puede ir una ruta en la respuesta (P1)
     let usedSystemTool = false;
     // ¿Se registró de verdad comida o agua en este turno? (para detectar un "✅ registrado" inventado por el modelo)
@@ -435,7 +450,9 @@ ${b.text}`;
     // Respuesta sin pasar por el modelo. Las herramientas deterministas (guía de síntomas, briefing, auditoría…) ya traen todo
     // calculado; la pasada del modelo solo agregaba una frase y costaba 5-15 s (a ~12-18 tokens/s). Igual se anexa el bloque completo.
     const finishQuick = (raw: string): QueryResult => {
-      const text = chileanNumbers(raw); // "Prot: 19.5g" → "Prot: 19,5 g", igual que las respuestas del modelo
+      // Tono «brígida»: el veredicto de la herramienta (metadata.veredicto) va primero, salvo ante síntomas
+      const ver = tone === "brigida" && !symptomThisTurn ? veredictos.find((v) => v.trim()) : undefined;
+      const text = chileanNumbers(ver && !raw.startsWith(ver) ? `${ver}\n\n${raw}` : raw); // "Prot: 19.5g" → "Prot: 19,5 g", igual que las respuestas del modelo
       callbacks?.onToken?.(text);
       return { message: createMessage("assistant", withBlocks(text)), modeUsed: actualMode, modelUsed: modeConfig.model, quick: true };
     };
@@ -520,6 +537,7 @@ ${b.text}`;
       const append = (res.metadata as any)?.appendToReply;
       if (append?.text && !res.error) appendBlocks.set(t.name, { text: String(append.text), marker: String(append.marker || "$^") });
       if (!res.error) doneTools.push({ name: t.name, output: res.output, human: (res.metadata as any)?.quickReply });
+      if (!res.error && typeof (res.metadata as any)?.veredicto === "string") veredictos.push((res.metadata as any).veredicto);
       // Herramienta determinista con respuesta lista: no hace falta una pasada del modelo (ver finishQuick)
       const q = (res.metadata as any)?.quickReply;
       if (!res.error && quickEnabled() && typeof q === "string" && q.trim()) return finishQuick(q.trim());
@@ -756,11 +774,15 @@ ${b.text}`;
         }
         // Cifras de dinero: solo las que están a la vista (Finanzas, herramientas, lo que dijo el usuario); el resto se quita
         // y se muestran las reales. 2026-10-07: "Saldo 12.650 · Gasto comida hoy 1.808 CLP" (eran sus kcal) no existían.
-        const grounded = llmMessages.filter((m) => m.role !== "assistant").map((m) => m.content || "");
+        // + las respuestas anteriores que armó el CÓDIGO (trace.quick): «¿y eso es harto?» después de «Tu plata: $408.000» repetía
+        // esa cifra y la guardia la borraba por no estar «a la vista» (banco brígida, 2026-11-05)
+        const grounded = llmMessages.filter((m) => m.role !== "assistant").map((m) => m.content || "")
+          .concat((conversationHistory ?? []).filter((m) => m.role === "assistant" && m.trace?.quick).slice(-4).map((m) => String(m.content ?? "")));
         const userTexts = llmMessages.filter((m) => m.role === "user").map((m) => m.content || "").concat(String(userText ?? ""));
         const money2 = groundMoney(response.content || "", grounded, userTexts);
         if (money2.removed.length) {
           console.warn(`[Guardia] Quité ${money2.removed.length} línea(s) con cifras de dinero que no salen de los datos`);
+          if (process.env.ERIS_DEBUG_GUARDS) console.warn(`[Guardia] (detalle) ${money2.removed.join(" ⏎ ").slice(0, 400)}`);
           response = { ...response, content: money2.text };
         }
         // "1,808 kcal" → "1.808 kcal", "1.3L" → "1,3 L" (el usuario lee en formato chileno)
@@ -856,6 +878,7 @@ ${b.text}`;
           duration,
         };
         if (!execResult.error) doneTools.push({ name: tc.name, output: execResult.output, human: (execResult.metadata as any)?.quickReply });
+        if (!execResult.error && typeof (execResult.metadata as any)?.veredicto === "string") veredictos.push((execResult.metadata as any).veredicto);
         if (TOOL_GROUP[tc.name] === "system") usedSystemTool = true;
         const append = (execResult.metadata as any)?.appendToReply;
         if (append?.text && !execResult.error) appendBlocks.set(tc.name, { text: String(append.text), marker: String(append.marker || "$^") });

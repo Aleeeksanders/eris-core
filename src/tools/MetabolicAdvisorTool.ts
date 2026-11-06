@@ -1,3 +1,4 @@
+import { veredictoComida } from "../services/Brigida.js";
 import { z } from "zod";
 import { Tool, type ToolExecutionResult } from "../Tool.js";
 import {
@@ -297,7 +298,10 @@ export class MetabolicAdvisorTool extends Tool<MetabolicAdvisorInput> {
           // El trato de un antojo (fase I7): lo que quedó pendiente para compensar
           const trato = await tratoDeHoy(memory, await todayIsoOf(memory, ctx.now)).catch(() => null);
           const t = panoramaRapido(ctx, analysis) + (trato ? `\n\n🤝 ${tratoLinea(trato)}` : "");
-          return { output: t, metadata: { quickReply: t } };
+          // Tono «brígida» (services/Brigida.ts): el veredicto de la comida del día, a la hora
+          const veredicto = ctx.mealsToday > 0 ? veredictoComida({ totals: { calories: ctx.eaten.kcal, protein: ctx.eaten.protein }, kcalGoal: ctx.goals.kcal,
+            proteinGoal: ctx.goals.protein ?? 0, proteinIsCap: ctx.goals.protein == null }, ctx.now) : "Nada anotado todavía: anota lo que comiste y te digo cómo vas.";
+          return { output: t, metadata: { quickReply: t, ...(veredicto ? { veredicto } : {}) } };
         }
         return { output: this.present(ctx, analysis, undefined, "Panorama de hoy") + this.offerFood(ctx) };
       }

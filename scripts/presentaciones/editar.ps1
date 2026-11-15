@@ -47,6 +47,27 @@ try {
         if ($null -ne $op.top) { $s.Top = [single]$op.top }
         if ($null -ne $op.width) { $s.Width = [single]$op.width }
         if ($null -ne $op.height) { $s.Height = [single]$op.height }
+        if ($null -ne $op.rotacion) { $s.Rotation = [single]$op.rotacion }
+      }
+      'clonar' {
+        # Copia una forma en la misma lámina, con nombre y posición nuevos
+        $s = F $op.ref $op.forma
+        $c = $s.Duplicate().Item(1)
+        $c.Name = $op.como
+        # PowerPoint copia también la animación del original: la copia parte sin ninguna
+        $seq = (L $op.ref).TimeLine.MainSequence
+        for ($i = $seq.Count; $i -ge 1; $i--) { if ($seq.Item($i).Shape.Name -eq $c.Name) { $seq.Item($i).Delete() } }
+        if ($null -ne $op.left) { $c.Left = [single]$op.left }
+        if ($null -ne $op.top) { $c.Top = [single]$op.top }
+        if ($null -ne $op.width) { $c.Width = [single]$op.width }
+        if ($null -ne $op.height) { $c.Height = [single]$op.height }
+        if ($null -ne $op.rotacion) { $c.Rotation = [single]$op.rotacion }
+        if ($null -ne $op.t) { $c.TextFrame.TextRange.Text = $op.t }
+      }
+      'tiempo' {
+        # Cambia cuándo aparece una forma que ya tiene animación
+        $seq = (L $op.ref).TimeLine.MainSequence
+        for ($i = 1; $i -le $seq.Count; $i++) { $e = $seq.Item($i); if ($e.Shape.Name -eq $op.forma) { $e.Timing.TriggerDelayTime = [single]$op.retraso } }
       }
       'alinear' {
         $s = F $op.ref $op.forma
@@ -98,6 +119,27 @@ try {
           for ($j = 0; $j -lt $op.celdas[$i].Count; $j++) { $tb.Cell($i + 1, $j + 1).Shape.TextFrame.TextRange.Text = $op.celdas[$i][$j] }
         }
         if ($op.anchos) { for ($j = 0; $j -lt $op.anchos.Count; $j++) { $tb.Columns.Item($j + 1).Width = [single]$op.anchos[$j] } }
+      }
+      'tablaFilas' {
+        # Deja la tabla con `total` filas (agrega al final copiando el formato de la última, o quita desde el final)
+        $tb = (F $op.ref $op.forma).Table
+        while ($tb.Rows.Count -lt [int]$op.total) { [void]$tb.Rows.Add() }
+        while ($tb.Rows.Count -gt [int]$op.total) { $tb.Rows.Item($tb.Rows.Count).Delete() }
+      }
+      'tablaMargen' {
+        # Aire dentro de cada celda (en puntos), para que el texto no quede pegado a los bordes
+        $tb = (F $op.ref $op.forma).Table
+        for ($i = 1; $i -le $tb.Rows.Count; $i++) { for ($j = 1; $j -le $tb.Columns.Count; $j++) {
+          $tf = $tb.Cell($i, $j).Shape.TextFrame
+          $tf.MarginLeft = [single]$op.izq; $tf.MarginRight = [single]$op.der; $tf.MarginTop = [single]$op.arr; $tf.MarginBottom = [single]$op.aba
+        } }
+      }
+      'animar' {
+        # Agrega una animación a una forma (efecto 10 = desvanecer; disparo 2 = con la anterior, 3 = después de la anterior)
+        $sl = L $op.ref; $s = F $op.ref $op.forma
+        $e = $sl.TimeLine.MainSequence.AddEffect($s, [int]$op.efecto, 0, [int]$op.disparo)
+        if ($null -ne $op.retraso) { $e.Timing.TriggerDelayTime = [single]$op.retraso }
+        if ($null -ne $op.duracion) { $e.Timing.Duration = [single]$op.duracion }
       }
       'debajo' {
         # Pone formas debajo de otra (p. ej. las viñetas bajo una tabla que creció)

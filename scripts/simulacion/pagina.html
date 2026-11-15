@@ -1,0 +1,534 @@
+<title>Simulador AXS</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;700&family=Sora:wght@500;600&display=swap">
+<style>
+/* Disposición: arriba las cuatro cifras que importan; después dos columnas, supuestos a la izquierda (a la vista al bajar) y resultados
+   a la derecha. En teléfono, una columna: primero los resultados, después los supuestos. Tokens del sistema de diseño AXS. */
+:root {
+  color-scheme: dark;
+  --vacio: #07060b; --superficie: #0e0e12; --borde: #2a2933; --tinta: #ece8e4; --tinta-suave: #b9b5b1;
+  --cian: #22d3ee; --azul: #2563eb; --banda: rgba(34, 211, 238, 0.16);
+  --bien: #4ade80; --ojo: #fbbf24; --mal: #f87171;
+  --display: Sora, Arial, sans-serif; --texto: Manrope, Arial, sans-serif; --mono: "JetBrains Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --vacio: #ffffff; --superficie: #f4f3f1; --borde: #d6d3ce; --tinta: #0b0b0f; --tinta-suave: #4a4952;
+    --cian: #0891b2; --azul: #1d4ed8; --banda: rgba(8, 145, 178, 0.15);
+    --bien: #15803d; --ojo: #b45309; --mal: #b91c1c;
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --vacio: #ffffff; --superficie: #f4f3f1; --borde: #d6d3ce; --tinta: #0b0b0f; --tinta-suave: #4a4952;
+  --cian: #0891b2; --azul: #1d4ed8; --banda: rgba(8, 145, 178, 0.15);
+  --bien: #15803d; --ojo: #b45309; --mal: #b91c1c;
+}
+* { box-sizing: border-box; }
+body { background: var(--vacio); color: var(--tinta); font-family: var(--texto); font-size: 15px; line-height: 1.5; }
+.pag { max-width: 1180px; margin: 0 auto; padding-block: 28px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 22px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+h1 { font-size: clamp(28px, 4vw, 40px); line-height: 1.1; }
+h2 { font-size: 19px; line-height: 1.25; }
+p { margin: 0; }
+a { color: var(--tinta); text-underline-offset: 3px; }
+.etiqueta { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--tinta-suave); }
+.suave { color: var(--tinta-suave); }
+.chico { font-size: 13px; line-height: 1.45; }
+.dato { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+header.cab { display: flex; flex-direction: column; gap: 8px; max-width: 70ch; }
+
+.cifras { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.cifra { background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cifra .num { font-family: var(--display); font-weight: 600; font-size: clamp(22px, 2.6vw, 30px); line-height: 1.15; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+.cuerpo { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 22px; align-items: start; }
+.supuestos { position: sticky; top: env(safe-area-inset-top, 0px); max-height: 100vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-block: 2px 12px; min-width: 0; }
+.resultados { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.bloque { background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.dos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+
+details.grupo { background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; }
+details.grupo > summary { cursor: pointer; padding: 12px 14px; font-family: var(--display); font-weight: 600; font-size: 15px; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+details.grupo > summary::-webkit-details-marker { display: none; }
+details.grupo > summary::after { content: "+"; font-family: var(--mono); color: var(--tinta-suave); }
+details.grupo[open] > summary::after { content: "−"; }
+details.grupo > .campos { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 14px; }
+.campo { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.campo .fila { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.campo label { font-size: 13.5px; font-weight: 500; }
+.campo output { font-family: var(--mono); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.campo input[type="range"] { width: 100%; accent-color: var(--cian); margin: 0; height: 24px; }
+.campo .pie { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 12px; color: var(--tinta-suave); line-height: 1.35; }
+.origen { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tinta-suave); white-space: nowrap; }
+.origen::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--tinta-suave); }
+.origen.medido::before { background: var(--bien); }
+.origen.referencia::before { background: var(--cian); }
+.origen.tuyo::before { background: var(--tinta); }
+.origen.estimado::before { background: transparent; border: 2px solid var(--ojo); }
+.check { display: flex; gap: 10px; align-items: center; font-size: 13.5px; font-weight: 500; }
+select.opc { font: inherit; font-size: 13.5px; color: var(--tinta); background: var(--vacio); border: 1px solid var(--borde); border-radius: 8px; padding: 8px 10px; width: 100%; min-width: 0; }
+select.opc:focus-visible { outline: 2px solid var(--cian); outline-offset: 1px; }
+#chat-planes td:first-child, #chat-planes th:first-child, #precios-tabla td:first-child, #precios-tabla th:first-child { text-align: left; white-space: normal; min-width: 180px; }
+.check input { width: 18px; height: 18px; accent-color: var(--cian); }
+button.plano { font: inherit; font-size: 13px; font-weight: 700; color: var(--tinta); background: transparent; border: 1px solid var(--borde); border-radius: 999px; padding: 9px 14px; cursor: pointer; align-self: flex-start; }
+button.plano:hover { border-color: var(--tinta-suave); }
+:focus-visible { outline: 2px solid var(--cian); outline-offset: 2px; }
+
+svg.graf { width: 100%; height: auto; display: block; }
+svg.graf .eje { fill: var(--tinta-suave); font-family: var(--mono); font-size: 11px; }
+svg.graf .rej { stroke: var(--borde); stroke-width: 1; }
+svg.graf .cero { stroke: var(--tinta-suave); stroke-width: 1; }
+svg.graf .franja { fill: var(--banda); }
+svg.graf .linea { fill: none; stroke: var(--cian); stroke-width: 2.2; stroke-linejoin: round; }
+svg.graf .punto { fill: var(--cian); }
+svg.graf .valor { fill: var(--tinta); font-family: var(--mono); font-size: 12px; font-weight: 500; }
+svg.graf .meta { stroke: var(--ojo); stroke-width: 1.3; stroke-dasharray: 5 4; }
+svg.graf .hito { stroke: var(--tinta-suave); stroke-width: 1; stroke-dasharray: 2 4; }
+
+.tornado { display: flex; flex-direction: column; gap: 12px; }
+.tfila { display: grid; grid-template-columns: minmax(0, 210px) minmax(0, 1fr); gap: 4px 12px; align-items: center; }
+.tfila .nombre { font-size: 13.5px; font-weight: 500; }
+.pista { position: relative; height: 14px; background: var(--vacio); border: 1px solid var(--borde); border-radius: 4px; }
+.pista .barra { position: absolute; top: 2px; bottom: 2px; background: var(--cian); border-radius: 2px; min-width: 2px; }
+.pista .base { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--tinta); }
+.tfila .extremos { grid-column: 2; display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--tinta-suave); }
+
+.reparto { display: flex; height: 28px; border-radius: 6px; overflow: hidden; border: 1px solid var(--borde); }
+.reparto span { display: block; height: 100%; }
+.reparto .r-iva { background: var(--tinta-suave); }
+.reparto .r-com { background: var(--azul); }
+.reparto .r-queda { background: var(--cian); }
+.leyenda { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }
+.leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+.tabla { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 6px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--borde); font-variant-numeric: tabular-nums; }
+th { font-family: var(--texto); font-weight: 700; color: var(--tinta-suave); font-size: 12px; }
+th:first-child, td:first-child { text-align: left; }
+td { font-family: var(--mono); }
+tr.hito td { border-bottom-color: var(--tinta-suave); }
+.neg { color: var(--mal); }
+details.mas > summary { cursor: pointer; font-family: var(--display); font-weight: 600; font-size: 16px; }
+details.mas > *:not(summary) { margin-top: 12px; }
+ul.fuentes { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; }
+.aviso { border-left: 0; background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; padding: 14px 16px; font-size: 14px; }
+.aviso strong { font-weight: 700; }
+
+@media (max-width: 900px) {
+  .cifras { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cuerpo { grid-template-columns: minmax(0, 1fr); }
+  .supuestos { position: static; max-height: none; order: 2; }
+  .dos { grid-template-columns: minmax(0, 1fr); }
+  .tfila { grid-template-columns: minmax(0, 1fr); }
+  .tfila .extremos { grid-column: 1; }
+}
+@media (max-width: 420px) { .cifras { grid-template-columns: minmax(0, 1fr); } }
+</style>
+
+<div class="pag">
+  <header class="cab">
+    <span class="etiqueta">AXS · Negocio</span>
+    <h1>Simulador AXS</h1>
+    <p class="suave">Cuánta plata entra, cuánta sale y cuánto queda para sueldos, mes a mes. Mueve los supuestos y todo se recalcula. La línea es tu caso base; la franja, donde cae el resultado en 8 de cada 10 corridas cuando lo incierto se mueve dentro de su rango. Los rangos tienen más espacio hacia arriba que hacia abajo, así que la línea suele ir por la parte baja de la franja.</p>
+  </header>
+
+  <section class="cifras" aria-live="polite">
+    <div class="cifra"><span class="etiqueta">Hay que poner</span><span class="num" id="t-poner">—</span><span class="chico suave" id="t-poner-s"></span></div>
+    <div class="cifra"><span class="etiqueta">Se paga sola</span><span class="num" id="t-sola">—</span><span class="chico suave" id="t-sola-s"></span></div>
+    <div class="cifra"><span class="etiqueta" id="t-subs-e">Suscriptores</span><span class="num" id="t-subs">—</span><span class="chico suave" id="t-subs-s"></span></div>
+    <div class="cifra"><span class="etiqueta" id="t-queda-e">Para sueldos</span><span class="num" id="t-queda">—</span><span class="chico suave" id="t-queda-s"></span></div>
+  </section>
+
+  <div class="cuerpo">
+    <aside class="supuestos" aria-label="Supuestos">
+      <div class="leyenda chico suave">
+        <span class="origen medido">Medido</span><span class="origen referencia">Referencia</span><span class="origen tuyo">Tuyo</span><span class="origen estimado">Estimado</span>
+      </div>
+      <div id="controles"></div>
+      <button class="plano" id="volver" type="button">Volver a los valores base</button>
+    </aside>
+
+    <main class="resultados">
+      <section class="bloque">
+        <h2>Caja de la empresa</h2>
+        <p class="chico suave">Lo acumulado: todo lo que entró menos todo lo que salió, equipos e impuestos incluidos.</p>
+        <svg class="graf" id="g-caja" viewBox="0 0 680 250" role="img" aria-label="Caja acumulada mes a mes"></svg>
+      </section>
+
+      <div class="dos">
+        <section class="bloque">
+          <h2>Suscriptores</h2>
+          <svg class="graf" id="g-subs" viewBox="0 0 680 300" role="img" aria-label="Suscriptores mes a mes"></svg>
+        </section>
+        <section class="bloque">
+          <h2>Queda para sueldos, al mes</h2>
+          <svg class="graf" id="g-queda" viewBox="0 0 680 300" role="img" aria-label="Lo que queda para sueldos cada mes"></svg>
+          <p class="chico suave" id="queda-nota"></p>
+        </section>
+      </div>
+
+      <section class="bloque">
+        <h2>Qué mueve más el resultado</h2>
+        <p class="chico suave" id="tornado-nota"></p>
+        <div class="tornado" id="tornado"></div>
+      </section>
+
+      <div class="dos">
+        <section class="bloque">
+          <h2 id="reparto-t">De cada suscripción</h2>
+          <div class="reparto" id="reparto" role="img" aria-label="Reparto del precio"></div>
+          <div class="leyenda" id="reparto-l"></div>
+          <div class="tabla"><table id="planes"></table></div>
+          <p class="chico suave" id="escala"></p>
+        </section>
+        <section class="bloque">
+          <h2>Lo que aguanta un PC</h2>
+          <p id="pc-cuenta"></p>
+          <p class="chico suave" id="pc-nota"></p>
+          <h2 style="margin-top:8px">Un sueldo</h2>
+          <p id="sueldo-cuenta"></p>
+          <h2 style="margin-top:8px">Publicidad</h2>
+          <p id="pub-cuenta"></p>
+        </section>
+      </div>
+
+      <section class="bloque" id="precios">
+        <h2>¿Qué precio?</h2>
+        <p class="chico suave" id="precios-nota"></p>
+        <div class="tabla"><table id="precios-tabla"></table></div>
+        <p id="precios-cuenta"></p>
+      </section>
+
+      <section class="bloque" id="chat-gratis">
+        <h2>¿El chat, gratis?</h2>
+        <p class="chico suave" id="chat-nota"></p>
+        <div class="tabla"><table id="chat-planes"></table></div>
+        <p id="chat-cuenta"></p>
+        <p class="chico suave" id="chat-tope"></p>
+      </section>
+
+      <section class="aviso" id="pendientes">
+        <strong>Lo que este simulador todavía no sabe.</strong> Cuánta gente instala y cuánta paga son rangos de otras apps, no datos de Eris: la beta los reemplaza. Los segundos por respuesta se miden al mudar Eris al PC de 12 GB. La puesta en marcha (marca, textos legales, ley de datos personales) hay que cotizarla. La segunda etapa, con condiciones médicas, no está en esta simulación.
+      </section>
+
+      <details class="mas bloque">
+        <summary>Mes a mes, con los valores base</summary>
+        <div class="tabla"><table id="meses"></table></div>
+      </details>
+
+      <details class="mas bloque">
+        <summary>De dónde sale cada cifra</summary>
+        <ul class="fuentes">
+          <li><strong>Uso del chat (medido).</strong> Tus conversaciones del 3 de septiembre al 7 de noviembre de 2026: 235 mensajes, 3,0 al día en los últimos 30 días; 43 de 62 respuestas con traza pasaron por el modelo; la hora más cargada concentra el 13 % del día. En el notebook, cada respuesta del modelo tardó 48 s (mediana) y cada llamada a Ollama, 14 s (1.210 llamadas).</li>
+          <li><strong>Quiénes pagan.</strong> <a href="https://www.revenuecat.com/state-of-subscription-apps" target="_blank" rel="noopener">RevenueCat, State of Subscription Apps 2026</a>: de instalación a pago en 35 días, 1,5 % de mediana en apps de Latinoamérica y 2,1 % en apps con versión gratis. Para salud y deporte, 2,9 % (cifra del informe citada por <a href="https://sahha.ai/blog/health-app-monetization-first-month/" target="_blank" rel="noopener">Sahha</a>).</li>
+          <li><strong>Quiénes renuevan.</strong> <a href="https://www.revenuecat.com/blog/growth/average-subscription-renewal-rates-by-app-category" target="_blank" rel="noopener">RevenueCat, renovaciones por categoría 2026</a>, salud y deporte: primera renovación mensual 57 % (46–68 %), primera anual 25 % (16–37 %). Las renovaciones siguientes son una estimación.</li>
+          <li><strong>Plan anual.</strong> En salud y deporte, el 68 % elige el anual (RevenueCat 2026, todo el mundo). Aquí la base es 25 %, a propósito cauta: el anual de Eris ahorra 16 % frente a pagar doce meses, y en otros mercados suele ahorrar más. El 68 % queda como el extremo alto del rango. Pesa mucho: una persona en el anual deja cerca de $46.400 en su vida y una en el mensual, cerca de $13.700, porque el mensual se abandona antes.</li>
+          <li><strong>IVA.</strong> <a href="https://support.google.com/googleplay/android-developer/answer/138000?hl=es-419" target="_blank" rel="noopener">Ayuda de Play Console</a>: quien reside en Chile cobra y entera el IVA de sus ventas en Google Play, y la comisión se calcula sobre el precio sin IVA.</li>
+          <li><strong>Comisión.</strong> Google Play cobra 15 % en suscripciones. Cobrando directo, Mercado Pago ronda 3,49 % + IVA y Flow 2,95 % + IVA.</li>
+          <li><strong>Publicidad.</strong> Costo por instalación en Latinoamérica entre US$ 0,34 y US$ 2,00, según blogs de proveedores (<a href="https://mapendo.co/blog/cost-per-install-by-country-2025" target="_blank" rel="noopener">Mapendo</a>, <a href="https://www.businessofapps.com/ads/cpi/research/cost-per-install/" target="_blank" rel="noopener">Business of Apps</a>). No hay cifra de Chile.</li>
+          <li><strong>Equipo y luz.</strong> Plan de compra del servidor (bóveda AXS, octubre de 2026): PC con RTX 3060 de 12 GB, ~$850.000; encendido, 36 a 43 kWh al mes a ~$236 el kWh.</li>
+          <li><strong>Impuesto a la utilidad.</strong> Régimen Pro Pyme: 12,5 % en 2025–2027 y 15 % en 2028 (<a href="https://www.sii.cl/normativa_legislacion/circulares/2025/circu53.pdf" target="_blank" rel="noopener">SII, Circular 53</a>). Desde 2029 las fuentes no coinciden entre 23 % y 25 %; aquí se usa 25 %.</li>
+          <li><strong>Contador.</strong> Entre $70.000 y $150.000 al mes para una pyme chica (<a href="https://www.lofwork.cl/?p=38271" target="_blank" rel="noopener">Lofwork</a>, <a href="https://www.2x3.cl/p/precios-contabilidad-empresas" target="_blank" rel="noopener">2x3</a>).</li>
+          <li><strong>Sueldos.</strong> Se supone que un sueldo líquido le cuesta a la empresa 1,31 veces ese monto. Es una aproximación: hay que afinarla con un contador.</li>
+        </ul>
+      </details>
+    </main>
+  </div>
+</div>
+
+<script src="modelo.js"></script>
+<script>
+(function () {
+  'use strict';
+  var S = window.SimAXS;
+  var $ = function (id) { return document.getElementById(id); };
+  var nf = new Intl.NumberFormat('es-CL', { maximumFractionDigits: 0 });
+  var dec = function (x, d) { return x.toLocaleString('es-CL', { minimumFractionDigits: d, maximumFractionDigits: d }); };
+  var clp = function (n) { return (n < 0 ? '−' : '') + '$' + nf.format(Math.abs(Math.round(n))); };
+  var corto = function (n) {
+    var a = Math.abs(n), s = n < 0 ? '−' : '';
+    if (a >= 1e9) return s + '$' + dec(a / 1e6, 0) + ' M';
+    if (a >= 1e6) return s + '$' + dec(a / 1e6, a >= 1e8 ? 0 : 1) + ' M';
+    if (a >= 1e4) return s + '$' + nf.format(Math.round(a / 1e3)) + ' mil';
+    return s + '$' + nf.format(Math.round(a));
+  };
+  var pct = function (x, d) { return dec(x * 100, d || 0) + ' %'; };
+  var FORMATO = {
+    num: function (v) { return nf.format(v); }, pct: function (v) { return pct(v, 0); }, pct1: function (v) { return pct(v, 1); },
+    clp: clp, usd: function (v) { return 'US$ ' + dec(v, 2); }, dec1: function (v) { return dec(v, 1); }, seg: function (v) { return dec(v, 0) + ' s'; },
+    mes: function (v) { return 'mes ' + (v + 1); }, mesOpc: function (v) { return v < 0 ? 'no se pagan' : 'mes ' + (v + 1); },
+    opc: function (v) { return String(v); },
+  };
+  var GRUPOS = [
+    { t: 'Gente que llega', abierto: true, c: [
+      { k: 'instalacionesMes0', l: 'Instalaciones el primer mes', f: 'num', min: 0, max: 5000, step: 50, o: 'estimado', n: 'Nadie lo sabe todavía: lo dirá el lanzamiento.' },
+      { k: 'crecimientoMensual', l: 'Crecen cada mes', f: 'pct1', min: 0, max: 0.2, step: 0.005, o: 'estimado' },
+      { k: 'conversion', l: 'De los que instalan, pagan', f: 'pct1', min: 0.002, max: 0.1, step: 0.001, o: 'referencia', n: '2,1 % en apps con versión gratis; 1,5 % en Latinoamérica; 2,9 % en salud y deporte.' },
+      { k: 'marketingMensual', l: 'Publicidad al mes', f: 'clp', min: 0, max: 3000000, step: 50000, o: 'tuyo' },
+      { k: 'costoPorInstalacionUSD', l: 'Cada instalación con publicidad', f: 'usd', min: 0.2, max: 3, step: 0.05, o: 'referencia' },
+    ] },
+    { t: 'Planes y renovación', c: [
+      { k: 'mixModulo', l: 'Eligen un módulo suelto', f: 'pct', min: 0, max: 0.6, step: 0.01, o: 'estimado' },
+      { k: 'mixAnual', l: 'Eligen el plan anual', f: 'pct', min: 0, max: 0.8, step: 0.01, o: 'estimado' },
+      { k: 'renovPrimera', l: 'Renuevan el segundo mes', f: 'pct', min: 0.2, max: 0.95, step: 0.01, o: 'referencia' },
+      { k: 'renovSiguientes', l: 'Renuevan los meses siguientes', f: 'pct', min: 0.5, max: 0.98, step: 0.01, o: 'estimado' },
+      { k: 'renovAnual', l: 'Renuevan el plan anual', f: 'pct', min: 0.05, max: 0.8, step: 0.01, o: 'referencia' },
+    ] },
+    { t: 'Precios y cobro', c: [
+      { k: 'precioModulo', l: 'Un módulo, al mes', f: 'clp', min: 490, max: 4990, step: 100, o: 'tuyo' },
+      { k: 'precioCompleto', l: 'Eris completo, al mes', f: 'clp', min: 990, max: 9990, step: 100, o: 'tuyo' },
+      { k: 'precioAnual', l: 'Eris completo, al año', f: 'clp', min: 9990, max: 99990, step: 1000, o: 'tuyo' },
+      { k: 'elasticidad', l: 'Cuánto baja la conversión si sube el precio', f: 'dec1', min: 0, max: 2, step: 0.1, o: 'estimado', n: '1 = baja en proporción al precio; 0 = el precio no la mueve. La conversión de arriba se supone a $4.990.' },
+      { k: 'comision', l: 'Comisión de cobro', f: 'pct1', min: 0, max: 0.3, step: 0.005, o: 'referencia', n: 'Google Play: 15 %. Cobrando directo: cerca de 4 %.' },
+      { k: 'mesCobro', l: 'Empieza a cobrar', f: 'mes', min: 0, max: 18, step: 1, o: 'tuyo', n: 'Antes de eso, la beta es gratis.' },
+    ] },
+    { t: 'Uso del chat', c: [
+      { k: 'mensajesDia', l: 'Mensajes al día por persona', f: 'dec1', min: 0.5, max: 12, step: 0.1, o: 'medido' },
+      { k: 'fraccionModelo', l: 'Respuestas que pasan por el modelo', f: 'pct', min: 0.1, max: 1, step: 0.01, o: 'medido' },
+      { k: 'segundosModelo', l: 'Segundos del PC por respuesta', f: 'seg', min: 3, max: 60, step: 1, o: 'estimado', n: 'En el notebook son 48 s. En el PC de 12 GB hay que medirlo.' },
+    ] },
+    { t: 'El chat para quien no paga', c: [
+      { k: 'planChat', l: 'Qué del chat es gratis', f: 'opc', op: [['libre', 'Todo el chat'], ['tope', 'Todo el chat, con tope contra el abuso'], ['codigo', 'Solo lo que responde el código']], o: 'tuyo', n: 'Gratis: el chat, la comida, el agua, el sueño, el plan del día, la salud y el Botiquín (2026-11-14). Forge, Finanzas e Inventario son módulos de pago. Anotar, el agua, el sueño y la guía de síntomas los responde el código y no ocupan el PC.' },
+      { k: 'topeModeloDia', l: 'Tope de consultas a la IA al día', f: 'num', min: 1, max: 60, step: 1, o: 'tuyo', n: 'Solo contra el abuso: el promedio medido es cerca de 2 al día.' },
+      { k: 'usoPrueba', l: 'De los que instalan, usan el chat el primer mes', f: 'pct', min: 0, max: 1, step: 0.05, o: 'estimado' },
+      { k: 'activosMes1', l: 'Siguen usando la app al mes', f: 'pct1', min: 0.01, max: 0.3, step: 0.005, o: 'referencia', n: 'Salud y deporte: 3,4 % en Android a 8,5 %, según la fuente.' },
+      { k: 'quedanCadaMes', l: 'De esos, siguen cada mes siguiente', f: 'pct', min: 0.3, max: 0.98, step: 0.01, o: 'estimado' },
+      { k: 'usoGratis', l: 'Cuánto usa el modelo quien no paga', f: 'pct', min: 0.1, max: 2, step: 0.05, o: 'estimado', n: 'Frente a lo medido en tu uso (100 % = igual que tú).' },
+    ] },
+    { t: 'Equipo propio', c: [
+      { k: 'costoServidor', l: 'Precio de cada PC', f: 'clp', min: 500000, max: 2500000, step: 10000, o: 'referencia' },
+      { k: 'respaldo', l: 'Un PC de repuesto desde los 50 que pagan', f: 'bool', o: 'tuyo' },
+      { k: 'precioKwh', l: 'La luz, por kWh', f: 'clp', min: 120, max: 400, step: 2, o: 'referencia' },
+      { k: 'internetMensual', l: 'Internet para el servidor, al mes', f: 'clp', min: 0, max: 100000, step: 1000, o: 'estimado' },
+    ] },
+    { t: 'Empresa y sueldos', c: [
+      { k: 'contadorMensual', l: 'Contador, al mes', f: 'clp', min: 0, max: 300000, step: 5000, o: 'referencia' },
+      { k: 'otrosFijos', l: 'Dominio, túnel y herramientas, al mes', f: 'clp', min: 0, max: 300000, step: 5000, o: 'estimado' },
+      { k: 'puestaEnMarcha', l: 'Puesta en marcha, una vez', f: 'clp', min: 0, max: 5000000, step: 50000, o: 'estimado', n: 'Marca, textos legales y cuenta de Google Play. Hay que cotizarlo.' },
+      { k: 'sueldoLiquido', l: 'Sueldo líquido de referencia', f: 'clp', min: 300000, max: 3000000, step: 10000, o: 'tuyo' },
+      { k: 'personas', l: 'Personas con sueldo', f: 'num', min: 1, max: 6, step: 1, o: 'tuyo' },
+      { k: 'mesSueldo', l: 'Pagar sueldos desde', f: 'mesOpc', min: -1, max: 59, step: 1, o: 'tuyo', n: 'Hoy no hay sueldos. Si los pagas, salen de la caja.' },
+      { k: 'cajaInicial', l: 'Plata con que parte la empresa', f: 'clp', min: 0, max: 30000000, step: 100000, o: 'tuyo' },
+      { k: 'meses', l: 'Meses a simular', f: 'num', min: 12, max: 60, step: 12, o: 'tuyo' },
+    ] },
+  ];
+  var CAMPO = {};
+  GRUPOS.forEach(function (g) { g.c.forEach(function (c) { CAMPO[c.k] = c; }); });
+  var ORIGEN = { medido: 'Medido', referencia: 'Referencia', tuyo: 'Tuyo', estimado: 'Estimado' };
+  var CLAVE = 'simulador-axs-v2';
+
+  var P = S.unir({});
+  try { var g0 = JSON.parse(localStorage.getItem(CLAVE) || 'null'); if (g0 && typeof g0 === 'object') for (var k0 in g0) if (k0 in CAMPO && typeof g0[k0] === typeof S.BASE[k0]) P[k0] = g0[k0]; } catch (e) {}
+  function guardar() { try { var d = {}; for (var k in CAMPO) if (P[k] !== S.BASE[k]) d[k] = P[k]; localStorage.setItem(CLAVE, JSON.stringify(d)); } catch (e) {} }
+
+  function fmt(k, v) { return FORMATO[CAMPO[k] ? CAMPO[k].f : 'num'](v); }
+  function el(tag, attrs, hijos) {
+    var e = document.createElement(tag);
+    for (var a in (attrs || {})) { if (a === 'text') e.textContent = attrs[a]; else e.setAttribute(a, attrs[a]); }
+    (hijos || []).forEach(function (h) { e.appendChild(h); });
+    return e;
+  }
+
+  // ─── Los supuestos ───
+  function pintarControles() {
+    var cont = $('controles');
+    cont.textContent = '';
+    cont.style.display = 'flex'; cont.style.flexDirection = 'column'; cont.style.gap = '10px';
+    GRUPOS.forEach(function (g) {
+      var campos = el('div', { class: 'campos' });
+      g.c.forEach(function (c) {
+        var id = 'c-' + c.k, pie = el('div', { class: 'pie' }, [el('span', { class: 'origen ' + c.o, text: ORIGEN[c.o] })]);
+        if (c.f === 'bool') {
+          var chk = el('input', { type: 'checkbox', id: id });
+          chk.checked = !!P[c.k];
+          chk.addEventListener('change', function () { P[c.k] = chk.checked; cambio(); });
+          campos.appendChild(el('div', { class: 'campo' }, [el('label', { class: 'check', for: id }, [chk, el('span', { text: c.l })]), pie]));
+          return;
+        }
+        if (c.f === 'opc') {
+          var sel = el('select', { id: id, class: 'opc' });
+          c.op.forEach(function (o) { var op = el('option', { value: o[0], text: o[1] }); if (P[c.k] === o[0]) op.selected = true; sel.appendChild(op); });
+          sel.addEventListener('change', function () { P[c.k] = sel.value; cambio(); });
+          if (c.n) pie.appendChild(el('span', { text: c.n }));
+          campos.appendChild(el('div', { class: 'campo' }, [el('label', { for: id, text: c.l }), sel, pie]));
+          return;
+        }
+        var out = el('output', { for: id, id: 'o-' + c.k, text: fmt(c.k, P[c.k]) });
+        var rango = el('span', { id: 'r-' + c.k });
+        var inp = el('input', { type: 'range', id: id, min: c.min, max: c.max, step: c.step, value: P[c.k] });
+        inp.addEventListener('input', function () { P[c.k] = Number(inp.value); out.textContent = fmt(c.k, P[c.k]); cambio(); });
+        pie.appendChild(rango);
+        if (c.n) pie.appendChild(el('span', { text: c.n }));
+        campos.appendChild(el('div', { class: 'campo' }, [el('div', { class: 'fila' }, [el('label', { for: id, text: c.l }), out]), inp, pie]));
+      });
+      var d = el('details', { class: 'grupo' }, [el('summary', { text: g.t }), campos]);
+      if (g.abierto) d.setAttribute('open', '');
+      cont.appendChild(d);
+    });
+  }
+  function pintarRangos() {
+    Object.keys(S.RANGOS).forEach(function (k) {
+      var r = S.rangoDe(P, k), e = $('r-' + k);
+      if (e && r) e.textContent = 'Se prueba entre ' + fmt(k, r[0]) + ' y ' + fmt(k, r[1]) + '.';
+    });
+  }
+
+  // ─── Gráficos ───
+  function pasos(min, max, n) {
+    var span = max - min || 1, bruto = span / n, mag = Math.pow(10, Math.floor(Math.log10(bruto))), r = bruto / mag;
+    var paso = (r >= 5 ? 10 : r >= 2 ? 5 : r >= 1 ? 2 : 1) * mag, out = [];
+    for (var v = Math.ceil(min / paso) * paso; v <= max + paso * 1e-6; v += paso) out.push(Math.abs(v) < paso * 1e-6 ? 0 : v);
+    return out;
+  }
+  function svg(tag, attrs, texto) {
+    var e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (var a in attrs) e.setAttribute(a, attrs[a]);
+    if (texto != null) e.textContent = texto;
+    return e;
+  }
+  function franja(id, base, banda, o) {
+    var g = $(id), vb = g.viewBox.baseVal, W = vb.width, H = vb.height, m = { l: 66, r: 16, t: 22, b: 26 }, n = base.length;
+    g.textContent = '';
+    var todos = banda.p10.concat(banda.p90, base, o.meta != null ? [o.meta] : [], [0]);
+    var lo = Math.min.apply(null, todos), hi = Math.max.apply(null, todos);
+    if (hi === lo) hi = lo + 1;
+    var pad = (hi - lo) * 0.06; hi += pad; if (lo < 0) lo -= pad;
+    var x = function (i) { return m.l + (n === 1 ? 0 : (i / (n - 1)) * (W - m.l - m.r)); };
+    var y = function (v) { return H - m.b - ((v - lo) / (hi - lo)) * (H - m.t - m.b); };
+    pasos(lo, hi, 4).forEach(function (v) {
+      g.appendChild(svg('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), class: v === 0 ? 'cero' : 'rej' }));
+      g.appendChild(svg('text', { x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end', class: 'eje' }, o.fmt(v)));
+    });
+    var marcas = [1]; for (var k = 12; k <= n; k += 12) marcas.push(k);
+    marcas.forEach(function (mes) { g.appendChild(svg('text', { x: x(mes - 1), y: H - 6, 'text-anchor': mes === 1 ? 'start' : 'middle', class: 'eje' }, mes === 1 ? 'mes 1' : String(mes))); });
+    if (o.hito != null && o.hito > 0 && o.hito < n) {
+      g.appendChild(svg('line', { x1: x(o.hito), x2: x(o.hito), y1: m.t, y2: H - m.b, class: 'hito' }));
+      g.appendChild(svg('text', { x: x(o.hito) + 5, y: m.t + 2, class: 'eje' }, 'empieza a cobrar'));
+    }
+    var d = '';
+    for (var i = 0; i < n; i++) d += (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(banda.p90[i]).toFixed(1);
+    for (var j = n - 1; j >= 0; j--) d += 'L' + x(j).toFixed(1) + ' ' + y(banda.p10[j]).toFixed(1);
+    g.appendChild(svg('path', { d: d + 'Z', class: 'franja' }));
+    if (o.meta != null) {
+      g.appendChild(svg('line', { x1: m.l, x2: W - m.r, y1: y(o.meta), y2: y(o.meta), class: 'meta' }));
+      g.appendChild(svg('text', { x: m.l + 6, y: y(o.meta) - 5, class: 'eje' }, o.metaTexto));
+    }
+    var l = '';
+    for (var q = 0; q < n; q++) l += (q ? 'L' : 'M') + x(q).toFixed(1) + ' ' + y(base[q]).toFixed(1);
+    g.appendChild(svg('path', { d: l, class: 'linea' }));
+    g.appendChild(svg('circle', { cx: x(n - 1), cy: y(base[n - 1]), r: 4.5, class: 'punto' }));
+    var yv = y(base[n - 1]) - 9;
+    g.appendChild(svg('text', { x: W - m.r, y: yv < m.t ? y(base[n - 1]) + 18 : yv, 'text-anchor': 'end', class: 'valor' }, o.fmt(base[n - 1])));
+  }
+
+  // ─── Resultados ───
+  function pintar() {
+    var sim = S.simular(P), mc = S.monteCarlo(P, 600, 7), sens = S.sensibilidad(P), n = sim.filas.length, R = sim.resumen;
+    var objetivo = S.costoSueldos(P), col = function (c) { return sim.filas.map(function (f) { return f[c]; }); };
+
+    $('t-poner').textContent = R.hayQuePoner > 0 ? corto(R.hayQuePoner) : 'Nada';
+    $('t-poner-s').textContent = 'Lo más hondo que baja la caja. Entre ' + corto(mc.hayQuePoner.p10) + ' y ' + corto(mc.hayQuePoner.p90) + ' en 8 de cada 10 corridas.';
+    $('t-sola').textContent = R.sePagaSola ? 'Mes ' + R.sePagaSola : 'No en ' + n + ' meses';
+    $('t-sola-s').textContent = (P.mesSueldo >= 0 ? 'Cubre operación y sueldos tres meses seguidos. ' : 'Cubre su operación tres meses seguidos, sin sueldos. ') + 'Antes del mes 24 en ' + pct(mc.sePagaSola.antesDe24) + ' de las corridas.';
+    $('t-subs-e').textContent = 'Suscriptores · mes ' + n;
+    $('t-subs').textContent = nf.format(R.suscriptoresFinal);
+    $('t-subs-s').textContent = 'Entre ' + nf.format(mc.bandas.suscriptores.p10[n - 1]) + ' y ' + nf.format(mc.bandas.suscriptores.p90[n - 1]) + ' en 8 de cada 10 corridas; la mitad termina sobre ' + nf.format(mc.bandas.suscriptores.p50[n - 1]) + '.';
+    $('t-queda-e').textContent = 'Para sueldos · mes ' + n;
+    $('t-queda').textContent = corto(R.quedaFinal);
+    var h = mc.hitos[n], gente = P.personas === 1 ? '1 sueldo' : P.personas + ' sueldos';
+    $('t-queda-s').textContent = 'Al mes, entre ' + corto(mc.quedaFinal.p10) + ' y ' + corto(mc.quedaFinal.p90) + '; la mitad de las corridas, sobre ' + corto(mc.quedaFinal.p50) + '.' + (h && h.alcanzaSueldos != null ? ' Alcanza para ' + gente + ' en ' + pct(h.alcanzaSueldos) + ' de las corridas.' : '');
+
+    franja('g-caja', col('caja'), mc.bandas.caja, { fmt: corto, hito: P.mesCobro });
+    franja('g-subs', col('suscriptores'), mc.bandas.suscriptores, { fmt: function (v) { return nf.format(v); }, hito: P.mesCobro });
+    franja('g-queda', col('quedaParaSueldos'), mc.bandas.quedaParaSueldos, { fmt: corto, meta: objetivo, metaTexto: gente + ' de ' + corto(P.sueldoLiquido) + ' líquidos' });
+    $('queda-nota').textContent = 'Lo que entra menos la operación (luz, internet, contador, publicidad), antes de sueldos y de comprar equipos. La línea punteada es lo que le cuestan a la empresa ' + gente + ': ' + corto(objetivo) + ' al mes.';
+
+    // Qué mueve más
+    var filas = sens.filas.filter(function (f) { return f.efecto > Math.max(1, Math.abs(sens.base) * 0.01); }).slice(0, 8);
+    var vals = [sens.base]; filas.forEach(function (f) { vals.push(f.conBajo, f.conAlto); });
+    var dmin = Math.min.apply(null, vals), dmax = Math.max.apply(null, vals), ancho = dmax - dmin || 1;
+    var t = $('tornado'); t.textContent = '';
+    $('tornado-nota').textContent = 'Cada supuesto llevado a su valor bajo y a su valor alto, con el resto en la base. Se mide lo que queda para sueldos al mes ' + n + ' (base: ' + corto(sens.base) + '). La marca vertical es la base.';
+    filas.forEach(function (f) {
+      var a = Math.min(f.conBajo, f.conAlto), b = Math.max(f.conBajo, f.conAlto);
+      var barra = el('div', { class: 'barra', style: 'left:' + (((a - dmin) / ancho) * 100).toFixed(2) + '%;width:' + (((b - a) / ancho) * 100).toFixed(2) + '%' });
+      var base = el('div', { class: 'base', style: 'left:' + (((sens.base - dmin) / ancho) * 100).toFixed(2) + '%' });
+      t.appendChild(el('div', { class: 'tfila' }, [
+        el('div', { class: 'nombre', text: f.nombre }), el('div', { class: 'pista' }, [barra, base]),
+        el('div', { class: 'extremos' }, [el('span', { text: 'con ' + fmt(f.clave, f.bajo) + ': ' + corto(f.conBajo) }), el('span', { text: 'con ' + fmt(f.clave, f.alto) + ': ' + corto(f.conAlto) })]),
+      ]));
+    });
+
+    // De cada suscripción
+    var c = S.porSuscripcion(P, P.precioCompleto);
+    $('reparto-t').textContent = 'De cada suscripción de ' + clp(P.precioCompleto);
+    var rp = $('reparto'); rp.textContent = '';
+    [['r-queda', c.queda], ['r-com', c.comision], ['r-iva', c.iva]].forEach(function (x) { rp.appendChild(el('span', { class: x[0], style: 'width:' + ((x[1] / c.precio) * 100).toFixed(2) + '%' })); });
+    var ley = $('reparto-l'); ley.textContent = '';
+    [['var(--cian)', 'Te queda ' + clp(c.queda)], ['var(--azul)', 'Comisión ' + clp(c.comision)], ['var(--tinta-suave)', 'IVA ' + clp(c.iva)]].forEach(function (x) {
+      var s = el('span', {}, [el('i', { style: 'background:' + x[0] }), document.createTextNode(x[1])]); ley.appendChild(s);
+    });
+    var tp = $('planes'); tp.textContent = '';
+    tp.appendChild(el('tr', {}, ['Plan', 'Precio', 'IVA', 'Comisión', 'Te queda'].map(function (x) { return el('th', { text: x }); })));
+    [['Un módulo', P.precioModulo], ['Eris completo, mensual', P.precioCompleto], ['Eris completo, anual', P.precioAnual]].forEach(function (x) {
+      var r = S.porSuscripcion(P, x[1]);
+      tp.appendChild(el('tr', {}, [x[0], clp(r.precio), clp(r.iva), clp(r.comision), clp(r.queda)].map(function (v) { return el('td', { text: v }); })));
+    });
+    $('escala').textContent = 'Con 10.000 suscriptores de Eris completo mensual llegan ' + corto(10000 * c.queda) + ' al mes, no ' + corto(10000 * P.precioCompleto) + ': la lámina de escenarios de la presentación no descuenta IVA ni comisión.';
+
+    // PC, sueldo y publicidad
+    var seg = P.mensajesDia * P.fraccionModelo * P.segundosModelo * P.horaPunta;
+    $('pc-cuenta').textContent = 'Cerca de ' + nf.format(R.capacidad) + ' personas por PC. Cada una ocupa ' + dec(seg, 1) + ' s del PC en la hora más cargada (' + dec(P.mensajesDia, 1) + ' mensajes × ' + pct(P.fraccionModelo) + ' por el modelo × ' + dec(P.segundosModelo, 0) + ' s × ' + pct(P.horaPunta) + ' del día), y el PC se usa hasta la mitad para que nadie haga fila.';
+    $('pc-nota').textContent = 'Al mes ' + n + ' hacen falta ' + sim.filas[n - 1].servidores + ' PC' + (P.respaldo ? ', contando el de repuesto' : '') + (R.costoServir != null ? '. Atender a cada suscriptor cuesta cerca de ' + clp(R.costoServir) + ' al mes entre equipo, luz e internet.' : '.');
+    var fijos = P.contadorMensual + P.otrosFijos + P.internetMensual;
+    $('sueldo-cuenta').textContent = gente.charAt(0).toUpperCase() + gente.slice(1) + ' de ' + clp(P.sueldoLiquido) + ' líquidos le cuesta' + (P.personas === 1 ? '' : 'n') + ' a la empresa cerca de ' + clp(objetivo) + ' al mes. Para pagarlo' + (P.personas === 1 ? '' : 's') + ' junto con los costos fijos hacen falta unos ' + nf.format(S.suscriptoresParaCubrir(P, objetivo + fijos)) + ' suscriptores.';
+    var v = S.valorPorPersona(P), d = S.duracion(P);
+    $('pub-cuenta').textContent = 'Cada persona que paga deja cerca de ' + clp(v.deja) + ' en total (un plan mensual dura ' + dec(d.mesesMensual, 1) + ' meses en promedio). Traerla con publicidad costaría cerca de ' + clp(v.traerla) + '. ' + (v.deja >= v.traerla ? 'Con estas cifras, la publicidad se paga.' : 'Con estas cifras, la publicidad no se paga sola.');
+
+    // ¿Qué precio? Las opciones comparadas, con todo lo demás igual
+    var ops = S.compararPrecios(P), eB = ops[0].porElasticidad[0].elasticidad, eA = ops[0].porElasticidad[2].elasticidad;
+    $('precios-nota').textContent = 'Cada opción con todo lo demás igual. Cuánta gente elige el anual depende de cuánto ahorra (estimado, hasta el 68 % de salud y deporte) y cuánta gente paga, del precio mensual. «Todo gratis y Eris+» supone que paga un cuarto menos de gente, porque vende comodidad y no herramientas (estimado). Al mes ' + n + '; las dos últimas columnas, si la conversión mira poco (' + dec(eB, 1) + ') o mucho (' + dec(eA, 1) + ') el precio.';
+    var tpz = $('precios-tabla'); tpz.textContent = '';
+    tpz.appendChild(el('tr', {}, ['Opción', 'Ahorra el anual', 'Eligen anual', 'Pagan', 'Deja cada persona', 'Deja por instalación', 'Se paga sola', 'Para sueldos', 'Si mira poco el precio', 'Si mira mucho'].map(function (x) { return el('th', { text: x }); })));
+    ops.forEach(function (o) {
+      var fila = [o.nombre, pct(o.ahorro), pct(o.mixAnual), pct(o.conversion, 1), clp(o.deja), clp(o.porInstalacion), o.sePagaSola ? 'mes ' + o.sePagaSola : 'no', corto(o.quedaFinal), corto(o.porElasticidad[0].quedaFinal), corto(o.porElasticidad[2].quedaFinal)];
+      tpz.appendChild(el('tr', o.precioCompleto === P.precioCompleto && o.precioAnual === P.precioAnual && o.mixModulo === P.mixModulo && o.precioModulo === P.precioModulo && !o.factorConversion ? { class: 'hito' } : {}, fila.map(function (x) { return el('td', { text: x }); })));
+    });
+    var uno = function (id) { return ops.filter(function (o) { return o.id === id; })[0]; };
+    var prop = uno('propuesta'), ant = uno('antes'), plus = uno('erisplus');
+    $('precios-cuenta').textContent = 'Con el núcleo gratis, cada módulo a $1.990 y Eris completo a $4.990 al mes o $34.990 al año (' + clp(34990 / 12) + ' al mes), cada instalación deja ' + clp(prop.porInstalacion) + ', contra ' + clp(plus.porInstalacion) + ' con todo gratis y Eris+, y ' + clp(ant.porInstalacion) + ' con los precios de antes. Si la gente mira muchísimo el precio, lo más barato deja más; si lo mira poco, $5.990 deja más, pero es menos accesible. El anual pesa: quien lo toma deja varias veces lo de quien paga mes a mes, porque el mensual se abandona antes.';
+
+    // ¿El chat, gratis? Las tres formas, con todo lo demás igual
+    var cc = S.compararChat(P), cp = S.costoPorPersona(P);
+    $('chat-nota').textContent = 'Lo que cuesta el chat de quien no paga, frente a darle solo lo que responde el código. Quien no paga prueba la app el primer mes; después sigue ' + pct(P.activosMes1, 1) + ' y cada mes se queda ' + pct(P.quedanCadaMes) + ' de esos. Al mes ' + n + '.';
+    var tc = $('chat-planes'); tc.textContent = '';
+    tc.appendChild(el('tr', {}, ['Qué es gratis', 'Personas sin pagar, activas', 'PC', 'Cuesta el chat gratis, al mes', 'Personas que pagan que lo cubren', 'Queda para sueldos'].map(function (x) { return el('th', { text: x }); })));
+    ['libre', 'tope', 'codigo'].forEach(function (k) {
+      var o = cc.planes[k], nombre = k === 'tope' ? 'Todo el chat, hasta ' + nf.format(P.topeModeloDia) + ' consultas al día' : k === 'libre' ? 'Todo el chat' : 'Solo lo que responde el código';
+      var tr = el('tr', P.planChat === k ? { class: 'hito' } : {}, [nombre, nf.format(o.gratisActivos), String(o.servidores), k === 'codigo' ? '—' : clp(o.costoChatMes), k === 'codigo' ? '—' : dec(o.pagadoresQueLoCubren, 0), corto(o.quedaFinal)].map(function (x) { return el('td', { text: x }); }));
+      tc.appendChild(tr);
+    });
+    var lib = cc.planes.libre;
+    $('chat-cuenta').textContent = 'Una persona que no paga y sigue usando el chat le cuesta al PC cerca de ' + clp(S.costoPorPersona(S.unir(Object.assign({}, P, { planChat: 'libre' }))).gratis) + ' al mes; una que paga, ' + clp(cp.paga) + ', y deja ' + clp(cc.netoMesPorSuscriptor) + '. Dar todo el chat gratis cuesta ' + clp(lib.costoChatMes) + ' al mes: lo cubren ' + dec(lib.pagadoresQueLoCubren, 0) + ' de ' + nf.format(lib.suscriptores) + ' personas que pagan. Para pagarse solo, la conversión tendría que pasar de ' + pct(cc.conversion, 2) + ' a ' + pct(lib.conversionNecesaria || cc.conversion, 2) + '.';
+    $('chat-tope').textContent = 'El tope casi no cambia el costo promedio: quien no paga usa en promedio ' + dec(P.mensajesDia * P.fraccionModelo * P.usoGratis, 1) + ' respuestas del modelo al día. Lo que sí hace es frenar a los pocos que usan muchísimo: una sola persona con 200 respuestas al día ocuparía ' + pct((200 * P.segundosModelo) / (1800 / P.horaPunta), 0) + ' de lo que da un PC en un día. No se supone que el chat gratis venda más o menos: eso lo dirá la beta.';
+
+    // Mes a mes
+    var tm = $('meses'); tm.textContent = '';
+    tm.appendChild(el('tr', {}, ['Mes', 'Instalan', 'Pagan', 'Entra', 'Operación', 'Queda', 'Sueldos', 'Equipo y puesta en marcha', 'Impuesto', 'Caja', 'PC'].map(function (x) { return el('th', { text: x }); })));
+    sim.filas.forEach(function (f) {
+      var celdas = [String(f.mes), nf.format(f.instalaciones), nf.format(f.suscriptores), clp(f.ingreso), clp(f.operacion), clp(f.quedaParaSueldos), clp(f.sueldos), clp(f.capex + f.unaVez), clp(f.impuesto), clp(f.caja), String(f.servidores)];
+      var tr = el('tr', f.mes % 12 === 0 ? { class: 'hito' } : {}, celdas.map(function (x, i) { var td = el('td', { text: x }); if ((i === 5 && f.quedaParaSueldos < 0) || (i === 9 && f.caja < 0)) td.className = 'neg'; return td; }));
+      tm.appendChild(tr);
+    });
+    pintarRangos();
+  }
+
+  var pendiente = false;
+  function cambio() { guardar(); if (pendiente) return; pendiente = true; requestAnimationFrame(function () { pendiente = false; pintar(); }); }
+  $('volver').addEventListener('click', function () { P = S.unir({}); guardar(); pintarControles(); pintar(); });
+  pintarControles();
+  pintar();
+})();
+</script>

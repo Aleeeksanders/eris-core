@@ -452,6 +452,10 @@ const CASOS: Caso[] = [
   // S4: «¿por qué duermo mal?» por código (asociación, no causa) y el sueño por partes anotado por chat
   { id: "s-porque", cat: "sueño", antes: suenoConCafe, turns: ["¿Por qué duermo tan mal?"], tools: ["sleep_log"], must: [/caf[eé]/i, /no prueba que sea la causa/i, /2 semanas/i], mustNot: [/insomnio cr[oó]nico|apnea|melatonina/i] },
   { id: "s-porque-pocos", cat: "sueño", antes: suenoCorto, turns: ["¿Qué me está quitando el sueño?"], tools: ["sleep_log"], must: [/pocas noches|2 semanas/i], mustNot: [/causa/i] },
+  // 2026-11-07: con sus horas, el tramo por código y sin «¿aparte o reemplaza?»; «a las 5 y media» no son 5,5 horas
+  { id: "s-tramo-suyo", cat: "sueño", turns: ["me dormí a las 5:30pm y desperté a las 23:50"], tools: ["sleep_log"], must: [/17:30/, /23:50/, /6 h 20/], mustNot: [/aparte/i, /reemplaz/i] },
+  { id: "s-tramo-rango", cat: "sueño", turns: ["dormí de 23:00 a 7:00"], tools: ["sleep_log"], must: [/23:00/, /07:00/, /8 h/], mustNot: [/aparte/i, /reemplaz/i] },
+  { id: "s-5-y-media", cat: "sueño", turns: ["me dormí a las 5 y media"], tools: ["sleep_log"], must: [/a qué hora despertaste/i], mustNot: [/5[,.]5/, /5 h 30/] },
   { id: "s-partes-chat", cat: "sueño", turns: ["Anoche dormí 4 horas y en la tarde una siesta de 2"], tools: ["sleep_log"], must: [/4 h/, /2 h/] },
   { id: "s-cafe-tarde", cat: "sueño", antes: async () => { const d = new Date(); await suenoCorto(Math.max(0, d.getHours() + d.getMinutes() / 60 - 1)); }, turns: ["Anota un café con leche"], tools: ["nutrition_tracker"], must: [/caf[eé]/i, /hora límite/i], mustNot: [/no pasa nada.*no pasa nada/i] },
   { id: "s-partido-dia", cat: "sueño", antes: async () => { await sembrarForge(); await suenoPartido(); }, turns: ["¿Qué tengo para hoy?"], tools: ["day_agenda"], must: [/2 partes/i, /13:51/] },

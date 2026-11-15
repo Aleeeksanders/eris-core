@@ -49,16 +49,16 @@ test("C2: atajos que ya no se roban mensajes (y los de siempre siguen)", async (
   for (const f of ["me llegó 1 kg de arroz", "llegaron 6 huevos", "compré 2 L de leche"]) expect(await tool(f)).toBe("inventory_tracker");
 }, T);
 
-test("C2: la nota del plan y el «¿aparte o reemplaza?» del sueño solo responden a SU pregunta", async () => {
+test("C2: la nota del plan y «¿Cómo sigues?» del sueño solo responden a SU pregunta", async () => {
   const ahora = new Date().toISOString();
   const otro = "Cuéntame tu caso en una frase y armo el día con eso. Por ejemplo: «hoy almuerzo afuera»…";
   expect(await tool("hoy almuerzo afuera", { mem: memoria({ day_plan_pending: { awaiting: "nota", at: ahora } }), hist: [["user", "Otro"], ["assistant", otro]] })).toBe("day_plan");
   expect(await tool("¿cuánta agua llevo?", { mem: memoria({ day_plan_pending: { awaiting: "nota", at: ahora } }), hist: [["user", "hola"], ["assistant", "¡Hola! ¿En qué te ayudo?"]] })).not.toBe("day_plan");
-  const q = "Esa noche ya tenías 5 h en tu reloj. ¿Estas 2 h (de 14:00 a 16:00) son aparte (las sumo: 7 h) o reemplazan lo que había?";
-  const sl = () => memoria({ sleep_pending: { hours: 2, day: "hoy", rango: "14:00 a 16:00", at: ahora } });
-  expect(await tool("son aparte", { mem: sl(), hist: [["user", "dormí de 14 a 16"], ["assistant", q]] })).toBe("sleep_log");
-  expect(await tool("no, ¿qué como ahora?", { mem: sl(), hist: [["user", "dormí de 14 a 16"], ["assistant", q]] })).not.toBe("sleep_log");
-  expect(await tool("sí", { mem: sl(), hist: [["user", "hola"], ["assistant", "¿Quieres ideas para la once?"]] })).not.toBe("sleep_log");
+  const q = "😴 Anoté: Ayer, de 17:30 a 23:50 · 6 h 20. ¿Cómo sigues?";
+  const sl = () => memoria({ sleep_pending: { kind: "seguir", fin: ahora, at: ahora } });
+  expect(await tool("Parto mi día ahora", { mem: sl(), hist: [["user", "dormí de 17:30 a 23:50"], ["assistant", q]] })).toBe("sleep_log");
+  expect(await tool("no, ¿qué como ahora?", { mem: sl(), hist: [["user", "dormí de 17:30 a 23:50"], ["assistant", q]] })).not.toBe("sleep_log");
+  expect(await tool("Parto mi día ahora", { mem: sl(), hist: [["user", "hola"], ["assistant", "¿Quieres ideas para la once?"]] })).not.toBe("sleep_log");
 }, T);
 
 test("C3: «añade», «pon», «suma» anotan comida, también sin cantidades (porción típica, avisando)", async () => {

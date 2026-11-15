@@ -51,6 +51,9 @@ import { removeItem, todayPayload, isValidDay, applyGoalUpdate, upsertChatRollup
 import { todayKeyOf } from "./services/NutritionDay.js";
 import { dayCtxFrom, nutritionDayOf, isoDayKey } from "./services/MealSchedule.js";
 import { AdminService } from "./services/security/AdminService.js";
+import { BetaMetrics, ACCIONES as ACCIONES_USO } from "./services/BetaMetrics.js";
+import { armarInforme } from "./services/BetaReport.js";
+import { alMedirModelo, contextoUso, type ContextoUso } from "./services/llm/ModelMeter.js";
 import { getFeatures, setFeature, isFeatureName, FEATURE_LABELS } from "./services/Features.js";
 import { loadTargets, sanitizeBody, localDay } from "./services/DailyTargets.js";
 import { buildNudge, parseNudgeRequest } from "./services/NudgeSuggest.js";
@@ -452,6 +455,12 @@ async function startServer() {
     },
   });
   toolRegistry.register(new AdminOverviewTool(adminService, audit));
+
+  // ─── Medición de la beta (2026-11-11): cuánto se usa y cuánto PC ocupa cada persona, sin leer lo que escribe ──
+  const betaMetrics = new BetaMetrics({ dir: join(os.homedir(), ".eris", "metricas"), secreto: () => accountStore.getSecret() });
+  alMedirModelo((l) => { void betaMetrics.modelo(l.profileId, l).catch(() => {}); });
+  const usoMedido = (fn: () => Promise<unknown>) => { void fn().catch(() => {}); };
+  for (const sig of ["SIGINT", "SIGTERM"] as const) process.once(sig, () => { void betaMetrics.guardar().finally(() => process.exit(0)); });
   // Herramientas de AXS que hacen el trabajo en código (solo Ikaros: el rol público no las tiene en su lista)
   toolRegistry.register(new AxsBriefingTool());
   toolRegistry.register(new VaultNoteTool());
@@ -757,6 +766,9 @@ async function startServer() {
       },
 
       async message(ws, message) {
+        // Medición de la beta: lo que corre por este mensaje (las llamadas al modelo incluidas) sabe de quién es y de qué tipo
+        const ctxUso: ContextoUso = { profileId: (ws.data as any)?.profileId ?? null, tipo: "lateral", llamadas: 0 };
+        return contextoUso.run(ctxUso, async () => {
         let { sessionId, profileId, remoteAddress } = ws.data as any;
         let data: any;
         try { data = JSON.parse(message as string); } catch { return; }
@@ -882,9 +894,17 @@ async function startServer() {
             // Registrar cliente para recibir push de alertas CGM
             registerClient(profileId, ws);
 
+            // Medición de la beta: alta (la de su cuenta de Google), rol y una conexión más
+            ctxUso.profileId = profileId;
+            const cuentaUso = await accountStore.findByProfile(profileId).catch(() => undefined);
+            await betaMetrics.conectar(profileId, { rol: profileRole, alta: cuentaUso?.account.createdAt }).catch(() => {});
+            const usoFuera = await betaMetrics.estaFuera(profileId).catch(() => false);
+
             ws.send(JSON.stringify({
               type: 'connected',
               features: await getFeatures(),
+              // «Ayudar a mejorar Eris» (Perfil): si se cuentan sus datos de uso
+              usoMedido: !usoFuera,
               sessionId, profileId,
               role: profileRole,
               showWelcome: await shouldWelcome(memory),
@@ -936,6 +956,8 @@ async function startServer() {
             ws.send(JSON.stringify({ type: "error", code: "too_large", message: "El mensaje es demasiado grande." }));
             return;
           }
+          // Medición de la beta: una cosa más que hizo la persona (solo cuenta los tipos de ACCIONES; las sincronizaciones no)
+          if (ACCIONES_USO.has(String(data.type))) usoMedido(() => betaMetrics.accion(profileId, String(data.type)));
 
           if (data.type === "logout") {
             // Cerrar sesión: el token deja de valer también en el servidor
@@ -966,9 +988,11 @@ async function startServer() {
               return;
             }
             const sendOverview = async () => {
+              const filas = await adminService.overview();
               ws.send(JSON.stringify({
                 type: "admin_overview",
-                profiles: await adminService.overview(),
+                // Con el grupo de la beta de cada uno (beta, paga o equipo): lo marca el administrador
+                profiles: await Promise.all(filas.map(async (r) => ({ ...r, grupo: await betaMetrics.grupoDe(r.profileId).catch(() => undefined) }))),
                 integrity: await audit.verify(),
                 server: {
                   uptimeSec: Math.round(process.uptime()),
@@ -986,6 +1010,24 @@ async function startServer() {
             };
 
             if (data.type === "admin_overview") { await sendOverview(); return; }
+
+            // ─── Medición de la beta: el informe (cohortes, chat, PC) y a quién cuenta cada grupo ──
+            if (data.type === "admin_beta_report") {
+              await betaMetrics.guardar();
+              ws.send(JSON.stringify({ type: "admin_beta_report", informe: armarInforme(await betaMetrics.datos(), isoDayKey(new Date())) }));
+              return;
+            }
+            if (data.type === "admin_set_grupo") {
+              const grupo = String(data.grupo ?? "");
+              if (!/^[a-z0-9._-]{1,64}$/.test(target) || !["beta", "pagado", "equipo"].includes(grupo)) {
+                await reply("set_grupo", { ok: false, message: "Grupo o perfil inválido." });
+                return;
+              }
+              await betaMetrics.setGrupo(target, grupo as "beta" | "pagado" | "equipo");
+              void audit.record({ event: "admin", profileId, role: "ikaros", detail: `set_grupo ${target}: ${grupo}`, ok: true });
+              await reply("set_grupo", { ok: true, message: grupo === "pagado" ? `${target} cuenta como persona que paga desde hoy.` : grupo === "equipo" ? `${target} es del equipo: no entra en las cifras de la beta.` : `${target} cuenta en la beta (gratis).` });
+              return;
+            }
 
             // ─── Modo empresa de la app: estado de AXS (bóveda) y del PC, calculados en código ──
             if (data.type === "admin_axs_dashboard") {
@@ -1284,8 +1326,15 @@ async function startServer() {
           if (data.type === "save_preference") {
             // Solo las preferencias que manda la app y con tamaño acotado (revisión 2026-10-31, S1: la clave iba tal cual a
             // la ruta del archivo y con «../» se escribía fuera del perfil)
-            const PREFS = new Set(["notifications", "auto_prefs"]);
+            const PREFS = new Set(["notifications", "auto_prefs", "metricas_uso"]);
             const key = typeof data.key === "string" ? data.key : "";
+            // «Ayudar a mejorar Eris» (medición de la beta): apagado deja de contar y borra lo contado. Vive fuera del perfil
+            // cifrado (la medición no lo abre), en el registro de la medición.
+            if (key === "metricas_uso" && typeof data.value === "boolean") {
+              await betaMetrics.setFuera(profileId, !data.value).catch(() => {});
+              ws.send(JSON.stringify({ type: "preference_saved", key }));
+              return;
+            }
             if (PREFS.has(key) && JSON.stringify(data.value ?? null).length <= 8_000) {
               try { await memory.set(`pref_${key}`, data.value); } catch {}
               ws.send(JSON.stringify({ type: "preference_saved", key }));
@@ -1417,10 +1466,17 @@ async function startServer() {
                 }
               } catch {}
               try {
-                // Sueño, pulso y entreno: el día calendario
-                await memory.upsertDailyRollup({
+                // Sueño, pulso y entreno: el día calendario. El sueño, en el día al que cuenta: a medianoche, lo último que se sabe sigue
+                // siendo la noche de ayer y se copiaba a la fila de hoy (el 11-07 ya traía las 7 h 45 del 11-06, sin haber dormido).
+                // Una app sin ese dato (antes de la 1.89): como antes.
+                const sueno = {
                   sleepHours: merged.sleep?.durationHours,
                   sleepNightHours: typeof merged.sleep?.nightHours === "number" ? merged.sleep.nightHours : undefined,
+                };
+                const diaSueno = typeof merged.sleep?.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(merged.sleep.day) ? merged.sleep.day : null;
+                if (diaSueno) await memory.upsertDailyRollup(sueno, diaSueno);
+                await memory.upsertDailyRollup({
+                  ...(diaSueno ? {} : sueno),
                   restingHR: merged.heartRate?.resting,
                   // Solo si Forge dijo que fue HOY: `trained` a secas quedaba en true para siempre y marcaba todos los días
                   trained: merged.trainedDay === isoDayKey(new Date()) || undefined,
@@ -1439,6 +1495,18 @@ async function startServer() {
                   fatG: merged.nutrition?.fat,
                   calories: merged.nutrition?.calories,
                 }, isoDayKey(nutritionDayOf(new Date(), dayCtxFrom(merged))));
+              } catch {}
+              // Medición de la beta: cuántas comidas, cuánta agua y si hubo sueño o entreno ese día (números, nunca el detalle).
+              // Solo lo que trae ESTE envío: lo mezclado arrastra valores de envíos anteriores.
+              try {
+                const s = data.snapshot;
+                const diaComida = isoDayKey(nutritionDayOf(new Date(), dayCtxFrom(merged)));
+                // La lista del teléfono es { date, items } (ya validada arriba): cuántos alimentos tiene ese día
+                // (su `date` va como «Wed Nov 11 2026», el formato del registro de comidas; la medición usa 2026-11-11)
+                if (Array.isArray(s.foodLog?.items)) usoMedido(() => betaMetrics.registro(profileId, "comidas", s.foodLog.items.length, isValidDay(s.foodLog.date) ? isoDayKey(new Date(Date.parse(s.foodLog.date))) : diaComida));
+                if (typeof s.hydration === "number") usoMedido(() => betaMetrics.registro(profileId, "aguaMl", s.hydration * 1000, diaComida));
+                if (typeof s.sleep?.day === "string" && Number(s.sleep?.durationHours) > 0) usoMedido(() => betaMetrics.registro(profileId, "sueno", 1, s.sleep.day));
+                if (typeof s.trainedDay === "string" && s.trainedDay === isoDayKey(new Date())) usoMedido(() => betaMetrics.registro(profileId, "entreno", 1, s.trainedDay));
               } catch {}
               ws.send(JSON.stringify({ type: "health_snapshot_received" }));
             }
@@ -1464,6 +1532,7 @@ async function startServer() {
             return;
           }
           if (data.type === "update_supplement_context") {
+            usoMedido(() => betaMetrics.registro(profileId, "suplementos"));
             try {
               if (typeof data.context === "string" && data.context.length < 20_000) {
                 await memory.set("supplements_context_latest", { at: new Date().toISOString(), context: data.context, summary: data.summary && typeof data.summary === "object" ? data.summary : null });
@@ -1488,6 +1557,7 @@ async function startServer() {
             return;
           }
           if (data.type === "update_inventory_context") {
+            usoMedido(() => betaMetrics.registro(profileId, "inventario"));
             if (typeof data.context === "string" && data.context.length < 60_000) {
               try { await memory.set("inventory_context_latest", { at: new Date().toISOString(), context: data.context, summary: data.summary && typeof data.summary === "object" ? data.summary : null }); } catch {}
             }
@@ -1496,6 +1566,7 @@ async function startServer() {
 
           // ─── Contexto financiero desde Hunter Wallet ─────────────────────────
           if (data.type === "update_financial_context") {
+            usoMedido(() => betaMetrics.registro(profileId, "finanzas"));
             if (data.context) {
               try { await memory.set('financial_context_latest', data.context); } catch {}
               // Finanzas 2.0: los números como dato (el asesor de comida usa el presupuesto al día; MetabolicAnalysis)
@@ -1578,6 +1649,8 @@ async function startServer() {
           // ─── «¿Qué recomienda Eris?» (Eris al timón · T1): la hoja y la tarjeta «Plan de Eris» de Inicio ──
           if (data.type === "day_plan_request") {
             const reply = (o: Record<string, unknown>) => ws.send(JSON.stringify({ type: "day_plan", requestId: data.requestId, ...o }));
+            // Medición de la beta: usó el plan de Eris (armarlo, cambiar un paso, «Lo comí ✓»); mirarlo no cuenta
+            if (["build", "swap", "done", "replan"].includes(String(data.action))) usoMedido(() => betaMetrics.registro(profileId, "plan"));
             try {
               const DP = await import("./services/DayPlanService.js");
               // La app que conoce el Modo Rendimiento (R1) lo avisa con v: 2; a las anteriores el plan les llega como Óptimo
@@ -1678,6 +1751,7 @@ async function startServer() {
           if (data.type === "sync_forge_projection") {
             const p = sanitizeProjection(data.projection);
             if (p) await memory.set(PROJECTION_KEY, p).catch(() => {});
+            if (p) usoMedido(() => betaMetrics.registro(profileId, "forge"));
             return;
           }
           // ─── Respaldo de Forge, cifrado en el PC (services/ForgeBackup.ts) ──
@@ -2126,9 +2200,12 @@ async function startServer() {
           // transcripto por voz ("voice_message" → Whisper → acá) — una vez
           // que hay texto del usuario, el camino es idéntico sin importar de
           // dónde vino (tools, modos, persistencia, todo igual).
-          const handleUserText = async (userText: string, requestedMode: ThinkingMode) => {
+          const handleUserText = async (userText: string, requestedMode: ThinkingMode, porVoz = false) => {
             // Tope de largo: un mensaje gigante no debe inundar el contexto del modelo ni hacer gastar el equipo
             if (typeof userText !== "string") return;
+            // Medición de la beta: desde acá, lo que haga el modelo es trabajo del chat; si llama al modelo, «pasó por el modelo»
+            ctxUso.tipo = "chat";
+            const llamadasAntes = ctxUso.llamadas;
             if (userText.length > MAX_USER_MESSAGE_CHARS) userText = userText.slice(0, MAX_USER_MESSAGE_CHARS);
             const currentSessionId = (ws.data as any).sessionId;
             const history = sessions.get(currentSessionId) || [];
@@ -2260,6 +2337,18 @@ async function startServer() {
             // Guardar para training (en background)
             memory.saveTrainingData(currentSessionId, history).catch(() => {});
 
+            // Medición de la beta: un mensaje más, si pasó por el modelo y cuánto tardó; y cuántas comidas tiene hoy (lo
+            // anotado por chat también cuenta, aunque no abra Nutrición). Solo números.
+            const llamoModelo = ctxUso.llamadas > llamadasAntes;
+            usoMedido(() => betaMetrics.chat(profileId, { voz: porVoz, porModelo: llamoModelo, ms: Date.now() - startTime }));
+            usoMedido(async () => {
+              const dia = await todayKeyOf(memory);
+              const log = await memory.get(`nutrition_log_${dia}`).catch(() => null);
+              // Cada registro del chat trae sus alimentos (items): se cuentan alimentos, igual que la lista del teléfono
+              const n = Array.isArray(log) ? log.reduce((s: number, e: any) => s + (Array.isArray(e?.items) ? e.items.length : 0), 0) : 0;
+              if (n) await betaMetrics.registro(profileId, "comidas", n, isoDayKey(new Date(Date.parse(dia)))); // «Wed Nov 11 2026» → 2026-11-11
+            });
+
             const duration = ((Date.now() - startTime) / 1000).toFixed(1);
             console.log(`[OK] ${profileId} ${duration}s${queryResult.quick ? " (al instante)" : ""} Resp: "${response.content.substring(0, 50).replace(/\n/g, " ")}..."`);
 
@@ -2316,6 +2405,7 @@ async function startServer() {
 
           if (data.type === "voice_message") {
             try {
+              ctxUso.tipo = "voz"; // medición de la beta: entender el audio es trabajo de voz; la respuesta, del chat
               const audioBuffer = Buffer.from(data.audioBase64, "base64");
               // Dictado con contexto (stt/VoiceFix.ts): Whisper recibe el vocabulario de Eris y del usuario y lo último que
               // dijo Eris; lo que oyó con duda se corrige por sonido y, si hace falta, el modelo lo reinterpreta con la
@@ -2336,13 +2426,14 @@ async function startServer() {
                 )).content || "",
               });
               const transcribed = v.text.trim();
+              usoMedido(() => betaMetrics.voz(profileId, { whisperMs: v.ms.whisper }));
               if (v.heard) console.log(`[Voz] ${v.ms.whisper} ms + ${v.ms.fix} ms · oído: "${v.heard.slice(0, 80)}"${v.fixes.length ? ` → "${transcribed.slice(0, 80)}" (${v.fixes.join("; ")})` : ""}`);
               if (!transcribed) {
                 ws.send(JSON.stringify({ type: "voice_transcribed", text: "" }));
                 return;
               }
               ws.send(JSON.stringify({ type: "voice_transcribed", text: transcribed, ...(transcribed !== v.heard ? { heard: v.heard } : {}) }));
-              await handleUserText(transcribed, data.mode || DEFAULT_CONFIG.defaultMode);
+              await handleUserText(transcribed, data.mode || DEFAULT_CONFIG.defaultMode, true);
             } catch (err) {
               console.error("[Voz] No pude transcribir:", err);
               ws.send(JSON.stringify({ type: "error", message: "No pude transcribir el audio. Inténtalo de nuevo en un momento." }));
@@ -2355,6 +2446,7 @@ async function startServer() {
           // respuesta automáticamente (así no se bloquea la entrega del texto). ──
           if (data.type === "tts_request") {
             try {
+              ctxUso.tipo = "voz";
               // La voz NO lee el texto de pantalla: dice una versión corta y
               // con la personalidad de Eris (canal distinto, complementa lo
               // escrito). Si el texto ya es breve se habla tal cual.
@@ -2364,7 +2456,9 @@ async function startServer() {
               const busy = !!(ws.data as any).abortController; // hay una consulta en curso en esta conexión
               const spoken = await buildSpokenVersion(provider, fullText, lastUserMsg, THINKING_MODES.flash.model, { skipLLM: busy });
               if (!spoken) return;
+              const tPiper = Date.now();
               const wav = await piperProvider.synthesize(spoken, "daniela");
+              usoMedido(() => betaMetrics.voz(profileId, { piperMs: Date.now() - tPiper }));
               if (wav.length === 0) return;
               ws.send(JSON.stringify({
                 type: "tts_audio",
@@ -2393,6 +2487,7 @@ async function startServer() {
           console.error(`[WS] Error en «${String((() => { try { return JSON.parse(String(message)).type; } catch { return "?"; } })())}»:`, err);
           ws.send(JSON.stringify({ type: "error", message: "Algo falló de mi lado. Inténtalo de nuevo en un momento." }));
         }
+        }); // contextoUso.run
       },
 
       close(ws) {

@@ -12,6 +12,7 @@ import type {
 } from "./LLMProvider.js";
 import type { ToolDefinition } from "../../types/message.js";
 import { plannerFor, parseKeepAlive } from "./ContextPlanner.js";
+import { registrarLlamada } from "./ModelMeter.js";
 
 /**
  * Cuánto tiempo Ollama mantiene el modelo cargado tras el último uso (ERIS_KEEP_ALIVE, por defecto 30m). Con 5m el modelo se
@@ -155,6 +156,10 @@ export class OllamaProvider implements LLMProvider {
       keep_alive: KEEP_ALIVE,
     };
 
+    // Cuánto ocupó esta llamada (medición de la beta, ModelMeter): lo que trabajó el modelo y lo que esperó en cola.
+    // Un reintento cuenta aparte: el intento que falló también ocupó el equipo.
+    const t0 = Date.now();
+    let medida: LLMResponse | null = null;
     try {
       // Combinar el timeout de siempre con el AbortSignal opcional que pasa el
       // caller (server.ts, cuando el usuario toca "detener") — así un abort
@@ -172,12 +177,13 @@ export class OllamaProvider implements LLMProvider {
         throw new Error(`Ollama HTTP ${res.status}: ${errorText}`);
       }
 
-      if (isStreaming) {
-        return await this.handleStream(res, options!.onToken!, options?.onThinking, options?.signal);
-      } else {
-        return await this.handleNonStream(res);
-      }
+      medida = isStreaming
+        ? await this.handleStream(res, options!.onToken!, options?.onThinking, options?.signal)
+        : await this.handleNonStream(res);
+      registrarLlamada(Date.now() - t0, medida.modeloMs ?? null, true);
+      return medida;
     } catch (err) {
+      if (!medida) registrarLlamada(Date.now() - t0, null, false);
       // Bucle detectado en thinking → reintentar sin thinking para sacar respuesta directa
       if (err instanceof ThinkingLoopError) {
         if (options?.onThinking) {
@@ -233,6 +239,7 @@ export class OllamaProvider implements LLMProvider {
     let nativeThinking = "";
     let promptTokens = 0;
     let completionTokens = 0;
+    let modeloMs: number | undefined;
     const nativeToolCalls: LLMToolCall[] = [];
     let wasStopped = false;
 
@@ -366,6 +373,7 @@ export class OllamaProvider implements LLMProvider {
           if (data.done) {
             promptTokens = data.prompt_eval_count || 0;
             completionTokens = data.eval_count || 0;
+            if (typeof data.total_duration === "number") modeloMs = data.total_duration / 1e6;
           }
         } catch {
           // Ignorar líneas no-JSON
@@ -409,6 +417,7 @@ export class OllamaProvider implements LLMProvider {
         completion: completionTokens,
         total: promptTokens + completionTokens,
       },
+      ...(modeloMs !== undefined ? { modeloMs } : {}),
     };
   }
 
@@ -471,6 +480,7 @@ export class OllamaProvider implements LLMProvider {
         total:
           (data.prompt_eval_count || 0) + (data.eval_count || 0),
       },
+      ...(typeof data.total_duration === "number" ? { modeloMs: data.total_duration / 1e6 } : {}),
     };
   }
 

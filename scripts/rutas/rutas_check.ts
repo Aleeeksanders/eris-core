@@ -39,6 +39,10 @@ const FILAS: Fila[] = [
   { frase: "¿cómo me fue esta semana?", es: "day_agenda", por: "C2" },
   { frase: "hazme una rutina para dormir", noEs: "training_plan", por: "C2" },
   { frase: "¿cómo ando de sueño?", es: "sleep_log", por: "C2" },
+  { frase: "me dormí a las 5:30pm y desperté a las 23:50", es: "sleep_log", por: "sueño con sus horas" },
+  { frase: "me dormí a las 5 y media", es: "sleep_log", por: "no son 5,5 horas: pregunta cuándo despertó" },
+  { frase: "¿Cuánta proteína me falta hoy y qué tengo en la casa para completarla?", es: "metabolic_advisor", por: "pide ideas, no solo el registro" },
+  { frase: "¿cuánta proteína me falta?", es: "nutrition_tracker", por: "solo la cifra del día" },
   { frase: "¿cómo voy hoy?", es: "metabolic_advisor", por: "C2" },
   // C3 — verbos de anotar
   { frase: "Añade una ensalada de lechuga, repollo y choclo al almuerzo", es: "nutrition_tracker", por: "C3" },

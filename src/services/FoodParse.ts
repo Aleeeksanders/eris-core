@@ -102,6 +102,8 @@ export function dayQueryOf(message: unknown): "food" | "water" | null {
   if (typeof message !== "string" || message.length > 120) return null;
   const t = fold(message).replace(/[¿?¡!.,]/g, " ").replace(/\s+/g, " ").trim();
   if (OTHER_DAY.test(t) || /\b(gast\w*|plata|pesos|lucas?|finanzas)\b/.test(t)) return null;
+  // «¿cuánta proteína me falta y qué tengo en la casa para completarla?» pide ideas: va al asesor, no solo al registro del día
+  if (/\b(que tengo|que hay|en (la |mi )?casa|para (completar|llegar)|que (puedo |me )?com\w*|con que)\b/.test(t) && !/\bque (he comido|comi|llevo comido)\b/.test(t)) return null;
   if (DAY_WATER_Q.test(t)) return "water";
   if (DAY_FOOD_Q.test(t)) return "food";
   return null;

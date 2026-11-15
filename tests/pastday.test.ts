@@ -1,6 +1,9 @@
 // Comida nombrada por adelantado y comidas de ayer/anteayer por chat (pedido del usuario, 2026-10-16). Memoria simulada.
-import { test, expect } from "bun:test";
+import { test, expect, setSystemTime, afterAll } from "bun:test";
 process.env.TZ = "America/Santiago"; // bun test corre en UTC: pasadas las 21:00 de Chile ya sería mañana
+// A mediodía: de madrugada, sin haber dormido, «ayer» es otro día de comida y estas pruebas fallaban según la hora de correrlas
+setSystemTime(new Date(2026, 10, 7, 12, 0));
+afterAll(() => setSystemTime());
 import { mealTimingOf, pastDayOf, pastMealTimingOf } from "C:/Proyectos/eris/src/services/FoodParse.ts";
 import { NutritionTool } from "C:/Proyectos/eris/src/tools/NutritionTool.ts";
 import { UnifiedFoodService } from "C:/Proyectos/eris/src/services/gluco/UnifiedFoodService.ts";

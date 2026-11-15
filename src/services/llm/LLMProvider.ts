@@ -34,6 +34,8 @@ export interface LLMResponse {
   };
   /** true si la generación fue cancelada a mitad de camino (ver AbortSignal en options) */
   stopped?: boolean;
+  /** Lo que el modelo trabajó en esta llamada, según el propio servidor del modelo (sin la espera en cola). */
+  modeloMs?: number;
 }
 
 /**

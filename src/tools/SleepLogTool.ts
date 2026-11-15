@@ -8,24 +8,25 @@
 // 2026-10-16 (conversaciones reales): «dormí de 8:15 a 11:15» se anotó como 4,25 h (lo calculaba el modelo) y «dormí 3
 // horas más» quedaba «como referencia» porque el reloj mandaba. Ahora: los tramos se calculan por código, «más/aparte/
 // siesta» se SUMA a lo que había, y lo que dice la persona manda sobre el reloj (el reloj se equivoca si quedó cargando).
-// Si da un tramo y esa noche ya tiene otra cifra, se pregunta si es aparte o si la reemplaza.
+// 2026-11-07: con las dos horas se guarda el tramo, igual que en la pantalla de Sueño, y el día lo deduce Eris. Ya no se pregunta «¿es
+// aparte o reemplaza?»: nadie sabía responder, y con el tramo se sabe solo. Tras un sueño largo a hora rara: «¿Cómo sigues?».
 // ============================================================
 
 import { veredictoSueno } from "../services/Brigida.js";
 import { z } from "zod";
 import { Tool, type ToolExecutionResult } from "../Tool.js";
 import { localDay } from "../services/DailyTargets.js";
-import { parseSleepStatement } from "../services/SleepParse.js";
+import { parseSleepStatement, parseSleepTimes, parseSleepOnset, parseWakeAnswer, resolveSleepSaid } from "../services/SleepParse.js";
 import { asksToLog } from "../services/FoodParse.js";
-import { sleepSummaryText, sleepReading, insightsText, bedtimeText, fmtSleep, hhmmOf, patternsText, type SleepInsights } from "../services/SleepCore.js";
+import { sleepSummaryText, sleepReading, insightsText, bedtimeText, fmtSleep, hhmmOf, patternsText, sleepKey, wakeIsOdd, sleepRangeText, wakeQuestionText, clock, WAKE_WAIT_H, type SleepInsights, type SaidTime } from "../services/SleepCore.js";
 
 export const SLEEP_LOG_KEY = "sleep_log";
 const PENDING_KEY = "sleep_pending";
 const PENDING_MIN = 10;
-export interface SleepEntry { hours: number; source: "manual"; at: string; /** Sueño 2.0 · S0: las partes que contó («4 y en la tarde 4 más»): la primera es la noche */ parts?: number[] }
+export interface SleepEntry { hours: number; source: "manual"; at: string; /** Sueño 2.0 · S0: las partes que contó («4 y en la tarde 4 más»): la primera es la noche */ parts?: number[]; /** los tramos dichos con sus horas [inicio, fin] (ms) */ tramos?: Array<[number, number]> }
 
 const Schema = z.object({
-  action: z.enum(["log", "get", "delete", "report", "bedtime", "why"]).default("log").describe("log = anotar; get = ver lo anotado; delete = borrar lo anotado de esa noche; " +
+  action: z.enum(["log", "get", "delete", "report", "bedtime", "why", "ask_wake", "seguir"]).default("log").describe("log = anotar; get = ver lo anotado; delete = borrar lo anotado de esa noche; " +
     "report = «¿cómo dormí?» / «¿cómo vengo con el sueño?» (con sus datos); bedtime = «¿a qué hora me acuesto?» / hasta qué hora tomar café; " +
     "why = «¿por qué duermo mal?» (lo que se repite en sus noches de 30 días)"),
   semana: z.boolean().optional().describe("report: true si pregunta por su sueño de las últimas semanas, no solo por anoche"),
@@ -37,7 +38,12 @@ const Schema = z.object({
   extra: z.boolean().optional().describe("true si son horas ADICIONALES a lo que ya durmió esa noche («3 horas más», una siesta): se suman"),
   base: z.number().optional().describe("Interno: la primera cifra cuando dice «dormí 4 y después 3 más»"),
   rango: z.string().optional().describe("Interno: el tramo «8:15 a 11:15»"),
-  modo: z.enum(["sumar", "reemplazar"]).optional().describe("Interno: respuesta a «¿es aparte o reemplaza?»"),
+  desde: z.number().optional().describe("Interno: inicio del tramo (ms)"),
+  hasta: z.number().optional().describe("Interno: fin del tramo (ms)"),
+  onsetMin: z.number().optional().describe("Interno: la hora en que se durmió, cuando no dijo a qué hora despertó"),
+  onsetAmb: z.boolean().optional().describe("Interno"),
+  fin: z.string().optional().describe("Interno: el fin del sueño por el que se preguntó «¿Cómo sigues?»"),
+  choice: z.enum(["dormir", "partir"]).optional().describe("Interno: la respuesta a «¿Cómo sigues?»"),
 });
 type Input = z.infer<typeof Schema>;
 
@@ -57,11 +63,22 @@ export async function getSleepLog(memory: any): Promise<Record<string, SleepEntr
   return v && typeof v === "object" ? v : {};
 }
 
-/** Lo anotado a mano para la noche de la que se despertó ese día (YYYY-MM-DD), o null. */
+/** Lo anotado a mano para la noche de la que se despertó ese día (YYYY-MM-DD), o null. Un tramo con horas no: el teléfono ya lo tiene. */
 export async function manualSleepFor(memory: any, day = localDay()): Promise<number | null> {
   const e = (await getSleepLog(memory))[day];
-  return e && typeof e.hours === "number" ? e.hours : null;
+  return e && typeof e.hours === "number" && !e.tramos?.length ? e.hours : null;
 }
+
+/** Los tramos juntos, sin contar dos veces lo que se pisa */
+function unirTramos(xs: Array<[number, number]>): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  for (const [a, b] of [...xs].sort((p, q) => p[0] - q[0])) {
+    const u = out[out.length - 1];
+    if (u && a <= u[1]) u[1] = Math.max(u[1], b); else out.push([a, b]);
+  }
+  return out;
+}
+const horasDe = (x: [number, number]) => (x[1] - x[0]) / 3_600_000;
 
 /** Lo que midió el reloj para la noche de hoy (si el resumen de salud es de hoy y no es algo anotado a mano). */
 async function delReloj(memory: any, day: string): Promise<number | null> {
@@ -101,16 +118,20 @@ export class SleepLogTool extends Tool<Input> {
   /** "dormí 7 horas", "de 8:15 a 11:15", "3 horas más" se anotan por código, sin depender de que el modelo calcule. */
   async preroute(message: string, context?: any): Promise<Record<string, unknown> | null> {
     const memory = context?.memory;
-    // Respuesta a «¿es aparte o reemplaza?»
+    // Respuesta a lo último que preguntó Eris: solo un mensaje corto, y solo si eso fue lo último que dijo
     if (memory) {
       const p: any = await memory.get(PENDING_KEY).catch(() => null);
-      // Solo una respuesta corta a ESA pregunta (lo último que dijo Eris): antes cualquier «sí» o «no» durante 10 min sumaba o
-      // reemplazaba el sueño («no, ¿qué como?» lo reemplazaba; revisión 2026-11-04, C2)
-      if (p && Date.now() - new Date(p.at).getTime() < PENDING_MIN * 60_000 && /son aparte|reemplazan lo que hab/i.test(String(context?.lastAssistantMessage ?? ""))) {
+      const antes = String(context?.lastAssistantMessage ?? "");
+      if (p && Date.now() - new Date(p.at).getTime() < PENDING_MIN * 60_000) {
         const t = fold(message).replace(/[¿?¡!.,]/g, " ").replace(/\s+/g, " ").trim();
-        if (t.length <= 40) {
-          if (/^(?:si|sip|dale|ya|ok)?\s*(?:son aparte|aparte|suma\w*|agrega\w*|adicional\w*|si|sip)\b/.test(t)) { await memory.set(PENDING_KEY, null).catch(() => {}); return { action: "log", hours: p.hours, day: p.day, rango: p.rango, modo: "sumar" }; }
-          if (/^(?:no\s+)?(?:reemplaza\w*|cambia\w*|esas? (son|fueron)|solo esas?|no)\b/.test(t) && !/[?¿]/.test(message)) { await memory.set(PENDING_KEY, null).catch(() => {}); return { action: "log", hours: p.hours, day: p.day, rango: p.rango, modo: "reemplazar" }; }
+        if (p.kind === "seguir" && /¿Cómo sigues\?/.test(antes) && t.length <= 40) {
+          if (/\b(vuelvo a dormir|voy a dormir|me vuelvo a dormir|sigo durmiendo|dormir)\b/.test(t)) return { action: "seguir", fin: p.fin, choice: "dormir" };
+          if (/\b(parto|partir|mi dia|sigo despierto|me quedo despierto|ya desperte)\b/.test(t)) return { action: "seguir", fin: p.fin, choice: "partir" };
+        }
+        if (p.kind === "despertar" && /a qué hora despertaste/i.test(antes)) {
+          const b = parseWakeAnswer(message);
+          const r = b ? resolveSleepSaid({ a: p.onset as SaidTime, b, atras: false }, Date.now()) : null;
+          if (r) { await memory.set(PENDING_KEY, null).catch(() => {}); return { action: "log", desde: r.start, hasta: r.end }; }
         }
       }
     }
@@ -126,6 +147,14 @@ export class SleepLogTool extends Tool<Input> {
       if (WEEK_SLEEP_ASK.test(q)) return { action: "report", semana: true };
       if (REPORT_ASK.test(q) && !/\b(entren\w*|gym|gimnasio)\b/.test(q)) return { action: "report" };
     }
+    // Con las dos horas: el tramo, igual que en la pantalla de Sueño
+    const dicho = parseSleepTimes(message);
+    if (dicho && !asksToLog(message)) {
+      const r = resolveSleepSaid(dicho, Date.now(), message);
+      if (r) return { action: "log", desde: r.start, hasta: r.end };
+    }
+    const onset = parseSleepOnset(message);
+    if (onset && !asksToLog(message)) return { action: "ask_wake", onsetMin: onset.min, onsetAmb: onset.amb };
     const s = parseSleepStatement(message);
     if (!s) return null;
     if (asksToLog(message)) return null; // también trae comida o agua: que lo resuelva el modelo con ambas herramientas
@@ -139,6 +168,24 @@ export class SleepLogTool extends Tool<Input> {
     const log = await getSleepLog(memory);
 
     if (input.action === "report" || input.action === "bedtime" || input.action === "why") return this.report(input, memory, log);
+
+    if (input.action === "ask_wake") {
+      await memory.set(PENDING_KEY, { kind: "despertar", onset: { min: input.onsetMin, amb: !!input.onsetAmb }, at: new Date().toISOString() }).catch(() => {});
+      const q = "¿Y a qué hora despertaste?\n[Opción: Recién]";
+      return { output: q, metadata: { quickReply: q } };
+    }
+
+    if (input.action === "seguir") {
+      await memory.set(PENDING_KEY, null).catch(() => {});
+      if (!input.fin || !input.choice) return { output: "", error: "Falta la respuesta." };
+      try { context?.wsClient?.send?.(JSON.stringify({ type: "sleep_wake_decision", end: input.fin, choice: input.choice })); } catch {}
+      const r = input.choice === "partir"
+        ? `Listo: tu día parte a las ${clock(input.fin)}. Tus comidas, tu agua y tus avisos se cuentan desde ahí.`
+        : "Listo: tu día sigue igual. Cuando vuelvas a despertar, me cuentas o lo anotas en Sueño.";
+      return { output: r, metadata: { quickReply: r } };
+    }
+
+    if (input.action === "log" && typeof input.desde === "number" && typeof input.hasta === "number") return this.logTramo(input.desde, input.hasta, memory, log, context);
 
     if (input.action === "get") {
       const days = Object.keys(log).sort().reverse().slice(0, 7);
@@ -162,15 +209,7 @@ export class SleepLogTool extends Tool<Input> {
     const antes = manual ?? reloj; // lo que ya había esa noche (lo anotado manda sobre el reloj)
     const tramo = input.rango ? ` (de ${input.rango})` : "";
 
-    // Un tramo cuando esa noche ya tiene otra cifra: ¿es aparte o la reemplaza? (no se adivina)
-    if (input.rango && !input.extra && !input.modo && antes != null && Math.abs(antes - hours) > 0.25) {
-      await memory.set(PENDING_KEY, { hours, day, rango: input.rango, at: new Date().toISOString() }).catch(() => {});
-      const de = manual != null ? "anotado" : "en tu reloj";
-      const q = `Esa noche ya tenías ${fmtH(antes)} ${de}. ¿Estas ${fmtH(hours)}${tramo} son aparte (las sumo: ${fmtH(antes + hours)}) o reemplazan lo que había?\n[Opción: Son aparte, súmalas] [Opción: Reemplaza]`;
-      return { output: q, metadata: { quickReply: q } };
-    }
-
-    const sumar = !!input.base || input.extra || input.modo === "sumar";
+    const sumar = !!input.base || input.extra;
     const total = Math.round((input.base ? input.base + hours : sumar && antes != null ? antes + hours : hours) * 100) / 100;
     if (total > 20) return { output: "", error: "Eso suma más de 20 horas: pregúntale al usuario cuánto durmió en total." };
 
@@ -201,6 +240,37 @@ export class SleepLogTool extends Tool<Input> {
     return { output: reply, metadata: { quickReply: reply, ...(veredicto ? { veredicto } : {}) } };
   }
 
+  /** «Dormí de 17:30 a 23:50»: el tramo al día que le toca, al teléfono (queda igual que anotarlo en Sueño) y, si fue a hora rara, la pregunta. */
+  private async logTramo(desde: number, hasta: number, memory: any, log: Record<string, SleepEntry>, context?: any): Promise<ToolExecutionResult> {
+    const min = (hasta - desde) / 60_000;
+    if (!(min >= 15 && min <= 16 * 60)) return { output: "", error: "Ese tramo no calza: tiene que ser entre 15 min y 16 h." };
+    const dia = sleepKey(hasta, min);
+    const snap: any = await memory.get("health_snapshot_latest").catch(() => null);
+    const tramos = unirTramos([...(log[dia]?.tramos ?? []), [desde, hasta]]);
+    // Lo que ya está en el resumen de ese día (el reloj u otro tramo): se junta, no se pisa ni se cuenta dos veces
+    const delResumen: Array<[number, number]> = snap?.sleep?.day === dia && Array.isArray(snap?.sleep?.episodes)
+      ? snap.sleep.episodes.map((e: any) => [Date.parse(e.start), Date.parse(e.end)] as [number, number]).filter((x: [number, number]) => x[1] > x[0]) : [];
+    const todo = unirTramos([...tramos, ...delResumen]);
+    const total = Math.round(todo.reduce((a, x) => a + horasDe(x), 0) * 100) / 100;
+    const noche = Math.round(Math.max(...todo.map(horasDe)) * 100) / 100;
+    log[dia] = { hours: total, source: "manual", at: new Date().toISOString(), tramos };
+    for (const k of Object.keys(log).sort().slice(0, Math.max(0, Object.keys(log).length - 60))) delete log[k];
+    await memory.set(SLEEP_LOG_KEY, log);
+    await memory.upsertDailyRollup({ sleepHours: total, sleepNightHours: noche }, dia).catch(() => {});
+    try { context?.wsClient?.send?.(JSON.stringify({ type: "sleep_tramo", start: desde, end: hasta })); } catch {}
+    const now = Date.now();
+    const usual = { usualWake: typeof snap?.schedule?.usualWake === "number" ? snap.schedule.usualWake : null, usualSleepH: typeof snap?.schedule?.sleepHours === "number" ? snap.schedule.sleepHours : null };
+    let reply = `😴 Anoté: ${sleepRangeText(desde, hasta, now)}.`;
+    const raro = min >= 180 && wakeIsOdd(hasta, usual);
+    if (raro && now - hasta < WAKE_WAIT_H * 3_600_000) {
+      const fin = new Date(hasta).toISOString();
+      await memory.set(PENDING_KEY, { kind: "seguir", fin, at: new Date().toISOString() }).catch(() => {});
+      reply += `\n\n${wakeQuestionText(fin)}\n[Opción: Vuelvo a dormir] [Opción: Parto mi día ahora]`;
+    }
+    const veredicto = raro ? null : veredictoSueno(total);
+    return { output: reply, metadata: { quickReply: reply, ...(veredicto ? { veredicto } : {}) } };
+  }
+
   /**
    * «¿Cómo dormí?» / «¿Cómo vengo con el sueño?» / «¿A qué hora me acuesto?»: por código, con lo del reloj (las partes de la
    * noche y las 2 semanas que calcula el teléfono, sleepCore) o lo anotado. Sin datos, lo dice; no inventa.
@@ -221,7 +291,10 @@ export class SleepLogTool extends Tool<Input> {
     const manual = log[localDay()];
     if (!input.semana) ver = veredictoSueno(manual?.hours ?? (fresh && typeof snap?.sleep?.durationHours === "number" ? snap.sleep.durationHours : null));
     if (!input.semana) {
-      if (manual) {
+      if (manual?.tramos?.length) {
+        const de = manual.tramos.map(([a, b]) => `de ${clock(new Date(a).toISOString())} a ${clock(new Date(b).toISOString())}`).join(" y ");
+        out.push(`Anotaste ${fmtSleep(manual.hours)}: ${de}.`);
+      } else if (manual) {
         out.push(manual.parts && manual.parts.length > 1
           ? `Anotaste ${fmtSleep(manual.hours)} en partes: ${manual.parts.map((h, i) => `${fmtSleep(h)}${i === 0 ? " de noche" : " aparte"}`).join(" y ")}.`
           : `Anotaste ${fmtSleep(manual.hours)} de sueño anoche.`);

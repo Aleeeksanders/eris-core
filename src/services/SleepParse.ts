@@ -6,6 +6,8 @@
 // nada. Las frases claras se reconocen acá y se anotan para ese día con sleep_log, sin depender del modelo.
 // ============================================================
 
+import { resolveSaidTimes, type SaidTime } from "./SleepCore.js";
+
 const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
 const WORD_NUM: Record<string, number> = {
@@ -57,6 +59,76 @@ export function tramoEn(t: string): { hours: number; rango: string } | null {
   return hours >= 0.25 && hours <= 16 ? { hours, rango: `${hhmm(a)} a ${hhmm(b)}` } : null;
 }
 
+// ─── Las horas dichas, para deducir el tramo (2026-11-07) ─────────────────────────────────────────────────────────────
+// «me dormí a las 5:30pm y desperté a las 23:50» no se reconocía, y «me dormí a las 5 y media» se anotaba como 5,5 horas de sueño.
+const ALA = `(?:a\\s+las?|a\\s+eso\\s+de\\s+las?|tipo|como\\s+a\\s+las?|como\\s+las?|cerca\\s+de\\s+las?)\\s+`;
+const HORA_DICHA = new RegExp(`${ALA}${HORA}`, "g");
+const DORMIRSE = new RegExp(`\\b(?:me\\s+(?:habia\\s+)?dormi(?:do)?|me\\s+quede\\s+dormid[oa]|me\\s+acoste|me\\s+fui\\s+a\\s+(?:dormir|acostar)|dormi)\\s+(?:recien\\s+)?${ALA}${HORA}`);
+const DESPERTAR = new RegExp(`\\b(?:desperte|me\\s+desperte|me\\s+levante|abri\\s+los\\s+ojos)\\s+${ALA}${HORA}`);
+const RECIEN = /\b(?:recien\s+(?:desperte|me\s+desperte|me\s+levante)|(?:desperte|me\s+desperte|me\s+levante)\s+(?:recien|ahora|hace\s+poco)|acabo\s+de\s+(?:despertar|levantarme))\b/;
+const TRAMO_DICHO = /\b(dormi|he dormido|dormimos|alcance a dormir|pude dormir|me dormi|me quede dormid[oa]|siesta)\b/;
+const SOLO_HORA = new RegExp(`^(?:${ALA})?${HORA}$`);
+
+/** "ocho" + "y cuarto" + ... → la hora dicha; `amb` si no dijo am ni pm y puede ser de día o de noche. */
+function dicha(h: string, y?: string, menos?: string, sufijo?: string): SaidTime | null {
+  const min = minutos(h, y, menos, sufijo);
+  if (min == null) return null;
+  const hh = /^\d/.test(h) ? Number(h.split(":")[0]) : WORD_NUM[h];
+  return { min: ((min % 1440) + 1440) % 1440, amb: !sufijo && hh >= 1 && hh <= 12 };
+}
+
+export interface SaidSleep { a: SaidTime; b: SaidTime | "ahora"; atras: boolean }
+
+/** «me dormí a las X y desperté a las Y», «de X a Y», «desperté recién, me dormí a las X». null si no trae las dos. */
+export function parseSleepTimes(message: unknown): SaidSleep | null {
+  if (typeof message !== "string" || message.length > 400 || /[¿?]/.test(message)) return null;
+  const t = fold(message);
+  if (/\bno (dormi|he dormido|pude dormir)\b/.test(t)) return null;
+  // «anteanoche», o «ayer» cuando el tramo sería de hoy: se resuelve en resolveSleepSaid
+  const atras = /\b(anteanoche|antenoche|ante anoche|ayer)\b/.test(t);
+  const on = t.match(DORMIRSE);
+  if (on) {
+    const a = dicha(on[1], on[2], on[3], on[4]);
+    const wk = t.match(DESPERTAR);
+    if (a && wk) { const b = dicha(wk[1], wk[2], wk[3], wk[4]); if (b) return { a, b, atras }; }
+    if (a && RECIEN.test(t)) return { a, b: "ahora", atras: false };
+  }
+  const pide = /\b(anot\w*|ingres\w*|registr\w*|guard\w*)\b/.test(t) && /\bsueno\b/.test(t);
+  if (TRAMO_DICHO.test(t) || pide) {
+    const m = t.match(TRAMO);
+    if (m) { const a = dicha(m[1], m[2], m[3], m[4]), b = dicha(m[5], m[6], m[7], m[8]); if (a && b) return { a, b, atras }; }
+  }
+  return null;
+}
+
+/** El tramo de lo dicho, a esta hora. «ayer» solo corre el día si si no el tramo caería hoy; «anteanoche», siempre. */
+export function resolveSleepSaid(d: SaidSleep, now: number, message = ""): { start: number; end: number } | null {
+  const r = resolveSaidTimes(d.a, d.b, now);
+  if (!r || !d.atras) return r;
+  const t = fold(message);
+  const dia = (ms: number) => new Date(ms).toDateString();
+  const anteanoche = /\b(anteanoche|antenoche|ante anoche)\b/.test(t);
+  if (!anteanoche && dia(r.end) !== dia(now)) return r;
+  const menos = (ms: number) => { const x = new Date(ms); x.setDate(x.getDate() - 1); return x.getTime(); };
+  return { start: menos(r.start), end: menos(r.end) };
+}
+
+/** «me dormí a las 5 y media» sin decir cuándo despertó: se le pregunta. Solo un mensaje corto que dice eso. */
+export function parseSleepOnset(message: unknown): SaidTime | null {
+  if (typeof message !== "string" || message.length > 60 || /[¿?]/.test(message)) return null;
+  const on = fold(message).match(DORMIRSE);
+  return on ? dicha(on[1], on[2], on[3], on[4]) : null;
+}
+
+/** La respuesta a «¿A qué hora despertaste?»: «a las 11:50», «recién», «ahora». */
+export function parseWakeAnswer(message: unknown): SaidTime | "ahora" | null {
+  if (typeof message !== "string" || message.length > 40) return null;
+  const t = fold(message).replace(/[.,!¡¿?]/g, " ").replace(/\s+/g, " ").trim();
+  if (/^(recien|ahora|recien nomas|ahora recien|hace poco|recien desperte)$/.test(t)) return "ahora";
+  const m = t.replace(/^(?:desperte|me desperte|me levante)\s+/, "").match(SOLO_HORA);
+  return m ? dicha(m[1], m[2], m[3], m[4]) : null;
+}
+
 /** Horas dentro de un texto ya normalizado. */
 export function hoursIn(t: string): number | null {
   const m = t.match(WITH_UNIT) ?? t.match(AND_HALF);
@@ -74,7 +146,8 @@ export function hoursIn(t: string): number | null {
  */
 export function parseSleepStatement(message: unknown): SleepStatement | null {
   if (typeof message !== "string" || message.length > 400) return null;
-  const t = fold(message);
+  // «a las 5 y media» es una hora del reloj, no 5,5 horas dormidas
+  const t = fold(message).replace(HORA_DICHA, " ");
   const slept = /\b(dormi|he dormido|habre dormido|dormimos|alcance a dormir|pude dormir)\b/.test(t);
   const request = /\b(anot\w*|ingres\w*|registr\w*|guard\w*|pon\w*|deja\w*|cuenta\w*|toma\w*)\b/.test(t) && /\bsueno\b/.test(t);
   if (!slept && !request) return null;

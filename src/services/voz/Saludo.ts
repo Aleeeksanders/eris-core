@@ -44,10 +44,26 @@ export function armarSaludo(d: DatosSaludo): string {
     if (/descansas|descanso/i.test(en[2])) partes.push("Hoy descansas del gym.");
     else if (toca) partes.push(`Hoy toca ${toca[1].trim()}${en[1] ? ` a las ${en[1]}` : ""}.`);
   }
+  // El calendario del teléfono (K2): cuántas cosas y la próxima (sus títulos van entre «»: pueden ser de otros)
+  const cal = linea(/📅\s*\*\*Calendario:\*\*\s*(.+)/);
+  let primeraCal = "";
+  if (cal) {
+    const evs = [...cal[1].matchAll(/(?:(\d{1,2}):(\d{2}) )?(«[^»]*»)( \(todo el día\))?/g)]
+      .map((m) => ({ min: m[1] ? Number(m[1]) * 60 + Number(m[2]) : null, hora: m[1] ? `${m[1]}:${m[2]}` : "", titulo: m[3] }));
+    const ahoraMin = d.ahora.getHours() * 60 + d.ahora.getMinutes();
+    // la próxima: la primera con hora que no haya pasado (hasta 30 min de gracia); si no, una de todo el día
+    const p = evs.find((e) => e.min != null && e.min >= ahoraMin - 30) ?? (evs.every((e) => e.min == null) ? evs[0] : undefined);
+    if (p) {
+      primeraCal = p.titulo;
+      const dicho = p.min != null ? `${p.titulo} a las ${p.hora}` : `${p.titulo}, todo el día`;
+      partes.push(evs.length === 1 ? `En tu calendario tienes ${dicho}.` : `En tu calendario tienes ${evs.length} cosas; la próxima, ${dicho}.`);
+    }
+  }
   // Lo próximo (lo primero de «Lo que sigue» que no sea el entreno, ya dicho)
   const i = ag.split("\n").findIndex((l) => /\*\*Lo que sigue:\*\*/.test(l));
   if (i >= 0) {
-    const sig = ag.split("\n").slice(i + 1).map((l) => /^•\s*(.+)/.exec(l)?.[1]).filter((x): x is string => !!x).find((x) => !/^Entreno/.test(x));
+    const sig = ag.split("\n").slice(i + 1).map((l) => /^•\s*(.+)/.exec(l)?.[1]).filter((x): x is string => !!x)
+      .find((x) => !/^Entreno/.test(x) && !(primeraCal && x.includes(primeraCal))); // (el evento del calendario ya se dijo)
     if (sig) partes.push(`Lo próximo: ${frase(sig).replace(/^(.)/, (c) => c.toLowerCase())}`);
   }
   // Plata: un pago o un ingreso cercano

@@ -17,6 +17,7 @@ import { immediateRoadmap } from "./services/vault/VaultBriefing.js";
 import { afinarVoz, mencionaAntes } from "./services/voz/RutaVoz.js";
 import { CacheVoz, ARRANQUES } from "./services/voz/CacheVoz.js";
 import { paraHablar } from "./services/voz/Hablar.js";
+import { permitidoBloqueado } from "./services/TelefonoParse.js";
 import { PiperProvider } from "./services/tts/PiperProvider.js";
 import { buildSpokenVersion } from "./services/SpokenVersion.js";
 import { ContextCompressor } from "./services/ContextCompressor.js";
@@ -102,6 +103,8 @@ const ROLE_PROMPTS: Record<Role, string> = {
 const PORT = Number(process.env.ERIS_PORT) || 3000;
 const MAX_USER_MESSAGE_CHARS = 8000;
 /** Tamaño máximo (caracteres del JSON) de cada mensaje del teléfono (revisión 2026-10-31, S2). */
+/** K3: lo que Hestia dice con el teléfono bloqueado cuando le piden algo personal */
+const BLOQUEADO_PIDE = "Para eso desbloquea el teléfono; apenas lo hagas, sigo.";
 const WS_TOPE_DEFAULT = 2_000_000;
 const WS_TOPES: Record<string, number> = {
   // fotos, audio y archivos (la foto llega en base64: hasta ~9 MB de imagen)
@@ -111,7 +114,7 @@ const WS_TOPES: Record<string, number> = {
   // lo que va a la memoria y al contexto del modelo: acotado
   update_health_snapshot: 600_000, sync_toji_context: 400_000, save_profile: 200_000, update_financial_context: 120_000, update_inventory_context: 120_000,
   // Hestia por voz: solo texto (el audio lo reconoce el teléfono)
-  voz_turno: 4_000, voz_inicio: 2_000, voz_cortar: 1_000, voz_colgar: 1_000,
+  voz_turno: 4_000, voz_inicio: 2_000, voz_cortar: 1_000, voz_colgar: 1_000, voz_desbloqueado: 1_000,
   update_supplement_context: 40_000, add_journal_entry: 20_000, create_project: 20_000, rename_project: 20_000, update_project: 20_000, tts_request: 20_000,
   save_preference: 12_000, set_tone: 2_000, set_strict_mode: 2_000, set_persona: 2_000, rename_chat: 4_000,
 };
@@ -2494,10 +2497,10 @@ async function startServer() {
           // ─── Hestia por voz (J1, 2026-11-16): una llamada en tiempo real ───
           // El teléfono reconoce la voz (en el aparato) y manda el texto de cada turno; acá el motor de voz responde por tokens, se
           // corta en trozos y Piper los dice uno tras otro (VozSesion). Solo Hestia: rol ikaros en Modo AXS Executive.
-          if (data.type === "voz_inicio" || data.type === "voz_turno" || data.type === "voz_cortar" || data.type === "voz_colgar") {
+          if (data.type === "voz_inicio" || data.type === "voz_turno" || data.type === "voz_cortar" || data.type === "voz_colgar" || data.type === "voz_desbloqueado") {
             const enviar = (m: Record<string, unknown>) => { try { ws.send(JSON.stringify(m)); } catch {} };
             type Pendiente = { id: string; clase: ClaseAprobacion; tool: string; dudas: number };
-            const voz = (ws.data as any).voz as { sesion: VozSesion; sessionId: string; history: any[]; titulado: boolean; aprobacion: Pendiente | null; herramientasTurno: string[]; externoTurno?: boolean; cerrar: () => Promise<void> } | undefined;
+            const voz = (ws.data as any).voz as { sesion: VozSesion; sessionId: string; history: any[]; titulado: boolean; aprobacion: Pendiente | null; herramientasTurno: string[]; externoTurno?: boolean; bloqueado?: boolean; pendiente?: string | null; cerrar: () => Promise<void> } | undefined;
             /** Responde la aprobación pendiente de la llamada (como si tocara la tarjeta: la tarjeta se cierra sola) */
             const resolverAprobacion = (d: "approved" | "denied", porVoz?: string) => {
               const a = voz?.aprobacion;
@@ -2535,6 +2538,9 @@ async function startServer() {
               const llamada = { sessionId, history: [] as any[], titulado: false, sesion: null as unknown as VozSesion, muletillas: [] as Array<{ wav: Buffer; texto: string }>, aprobacion: null as Pendiente | null, plata: false, muletillaLarga: null as { wav: Buffer; texto: string } | null, herramientasTurno: [] as string[], externoTurno: false,
                 // J3: lo que pasó (para el resumen al colgar) y la llamada anterior (para «lo que hablamos ayer»)
                 inicio: new Date(), eventos: [] as EventoLlamada[], anterior: null as string | null, cerrada: false,
+                // K3: abierta con el botón del asistente sobre la pantalla de bloqueo: solo lo seguro hasta que desbloquees (lo pedido
+                // queda en «pendiente» y sigue solo al desbloquear)
+                bloqueado: data.bloqueado === true, pendiente: null as string | null,
                 cerrar: async () => {} };
               llamada.anterior = llamadaReciente(await memory.get(CLAVE_LLAMADAS).catch(() => null), new Date())?.resumen ?? null;
               llamada.cerrar = async () => {
@@ -2559,6 +2565,14 @@ async function startServer() {
                   // La hora y la fecha, por código y al instante (J2)
                   const directa = respuestaDirecta(texto, ahora);
                   if (directa) return { content: directa, quick: true };
+                  // K3: con el teléfono bloqueado, solo lo seguro y por código (TelefonoParse.SEGURAS_BLOQUEADO: alarma, temporizador,
+                  // linterna, volumen, música, batería). Lo demás espera: se le pide a la app que muestre el desbloqueo, y al
+                  // desbloquear (voz_desbloqueado) lo pedido sigue solo.
+                  if (llamada.bloqueado && !permitidoBloqueado(texto)) {
+                    llamada.pendiente = texto;
+                    enviar({ type: "voz_desbloquear" });
+                    return { content: BLOQUEADO_PIDE, quick: true };
+                  }
                   const dia = ahora.toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" });
                   const hora = ahora.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
                   // Plata (J2): la respuesta entera y revisada antes de decirla. Por tokens, la guardia de cifras de dinero quitaba
@@ -2602,13 +2616,15 @@ async function startServer() {
                     // escrita «Ahora: …», el modelo la leía en voz alta al comienzo de cada respuesta (prueba J1)
                     `(Dato interno, no lo repitas: hoy es ${dia} y son las ${hora}, hora de Chile.)` +
                       // (J3: solo si habla de algo anterior: son ~300 tokens que se leen en cada pasada)
-                      (llamada.anterior && mencionaAntes(texto) ? `\n(La llamada anterior, por si la menciona; no la repitas si no:\n${llamada.anterior})` : ""),
+                      (llamada.anterior && !llamada.bloqueado && mencionaAntes(texto) ? `\n(La llamada anterior, por si la menciona; no la repitas si no:\n${llamada.anterior})` : ""),
                     "flash",
                     {
                       profileId, memory, role: (ws.data as any).role, wsClient: ws,
                       llm: { provider, model: THINKING_MODES.flash.model },
                       glucoService: activeGlucoServices.get(profileId) || null,
                       foodService: unifiedFood, axsMode: true, voz: true,
+                      // (y aunque lo dicho calce, sobre la pantalla de bloqueo nunca el modelo: solo el atajo del teléfono)
+                      ...(llamada.bloqueado ? { soloAtajos: { herramientas: ["telefono"], sinAtajo: BLOQUEADO_PIDE } } : {}),
                     },
                     texto,
                     signal,
@@ -2642,7 +2658,7 @@ async function startServer() {
               // hoy?») y lo inmediato de AXS. Corto en voz, el día completo en la pantalla. saludo:false = sin saludo; true = igual
               // (las pruebas). Si alcanzó a hablar antes, no va.
               void (async () => {
-                if (data.saludo === false) return;
+                if (data.saludo === false || llamada.bloqueado) return; // (bloqueado: el saludo es tu día, nada que decir en voz alta)
                 const hoy = new Date().toDateString();
                 if (data.saludo !== true && (await memory.get("voz_saludo_dia").catch(() => null)) === hoy) return;
                 const toolCtx = {
@@ -2657,14 +2673,25 @@ async function startServer() {
                 const datos = { nombre, ahora: new Date(), agenda, inmediatas };
                 const texto = armarSaludo(datos);
                 await memory.set("voz_saludo_dia", hoy);
-                llamada.history.push(createMessage("assistant", texto));
+                // K2: si trae títulos del calendario (pueden ser invitaciones de otros), en el historial va como dato
+                llamada.history.push({ ...createMessage("assistant", texto), ...((ag?.metadata as any)?.untrusted ? { trace: { tools: ["day_agenda"], externo: true } } : {}) });
                 await llamada.sesion.turno("", Date.now(), { respuesta: texto, detalle: detalleSaludo(datos) });
               })().catch((e) => console.warn("[Voz] no pude saludar:", e));
               return;
             }
+            // K3: desbloqueaste el teléfono durante la llamada: desde ahora, todo; y lo que pediste bloqueado, sigue solo
+            let pedidoBloqueado: string | null = null;
+            if (data.type === "voz_desbloqueado") {
+              if (!voz?.bloqueado) return;
+              voz.bloqueado = false;
+              pedidoBloqueado = voz.pendiente ?? null;
+              voz.pendiente = null;
+              console.log(`[Voz] ${profileId}: teléfono desbloqueado en la llamada${pedidoBloqueado ? " (sigue lo pendiente)" : ""}`);
+              if (!pedidoBloqueado) return;
+            }
             // voz_turno
             if (!voz) { enviar({ type: "voz_error", mensaje: "La llamada no está iniciada." }); return; }
-            const texto = String(data.texto ?? "").trim().slice(0, 1000);
+            const texto = String(pedidoBloqueado ?? data.texto ?? "").trim().slice(0, 1000);
             if (!texto) return;
             // ¿Contesta la pregunta de una aprobación? (J2) Lo decide este código; el turno que espera sigue con la respuesta
             if (voz.aprobacion) {

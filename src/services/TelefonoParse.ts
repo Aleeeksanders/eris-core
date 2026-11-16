@@ -5,6 +5,7 @@
 // ============================================================
 
 import type { TelefonoOp } from "./TelefonoBridge.js";
+import { parseAgendar, pideCalendario } from "./TelefonoK2.js";
 
 const fold = (t: string) => String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[¿?¡!.,;]+/g, " ").replace(/\s+/g, " ").trim();
 
@@ -75,7 +76,7 @@ export function appDelTelefono(nombre: string, apps: string[]): string | null {
  * El texto plegado (sin tildes, minúsculas, sin signos, espacios simples) y, para cada letra, su posición en el original: así el
  * mensaje que dicta («respóndele que llego en 10, Brian») se saca del ORIGINAL, con sus mayúsculas y tildes.
  */
-function plegarConMapa(original: string): { t: string; pos: number[] } {
+export function plegarConMapa(original: string): { t: string; pos: number[] } {
   let t = ""; const pos: number[] = [];
   let espacio = true;
   for (let i = 0; i < original.length; i++) {
@@ -150,6 +151,10 @@ export function parseTelefono(texto: string, apps: string[] = []): TelefonoOp | 
   // K1 primero: «respóndele que pongo la alarma a las 7» es un mensaje, no una alarma
   const k1 = parseMensajes(texto, t);
   if (k1) return k1;
+  // K2: agendar («agéndame una reunión con Brian mañana a las 10») y leer el calendario
+  const ag = parseAgendar(texto);
+  if (ag) return { accion: "agendar", titulo: ag.titulo, cuando: ag.cuando };
+  if (pideCalendario(texto)) return { accion: "calendario", cuando: texto };
   if (t.length > 160) return null;
 
   // Alarma
@@ -197,4 +202,19 @@ export function parseTelefono(texto: string, apps: string[] = []): TelefonoOp | 
     if (TEL.test(t)) return { accion: "abrir_app", nombre: ab[1].trim() };
   }
   return null;
+}
+
+/**
+ * K3 (2026-11-16): con el teléfono BLOQUEADO (la llamada se abrió con el botón del asistente sobre la pantalla de bloqueo) Hestia
+ * hace solo lo que no expone nada tuyo ni afecta a otros: alarma, temporizador, linterna, volumen, música y batería (la hora y la
+ * fecha van aparte, por código). Mensajes, llamadas, el calendario, abrir apps (Android pide desbloquear igual) y todo lo demás
+ * espera a que desbloquees: cualquiera que tenga el teléfono en la mano podría decir «léeme los mensajes». Lo decide este código,
+ * no el modelo.
+ */
+export const SEGURAS_BLOQUEADO = new Set(["alarma", "temporizador", "linterna", "volumen", "musica", "bateria"]);
+
+/** ¿Esto se puede hacer con el teléfono bloqueado? */
+export function permitidoBloqueado(texto: string): boolean {
+  const op = parseTelefono(texto);
+  return !!op && SEGURAS_BLOQUEADO.has(String(op.accion));
 }

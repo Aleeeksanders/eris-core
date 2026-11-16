@@ -13,16 +13,17 @@ import { Tool, type PreflightResult, type ToolExecutionResult } from "../Tool.js
 import { canTelefono, appsDelTelefono, requestTelefonoOp, type TelefonoOp, type TelefonoResult } from "../services/TelefonoBridge.js";
 import { parseTelefono, duracionDicha, horaDicha } from "../services/TelefonoParse.js";
 import { planear, preguntaPlan, detallePlan, ejecutarPlan, formatearMensajes, respuestaMusica, type Plan, type MsgTel, type UltimoChat } from "../services/TelefonoK1.js";
+import { planAgendar, preguntaAgendar, respuestaAgendar, rangoDicho, formatearEventos, parseAgendar, type PlanAgendar, type EventoTel } from "../services/TelefonoK2.js";
 
 /** K1: el plan resuelto en preflight (a quién, por dónde) se usa en execute, para hacer exactamente lo que se aprobó */
-const PLANES = new Map<string, { plan: Plan; at: number }>();
+const PLANES = new Map<string, { plan: Plan | PlanAgendar; at: number }>();
 const clavePlan = (ctx: any, input: unknown) => `${ctx?.profileId ?? "?"}|${JSON.stringify(input)}`;
-function guardarPlan(ctx: any, input: unknown, plan: Plan) {
+function guardarPlan(ctx: any, input: unknown, plan: Plan | PlanAgendar) {
   const ahora = Date.now();
   for (const [k, v] of PLANES) if (ahora - v.at > 5 * 60_000) PLANES.delete(k);
   PLANES.set(clavePlan(ctx, input), { plan, at: ahora });
 }
-function tomarPlan(ctx: any, input: unknown): Plan | null {
+function tomarPlan(ctx: any, input: unknown): Plan | PlanAgendar | null {
   const k = clavePlan(ctx, input);
   const v = PLANES.get(k);
   PLANES.delete(k);
@@ -32,7 +33,9 @@ const ultimoChat = (ws: any): UltimoChat | null => (ws?.data as any)?.ultimoChat
 
 const ACCIONES = ["abrir_app", "alarma", "temporizador", "linterna", "volumen", "navegar", "bateria",
   // K1
-  "mensajes", "responder", "llamar", "sms", "whatsapp", "musica"] as const;
+  "mensajes", "responder", "llamar", "sms", "whatsapp", "musica",
+  // K2
+  "calendario", "agendar"] as const;
 /** Las que mandan algo a otra persona o llaman: se resuelve a quién, y se aprueba leyendo el texto (TelefonoK1) */
 const A_OTROS = new Set(["responder", "llamar", "sms", "whatsapp"]);
 
@@ -44,6 +47,11 @@ const Schema = z.object({
   que: z.enum(["pausa", "sigue", "siguiente", "anterior", "que_suena"]).optional().describe("musica: qué hacer"),
   canal: z.enum(["auto"]).optional().describe("Interno"),
   codigos: z.boolean().optional().describe("Interno: mostrar los códigos de verificación (solo si los pidió)"),
+  // K2
+  titulo: z.string().optional().describe("agendar: el nombre del evento («Reunión con Brian»)"),
+  cuando: z.string().optional().describe("calendario/agendar: CUÁNDO, tal como lo dijo («mañana a las 4», «el viernes a las 10», «esta semana»). No calcules fechas ni horas: el código las resuelve"),
+  duracionMin: z.number().int().optional().describe("agendar: duración en minutos, solo si la dijo"),
+  lugar: z.string().optional().describe("agendar: dónde, solo si lo dijo"),
   nombre: z.string().optional().describe("abrir_app: el nombre de la app («Spotify», «WhatsApp»)"),
   hora: z.number().int().optional().describe("alarma: la hora (0-23)"),
   minuto: z.number().int().optional().describe("alarma: los minutos (0-59)"),
@@ -121,6 +129,18 @@ export class TelefonoTool extends Tool<Input> {
   }
 
   async preflight(input: Input, context?: any): Promise<PreflightResult> {
+    // K2: agendar — cuándo lo resuelve el código; la tarjeta y la voz dicen qué y cuándo
+    if (input.accion === "agendar") {
+      let plan = planAgendar(input);
+      // si el modelo no pasó el «cuándo» tal como lo dijo (o lo «calculó»), vale lo que dijo Alex
+      if (plan.tipo === "preguntar" && input.titulo) {
+        const dicho = parseAgendar(String(context?.userMessage ?? ""));
+        if (dicho?.cuando) { const p2 = planAgendar({ ...input, cuando: dicho.cuando }); if (p2.tipo === "agendar") plan = p2; }
+      }
+      guardarPlan(context, input, plan);
+      const q = preguntaAgendar(plan);
+      return q ? { ok: true, approval: { title: "Agendar en tu calendario", detail: `${q}\n\n(Hestia Manos · calendario)`, risk: "normal", flags: [] } } : { ok: true };
+    }
     // K1: a quién y por dónde, ANTES de preguntar (la tarjeta y la voz dicen el texto exacto y a quién va)
     if (A_OTROS.has(input.accion)) {
       if (!canTelefono(context?.wsClient)) return { ok: true };
@@ -171,6 +191,23 @@ export class TelefonoTool extends Tool<Input> {
       // Lo que escribieron otros: contenido externo (en este turno no corre nada peligroso)
       return { output: q, metadata: { quickReply: q, untrusted: true, telefonoOk: r.ok } };
     }
+    // ─── K2 ───
+    if (input.accion === "calendario") {
+      const rg = rangoDicho(input.cuando ?? "hoy");
+      const r = await requestTelefonoOp(ws, { accion: "eventos", desde: rg.desde.getTime(), hasta: rg.hasta.getTime() });
+      const evs = (r.ok && Array.isArray(r.data?.eventos) ? r.data.eventos : []) as EventoTel[];
+      const q = r.ok ? formatearEventos(evs, rg.etiqueta, rg.semana)
+        : r.code === "sin_permiso" ? "Hestia Manos no tiene permiso para ver tu calendario: ábrela y dale el permiso." : respuestaTelefono(input, r);
+      // los títulos pueden venir de invitaciones de otras personas: contenido externo
+      return { output: q, metadata: { quickReply: q, untrusted: true, telefonoOk: r.ok } };
+    }
+    if (input.accion === "agendar") {
+      const plan = (tomarPlan(context, input) as PlanAgendar | null) ?? planAgendar(input);
+      if (plan.tipo !== "agendar") return { output: plan.texto, metadata: { quickReply: plan.texto } };
+      const r = await requestTelefonoOp(ws, { accion: "crear_evento", titulo: plan.titulo, inicio: plan.inicio, fin: plan.fin, todoElDia: plan.todoElDia, ...(plan.lugar ? { lugar: plan.lugar } : {}) });
+      const q = respuestaAgendar(plan, r.ok, r.code, r.msg);
+      return { output: q, metadata: { quickReply: q, telefonoOk: r.ok } };
+    }
     if (input.accion === "musica") {
       const r = await requestTelefonoOp(ws, { accion: "musica", que: input.que ?? "que_suena" });
       const q = respuestaMusica(input.que ?? "que_suena", r);
@@ -178,7 +215,7 @@ export class TelefonoTool extends Tool<Input> {
     }
     if (A_OTROS.has(input.accion)) {
       // El plan que se aprobó (preflight); sin él, solo lo que no necesitaba aprobación
-      let plan = tomarPlan(context, input);
+      let plan = tomarPlan(context, input) as Plan | null;
       if (!plan) {
         plan = await planear(ws, input, ultimoChat(ws));
         if (preguntaPlan(plan)) { const q = "Se me perdió el hilo de esa aprobación: pídemelo de nuevo."; return { output: q, metadata: { quickReply: q } }; }

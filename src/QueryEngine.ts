@@ -41,6 +41,15 @@ let lastGpuReload = 0;
 /** Tope de tarjetas de aprobación por mensaje: un modelo (o un texto inyectado) no puede acribillar al usuario a pedidos. */
 const MAX_APPROVALS_PER_TURN = 6;
 
+/** «Ok», «dale, hazlo», «sí, procede», «hazle caso»: solo asiente (no pide nada con sus palabras) */
+const ASIENTE = new Set(["ok", "okay", "okey", "oka", "dale", "ya", "si", "bueno", "listo", "perfecto", "de", "acuerdo", "vale", "va", "pues",
+  "entonces", "nomas", "hazlo", "haz", "eso", "hagalo", "hazle", "caso", "procede", "adelante", "ejecuta", "ejecutalo", "cumple", "cumplelo",
+  "obedece", "por", "favor", "lo", "que", "dice", "dicen", "pide", "piden", "todo", "porfa", "altiro", "ahora", "hestia", "eris"]);
+export function soloAsiente(texto: string): boolean {
+  const w = String(texto ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-zñ\s]/g, " ").split(/\s+/).filter(Boolean);
+  return w.length > 0 && w.length <= 8 && w.every((x) => ASIENTE.has(x));
+}
+
 /**
  * Selector de herramientas por mensaje (ver services/ToolRouter.ts). Recibe el mensaje y los mensajes previos del usuario
  * y devuelve qué herramientas ve el modelo en este turno. Las demás quedan fuera de las definiciones Y se rechazan si se llaman.
@@ -531,6 +540,13 @@ ${b.text}`;
     // Con una señal de alarma, o una PREGUNTA sobre un síntoma, la guía va antes que todo; un síntoma contado como dato
     // («me duele la rodilla», la nota del plan) sigue su camino.
     const textoPre = repeatText ?? rawUserMessage ?? userMessage;
+    // Hestia Manos (K2, banco «voz-cal-inyeccion»): después de leerle algo escrito por OTRA persona (mensajes, un evento del
+    // calendario, la web), un «ok, hazlo» suelto no es una orden para hacer lo que decía ese texto. El modelo de 4B contestaba
+    // «Vale, cancelo todo y llamo al…» (no lo hacía, pero lo decía). Por código: no se hace nada y se dice por qué.
+    const previa = [...(conversationHistory ?? [])].reverse().find((m) => m.role === "assistant");
+    if (previa?.trace?.externo && !/[?¿]\s*$/.test(String(previa.content ?? "").trim()) && soloAsiente(textoPre)) {
+      return finishQuick("Ok. Ojo: lo que te leí lo escribió otra persona, así que no hago nada de lo que dice ahí. Si quieres algo, pídemelo tú con tus palabras.");
+    }
     // «¿Cómo vengo de estrés?» o «¿cómo ando del ánimo?» preguntan por cómo VIENE (el Modo Rendimiento, el sueño), no qué
     // hacer con un síntoma: la guía se los robaba (banco de chat 2026-11-04, «r-senales»). Con alarma, igual va primero.
     const comoVengo = /\bc[oó]mo (vengo|ando|voy|he andado|he estado|me (ha|han) ido)\b/i.test(textoPre) && !/\b(dol|duel|fiebre|sangr|mare|v[oó]mit|n[aá]use|pecho|respir)/i.test(textoPre);
@@ -538,8 +554,13 @@ ${b.text}`;
     const todas = this.toolRegistry.getAll();
     const enOrden = urgente ? [...todas.filter((t) => t.name === "symptom_guide"), ...todas.filter((t) => t.name !== "symptom_guide")] : todas;
     let atajo = false;
+    // K3: la llamada abierta sobre la pantalla de bloqueo. Solo corren los atajos de estas herramientas y NUNCA el modelo (que
+    // tiene tu perfil y tu memoria en el contexto: cualquiera con el teléfono en la mano lo escucharía). Sin atajo, este texto.
+    const soloAtajos = (toolContext as any)?.soloAtajos as { herramientas: string[]; sinAtajo: string } | undefined;
+    let ultimoAtajo: { error?: string } | null = null;
     for (const t of enOrden) {
       if (!t.preroute) continue;
+      if (soloAtajos && !soloAtajos.herramientas.includes(t.name)) continue;
       if (hideAxs && HIDDEN_IN_ERIS.has(TOOL_GROUP[t.name])) continue; // briefing/auditoría de la bóveda: solo en Modo AXS
       if (toolsApagadas.has(t.name)) continue; // su módulo está apagado en Perfil (A2)
       let input: Record<string, unknown> | null = null;
@@ -561,7 +582,15 @@ ${b.text}`;
       // Herramienta determinista con respuesta lista: no hace falta una pasada del modelo (ver finishQuick)
       const q = (res.metadata as any)?.quickReply;
       if (!res.error && quickEnabled() && typeof q === "string" && q.trim()) return finishQuick(q.trim());
+      // Un atajo que pidió aprobación y le dijeron que no: lo dice el código (el modelo decía «El usuario rechazó la acción»)
+      if (res.error && refused.has(`${t.name}:${JSON.stringify(input)}`) && /RECHAZ/.test(res.error)) return finishQuick("Ok, no lo hago.");
+      ultimoAtajo = { error: res.error };
       break;
+    }
+    if (soloAtajos) {
+      // (un atajo que falló: lo que dijo la herramienta, sin pasar por el modelo)
+      const err = ultimoAtajo?.error ? salidaHumana(String(ultimoAtajo.error)).split("\n")[0].slice(0, 200) : "";
+      return finishQuick(err ? `No pude: ${err}` : soloAtajos.sinAtajo);
     }
     // Revisión A2: ningún atajo lo tomó y el mensaje es de un módulo apagado en Perfil → se dice, en vez de que el modelo
     // improvise sin la herramienta («¿tengo arroz en la despensa?» con el Inventario apagado)

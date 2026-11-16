@@ -27,6 +27,7 @@ import { asksToLog } from "../services/FoodParse.js";
 import { loadTargets } from "../services/DailyTargets.js";
 import { sleepSummaryText, sleepReading, hhmmOf, sleepReadiness, sleepDayTip, trainingTimeNote, fmtSleep } from "../services/SleepCore.js";
 import { moduloOn } from "../services/AutoPrefs.js";
+import { canTelefono, requestTelefonoOp } from "../services/TelefonoBridge.js";
 
 const Schema = z.object({
   resto: z.boolean().optional().describe("true si pide planificar el RESTO del día («planifícame el resto del día»): lo que sigue, en orden."),
@@ -119,6 +120,21 @@ export class DayAgendaTool extends Tool<Input> {
       if (tn) head.push(`   🌙 ${tn}`);
       if (td.doneSets === 0) sigue.push({ h: intent?.time ? Number(intent.time.split(":")[0]) + Number(intent.time.split(":")[1] ?? 0) / 60 : 99, t: `Entreno: ${(td.name ?? "").replace(/^\s*d[ií]a\s*\w+\s*[:—–-]\s*/i, "")}${intent?.time ? "" : " (cuando te acomode)"}` });
     } else if (intent?.answer === "si") head.push(`🏋️ **Entreno:** ${intentPhrase(intent)}${intent.time ? ` a las ${intent.time}` : ""}.`);
+
+    // ── El calendario del teléfono (Hestia Manos, K2): solo Ikaros en Modo AXS, y sin esperar más de 4 s al teléfono ──
+    // Los títulos pueden venir de invitaciones de otras personas: la respuesta queda marcada como contenido externo
+    let externo = false;
+    if (context?.role === "ikaros" && context?.axsMode === true && canTelefono(context?.wsClient)) {
+      const desde = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const r = await requestTelefonoOp(context.wsClient, { accion: "eventos", desde, hasta: desde + 86_400_000 }, 4000).catch(() => null);
+      const evs = (r?.ok && Array.isArray(r.data?.eventos) ? r.data.eventos : []) as Array<{ titulo: string; inicio: number; todoElDia: boolean }>;
+      if (evs.length) {
+        externo = true;
+        const hm = (ms: number) => hhmm(new Date(ms));
+        head.push(`📅 **Calendario:** ${evs.slice(0, 5).map((e) => (e.todoElDia ? `«${e.titulo}» (todo el día)` : `${hm(e.inicio)} «${e.titulo}»`)).join("; ")}.`);
+        for (const e of evs) if (!e.todoElDia && e.inicio > now.getTime() - 30 * 60_000) sigue.push({ h: hourOf(new Date(e.inicio)), t: `«${e.titulo}» a las ${hm(e.inicio)}` });
+      }
+    }
 
     // ── Comida (Nutrición) ──
     const G = ctx.goals;
@@ -225,7 +241,7 @@ export class DayAgendaTool extends Tool<Input> {
     const reply = out.join("\n");
     // Tono «brígida» (services/Brigida.ts): una línea de veredicto
     const veredicto = orden.length ? `Te ${orden.length === 1 ? "queda 1 cosa" : `quedan ${orden.length} cosas`} hoy. A darle.` : undefined;
-    return { output: reply, metadata: { quickReply: reply, ...(veredicto ? { veredicto } : {}) } };
+    return { output: reply, metadata: { quickReply: reply, ...(veredicto ? { veredicto } : {}), ...(externo ? { untrusted: true } : {}) } };
   }
 
   /**

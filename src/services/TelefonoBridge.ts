@@ -8,7 +8,9 @@
 export interface TelefonoOp {
   accion: "estado" | "apps" | "abrir_app" | "alarma" | "temporizador" | "linterna" | "volumen" | "navegar" | "bateria"
     // K1
-    | "mensajes" | "responder" | "contactos" | "llamar" | "sms" | "whatsapp" | "musica";
+    | "mensajes" | "responder" | "contactos" | "llamar" | "sms" | "whatsapp" | "musica"
+    // K2: al teléfono van «eventos» y «crear_evento»; «calendario» y «agendar» son de la herramienta (las resuelve el servidor)
+    | "eventos" | "crear_evento" | "calendario" | "agendar";
   nombre?: string; paquete?: string;
   hora?: number; minuto?: number; mensaje?: string;
   segundos?: number;
@@ -21,6 +23,10 @@ export interface TelefonoOp {
   /** responder: «auto» = por su chat si te escribió hace poco; si no, WhatsApp */
   canal?: "auto";
   que?: "pausa" | "sigue" | "siguiente" | "anterior" | "que_suena";
+  // K2: el rango (ms), el evento (título, comienzo y fin en ms) y, para la herramienta, cuándo como lo dijo
+  desde?: number; hasta?: number;
+  titulo?: string; inicio?: number; fin?: number; todoElDia?: boolean; lugar?: string;
+  cuando?: string; duracionMin?: number;
 }
 
 export interface TelefonoResult {

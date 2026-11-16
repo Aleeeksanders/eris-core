@@ -4,11 +4,36 @@
     { "ok": true, "lang": "es-ES", "angle": 0.4, "lines": [ { "text": "...", "words": [ { "t": "...", "x": 1, "y": 2, "w": 3, "h": 4 } ] } ] }
   La imagen la borra el servidor apenas termina.
 #>
-param([Parameter(Mandatory = $true)][string]$Path)
+param([Parameter(Mandatory = $true)][string]$Path, [switch]$Mejorar)
 
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 try {
+  # -Mejorar (2026-11-16): la segunda lectura, en gris, con más contraste y a 2000 px de ancho. Con la foto de la app (grande y
+  # comprimida) el OCR leía mal el pie de la boleta del Jumbo; mejorada, cuadró en 5 de 8 variantes donde la original no.
+  # La copia queda junto a la original (en la carpeta temporal que el servidor borra al terminar).
+  if ($Mejorar) {
+    Add-Type -AssemblyName System.Drawing
+    $src = [System.Drawing.Image]::FromFile((Resolve-Path $Path).Path)
+    $f = 2000 / $src.Width
+    $w = [int]($src.Width * $f); $h = [int]($src.Height * $f)
+    $bmp = New-Object System.Drawing.Bitmap $w, $h
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $c = 1.5; $t = (1 - $c) / 2
+    $m = New-Object System.Drawing.Imaging.ColorMatrix
+    $m.Matrix00 = 0.299 * $c; $m.Matrix01 = 0.299 * $c; $m.Matrix02 = 0.299 * $c
+    $m.Matrix10 = 0.587 * $c; $m.Matrix11 = 0.587 * $c; $m.Matrix12 = 0.587 * $c
+    $m.Matrix20 = 0.114 * $c; $m.Matrix21 = 0.114 * $c; $m.Matrix22 = 0.114 * $c
+    $m.Matrix33 = 1; $m.Matrix40 = $t; $m.Matrix41 = $t; $m.Matrix42 = $t; $m.Matrix44 = 1
+    $ia = New-Object System.Drawing.Imaging.ImageAttributes
+    $ia.SetColorMatrix($m)
+    $g.DrawImage($src, (New-Object System.Drawing.Rectangle 0, 0, $w, $h), 0, 0, $src.Width, $src.Height, [System.Drawing.GraphicsUnit]::Pixel, $ia)
+    $g.Dispose(); $src.Dispose()
+    $Path = Join-Path (Split-Path (Resolve-Path $Path).Path) 'mejorada.png'
+    $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    $bmp.Dispose()
+  }
   Add-Type -AssemblyName System.Runtime.WindowsRuntime
   $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
   $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]

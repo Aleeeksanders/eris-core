@@ -6,13 +6,21 @@
 // ============================================================
 
 export interface TelefonoOp {
-  accion: "estado" | "apps" | "abrir_app" | "alarma" | "temporizador" | "linterna" | "volumen" | "navegar" | "bateria";
+  accion: "estado" | "apps" | "abrir_app" | "alarma" | "temporizador" | "linterna" | "volumen" | "navegar" | "bateria"
+    // K1
+    | "mensajes" | "responder" | "contactos" | "llamar" | "sms" | "whatsapp" | "musica";
   nombre?: string; paquete?: string;
   hora?: number; minuto?: number; mensaje?: string;
   segundos?: number;
   encender?: boolean;
   cambio?: "subir" | "bajar" | "silencio" | "maximo" | "nivel"; nivel?: number;
   destino?: string;
+  // K1: a quién (como lo dijo), en qué app, el texto exacto, el número ya resuelto, la conversación
+  persona?: string; app?: string; horas?: number; codigos?: boolean;
+  texto?: string; numero?: string; chat?: string;
+  /** responder: «auto» = por su chat si te escribió hace poco; si no, WhatsApp */
+  canal?: "auto";
+  que?: "pausa" | "sigue" | "siguiente" | "anterior" | "que_suena";
 }
 
 export interface TelefonoResult {

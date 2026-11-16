@@ -71,10 +71,86 @@ export function appDelTelefono(nombre: string, apps: string[]): string | null {
   return lista.find((x) => x.p === q)?.a ?? lista.find((x) => x.p.startsWith(q) && q.length >= 3)?.a ?? null;
 }
 
+/**
+ * El texto plegado (sin tildes, minúsculas, sin signos, espacios simples) y, para cada letra, su posición en el original: así el
+ * mensaje que dicta («respóndele que llego en 10, Brian») se saca del ORIGINAL, con sus mayúsculas y tildes.
+ */
+function plegarConMapa(original: string): { t: string; pos: number[] } {
+  let t = ""; const pos: number[] = [];
+  let espacio = true;
+  for (let i = 0; i < original.length; i++) {
+    const base = original[i].normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+    const c = /[¿?¡!.,;\s]/.test(base) ? " " : base;
+    if (c === " ") { if (!espacio) { t += " "; pos.push(i); espacio = true; } continue; }
+    for (const ch of c) { t += ch; pos.push(i); }
+    espacio = false;
+  }
+  if (t.endsWith(" ")) { t = t.slice(0, -1); pos.pop(); }
+  return { t, pos };
+}
+/** Desde la posición `desde` del texto plegado, el tramo del original (sin el signo final) */
+const tramo = (original: string, m: { pos: number[] }, desde: number) => original.slice(m.pos[desde] ?? original.length).trim().replace(/[\s.!?¿¡]+$/, "");
+
+/** Cómo se nombra cada app de mensajes al pedir «léeme los de WhatsApp» */
+const APP_DICHA: Array<[RegExp, string]> = [[/whatsapp|wsp|wasap/, "whatsapp"], [/telegram/, "telegram"], [/gmail|correos?|mails?/, "gmail"],
+  [/instagram|insta/, "instagram"], [/messenger/, "messenger"], [/mensajes? de texto|sms/, "mensajes"]];
+const appDe = (t: string) => APP_DICHA.find(([re]) => re.test(t))?.[1];
+
+/** K1: mensajes, llamadas y música. null = no es de esto. */
+function parseMensajes(original: string, t: string): TelefonoOp | null {
+  // Música (las sesiones de medios: Spotify, YouTube Music…)
+  // (la música se nombra: «pon el tema para la reunión» no es pausar)
+  if (/\b(musica|cancion|spotify|reproduccion)\b/.test(t) || /^(pausa|play|dale play)$/.test(t)) {
+    if (/\bque (cancion|musica) (es|suena|esta sonando|estoy escuchando)\b|\bcomo se llama (esta|la) cancion\b/.test(t)) return { accion: "musica", que: "que_suena" };
+    if (/\b(siguiente|proxima|otra) cancion\b|\b(salta|pasa|cambia)\w* (la |esta )?cancion\b/.test(t)) return { accion: "musica", que: "siguiente" };
+    if (/\bcancion anterior\b|\bla cancion de antes\b/.test(t)) return { accion: "musica", que: "anterior" };
+    if (/\b(pausa\w*|pon(le|me)? pausa|deten\w*|para|parala|apaga)( a)? (la |el )?(musica|cancion|spotify|reproduccion)\b|^pausa$/.test(t)) return { accion: "musica", que: "pausa" };
+    if (/\b(sigue|continua|reanuda|dale play|pon(le)? play|play)( (con )?(la |el )?(musica|cancion|spotify))?\b/.test(t)) return { accion: "musica", que: "sigue" };
+  }
+  const m = plegarConMapa(original);
+  // Responder a quien te escribió: «respóndele (a Brian) que llego en 10», «contéstale que sí»
+  let r = /^(?:oye )?(?:respondele|contestale|responde|contesta)(?: a ([a-z0-9 ]+?))? (?:diciendo que|que|diciendo|con) /.exec(m.t);
+  if (r) {
+    const texto = tramo(original, m, r[0].length);
+    if (texto) return { accion: "responder", ...(r[1] ? { persona: r[1].trim() } : {}), texto };
+  }
+  // Un WhatsApp o un SMS a alguien: «mándale un WhatsApp a Carla que llego tarde», «envíale un SMS a Brian diciendo que voy»
+  r = /^(?:oye )?(?:mandale|enviale|manda|envia|escribele) (?:un |una )?(whatsapp|wsp|wasap|sms|mensaje de texto|mensajito|mensaje|nota de voz)(?: por whatsapp)? a ([a-z0-9 ]+?) (?:diciendo que|que|diciendo|con el texto) /.exec(m.t);
+  if (r) {
+    const texto = tramo(original, m, r[0].length);
+    if (!texto) return null;
+    const canal = /whatsapp|wsp|wasap/.test(r[1]) || /por whatsapp/.test(r[0]) ? "whatsapp" : /sms|texto/.test(r[1]) ? "sms" : null;
+    return canal ? { accion: canal, persona: r[2].trim(), texto } : { accion: "responder", persona: r[2].trim(), texto, canal: "auto" };
+  }
+  // «dile a Brian que llego en 10», «escríbele a mi mamá que voy»: por su chat, si te escribió hace poco; si no, WhatsApp
+  r = /^(?:oye )?(?:dile|digale|escribele|avisale) a ([a-z0-9 ]+?) que /.exec(m.t);
+  if (r) {
+    const texto = tramo(original, m, r[0].length);
+    if (texto) return { accion: "responder", persona: r[1].trim(), texto, canal: "auto" };
+  }
+  // Llamar: «llama a mi mamá», «llámale a Brian», «márcale a la Carla» (no «llámame a las 8», que es un recordatorio)
+  r = /^(?:oye )?(?:llama|llamale|llamame|marca|marcale|marcame)(?: a)? (?!(?:a )?las? (?:\d|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\b)([a-z0-9 ]{2,40})$/.exec(m.t);
+  if (r && !/^(el|al) (pc|computador)/.test(r[1])) return { accion: "llamar", persona: r[1].replace(/^(a|al|la|el) /, "").trim() };
+  // Leer: «léeme los mensajes», «¿quién me escribió?», «¿tengo mensajes nuevos de WhatsApp?», «¿qué me dijo Brian?»
+  const dijo = /\bque (?:me )?(?:dijo|escribio|mando|puso|respondio|contesto) (?:el |la )?([a-z0-9 ]{2,40})$/.exec(t);
+  if (dijo && !/\b(medico|doctor|eris|hestia)\b/.test(dijo[1])) return { accion: "mensajes", persona: dijo[1].trim() };
+  const lee = /\b(leeme|lee|dime|revisa|muestrame)\b.*\b(mensajes?|whatsapps?|wsps?|correos?|mails?|notificaciones|chats?)\b|\b(quien|alguien) me (escribio|hablo|mando)\b|\b(tengo|hay|llegaron|me llego|me llegaron)\b.*\b(mensajes?|whatsapps?|correos?|notificaciones)\b|^(mensajes|mis mensajes)$/.test(t);
+  if (lee) {
+    const de = /\b(?:mensajes?|whatsapps?|correos?|mails?|chats?) de (?!whatsapp|telegram|gmail|instagram|messenger|correo|texto|hoy|ayer|esta)(?:el |la )?([a-z0-9 ]{2,40})$/.exec(t);
+    const app = appDe(t);
+    return { accion: "mensajes", ...(de ? { persona: de[1].trim() } : {}), ...(app ? { app } : {}), ...(/\bcodigos?\b/.test(t) ? { codigos: true } : {}) };
+  }
+  return null;
+}
+
 /** La orden del teléfono dicha, o null si no es una (o habla del PC). `apps`: las del teléfono, para «abre X». */
 export function parseTelefono(texto: string, apps: string[] = []): TelefonoOp | null {
   const t = fold(texto);
-  if (!t || t.length > 160 || PC.test(t)) return null;
+  if (!t || t.length > 300 || PC.test(t)) return null;
+  // K1 primero: «respóndele que pongo la alarma a las 7» es un mensaje, no una alarma
+  const k1 = parseMensajes(texto, t);
+  if (k1) return k1;
+  if (t.length > 160) return null;
 
   // Alarma
   if (/\b(alarma|despiertame|despertador)\b/.test(t) && !/\b(apaga|quita|borra|elimina|cancela|desactiva)\w*\b/.test(t)) {

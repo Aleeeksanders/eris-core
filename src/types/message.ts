@@ -32,7 +32,7 @@ export interface Message {
    * salió al instante y cuánto tardó. Solo nombres y errores, nunca lo que devolvieron (eso tiene datos de la persona).
    * Antes no quedaba nada y no se podía distinguir un «✅ anotado» real de uno inventado.
    */
-  trace?: { tools: string[]; errors?: string[]; quick?: boolean; ms?: number };
+  trace?: { tools: string[]; errors?: string[]; quick?: boolean; ms?: number; /** K1: citó contenido de otros (mensajes, web): en el historial va marcado como dato */ externo?: boolean };
 }
 
 export interface ConversationContext {

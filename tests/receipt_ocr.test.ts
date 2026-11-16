@@ -105,7 +105,7 @@ test("Jumbo de cerca: los 5 productos con su código de barras, el TOTAL que cua
   ]);
   expect(r.items[0].desc).toBe("Botella 1LT Keep");
   expect(r.items[2]).toMatchObject({ cant: 2, unit: 2650, descuento: -1010 });
-  expect(r.comercio).toBe("CENCOSUD RETAIL S.A.");
+  expect(r.comercio).toBe("Jumbo"); // la cadena (11-16), no la razón social
   expect(r.dudosas).toEqual([]);
 });
 
@@ -122,7 +122,7 @@ test("Jumbo entera (letra más chica): un precio ilegible se calcula con el tota
   // «16/11/26» (un 5 leído como 6) es mañana: vale la del número largo (20261115…); no la de los puntos (13-11)
   expect(r.fecha).toBe("2026-11-15");
   expect(r.hora).toBe("18:07");
-  expect(r.comercio).toBe("CENCOSUD RETAIL S.A."); // «sil SANTIAGO PONIENTE» es el SII
+  expect(r.comercio).toBe("Jumbo"); // la cadena (11-16), no la razón social // «sil SANTIAGO PONIENTE» es el SII
   // Con el día siguiente, «16/11» sería válida: manda lo que dice la boleta
   const r2 = armarBoleta(fx("boleta_jumbo_entera"), "2026-11-16");
   expect(r2.ok && r2.fecha).toBe("2026-11-16");
@@ -177,4 +177,71 @@ test("factura con precios netos: se le suma el IVA a cada producto y cuadra con 
   expect(r.cuadra).toBe(true);
   expect(r.items.map((i) => i.monto)).toEqual([11901, 17579]);
   expect(r.comercio).toBe("FERRETERIA DEMO SPA");
+});
+
+// ─── 2026-11-16: 15 fotos de la misma boleta del Jumbo sacadas con la app, ninguna cuadró ───
+// Fixtures: la foto real de antes, agrandada y comprimida como la de la app (≈12 MP, JPEG al 50 %) y además girada 3°.
+import { etiquetaPie, totalDelPie, puntajeBoleta } from "C:/Proyectos/eris/src/services/ReceiptOcr.ts";
+
+test("las etiquetas del pie aunque el OCR las lea mal", () => {
+  expect(etiquetaPie("TOIAL $")).toBe("total");
+  expect(etiquetaPie("DESCUENIOS")).toBe("descuentos");
+  expect(etiquetaPie("T. OEB]IO")).toBe("pago");
+  expect(etiquetaPie("TOTAL IVA 19,00%")).toBe("iva");
+  expect(etiquetaPie("TOTAL 19,00%")).toBe("iva"); // sin la palabra IVA: igual es el IVA, no el total
+  expect(etiquetaPie("Sub Toíal $")).toBe("subtotal");
+  expect(etiquetaPie("NETO")).toBe("neto");
+  expect(etiquetaPie("LECHE PRO 1L CHOC")).toBeNull();
+});
+
+test("el total por la aritmética del pie (subtotal − descuentos, neto + IVA, lo pagado)", () => {
+  const v = (x: number, tipo: any = null) => ({ v: x, tipo });
+  // la etiqueta «TOTAL» quedó con el IVA: el total no es $4.708
+  expect(totalDelPie([v(31500, "subtotal"), v(24772), v(4708, "total"), v(2020, "descuentos"), v(29480)], 29480, 4708)).toBe(29480);
+  // sin ninguna etiqueta y con un producto que no se leyó (la suma no calza): igual el total
+  expect(totalDelPie([v(31500), v(24772), v(4708), v(2020), v(29480), v(29480)], 24180)).toBe(29480);
+  // una factura de precios netos: el total es neto + IVA, no el neto (aunque la suma de los productos sea el neto)
+  expect(totalDelPie([v(24772, "neto"), v(4708, "iva"), v(29480, "total")], 24772, 29480)).toBe(29480);
+  // sin pie: queda lo etiquetado
+  expect(totalDelPie([], 1990, 1990)).toBe(1990);
+});
+
+test("la foto de la app (grande y comprimida): el total ya no es el IVA, cuadra, y el comercio es Jumbo", () => {
+  const r = armarBoleta(fx("boleta_jumbo_app"), "2026-11-16");
+  expect(r.ok).toBe(true);
+  if (!r.ok) return;
+  expect(r.total).toBe(29480);
+  expect(r.cuadra).toBe(true);
+  expect(r.comercio).toBe("Jumbo");
+  expect(r.items.length).toBe(5);
+});
+
+test("dos lecturas: si la foto tal cual no cuadra, se lee la mejorada y se queda la mejor", async () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0]);
+  const pedidas: boolean[] = [];
+  const r = await leerBoletaFoto(png.toString("base64"), async (_p, mejorar) => { pedidas.push(!!mejorar); return fx(mejorar ? "boleta_jumbo_app_rot_mej" : "boleta_jumbo_app_rot"); });
+  expect(pedidas).toEqual([false, true]);
+  expect(r.ok && r.cuadra).toBe(true);
+  expect(r.ok && r.total).toBe(29480);
+  // la que ya cuadra no pide la segunda
+  const una: boolean[] = [];
+  await leerBoletaFoto(png.toString("base64"), async (_p, mejorar) => { una.push(!!mejorar); return fx("boleta_jumbo_app"); });
+  expect(una).toEqual([false]);
+  expect(puntajeBoleta({ ok: false, code: "ocr", msg: "" })).toBe(-1);
+});
+
+test("una oferta mayor que el producto de arriba no es suya; «OUMBO AS» sin el menos igual es la oferta", () => {
+  const fila = (y: number, label: string, precio?: string) => [
+    ...label.split(" ").map((t, i) => ({ t, x: 10 + i * 90, y, w: 80, h: 20 })),
+    ...(precio ? [{ t: precio, x: 600 - precio.length * 12, y, w: precio.length * 12, h: 20 }] : []),
+  ];
+  const fs2 = [
+    fila(0, "JUMBO"), fila(30, "LECHE PRO 1L CAPPU", "5.300"), fila(60, "OUMBO AS", "1.010"),
+    fila(90, "CHICLE", "300"), fila(120, "JUMBO OFERTAS", "-1.010"), fila(150, "TOTAL", "4.590"),
+  ];
+  const r = armarBoleta({ ok: true, lines: fs2.map((w) => ({ text: w.map((x) => x.t).join(" "), words: w })) }, "2026-11-16");
+  expect(r.ok).toBe(true);
+  if (!r.ok) return;
+  expect(r.items.map((i) => [i.desc, i.monto])).toEqual([["Leche Pro 1L Cappu", 4290], ["Chicle", 300]]);
+  expect(r.comercio).toBe("Jumbo");
 });

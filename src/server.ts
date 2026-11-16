@@ -1899,7 +1899,9 @@ async function startServer() {
           if (data.type === "finance_receipt_photo") {
             const img = typeof data.image === "string" ? data.image : "";
             let r: any;
-            try { r = await leerBoletaFoto(img); } catch { r = { ok: false, code: "ocr", msg: "No pude leer la foto." }; }
+            // (para la cuenta de Alex queda lo que leyó el OCR —texto y posiciones, nunca la foto— para revisar las que no cuadran)
+            const guardar = (ws.data as any).role === "ikaros" ? join(os.homedir(), ".eris", "boletas_ocr") : undefined;
+            try { r = await leerBoletaFoto(img, undefined, { guardar }); } catch { r = { ok: false, code: "ocr", msg: "No pude leer la foto." }; }
             if (r.ok) console.log(`[Finanzas] boleta de ${profileId}: ${r.items.length} productos, ${r.cuadra ? "cuadra" : "NO cuadra"} con el total`);
             ws.send(JSON.stringify({ type: "finance_receipt_read", requestId: data.requestId, ...r }));
             return;
@@ -2406,6 +2408,7 @@ async function startServer() {
               tools: traceTools,
               ...(traceErrors.length ? { errors: traceErrors } : {}),
               ...(queryResult.quick ? { quick: true } : {}),
+              ...(queryResult.externo ? { externo: true } : {}), // K1: citó a otros: en el historial va como dato
               ms: Date.now() - startTime,
             };
             history.push(response);
@@ -2494,7 +2497,7 @@ async function startServer() {
           if (data.type === "voz_inicio" || data.type === "voz_turno" || data.type === "voz_cortar" || data.type === "voz_colgar") {
             const enviar = (m: Record<string, unknown>) => { try { ws.send(JSON.stringify(m)); } catch {} };
             type Pendiente = { id: string; clase: ClaseAprobacion; tool: string; dudas: number };
-            const voz = (ws.data as any).voz as { sesion: VozSesion; sessionId: string; history: any[]; titulado: boolean; aprobacion: Pendiente | null; herramientasTurno: string[]; cerrar: () => Promise<void> } | undefined;
+            const voz = (ws.data as any).voz as { sesion: VozSesion; sessionId: string; history: any[]; titulado: boolean; aprobacion: Pendiente | null; herramientasTurno: string[]; externoTurno?: boolean; cerrar: () => Promise<void> } | undefined;
             /** Responde la aprobación pendiente de la llamada (como si tocara la tarjeta: la tarjeta se cierra sola) */
             const resolverAprobacion = (d: "approved" | "denied", porVoz?: string) => {
               const a = voz?.aprobacion;
@@ -2529,7 +2532,7 @@ async function startServer() {
               voz?.sesion.cortar();
               void voz?.cerrar().catch(() => {});
               const sessionId = `voz_${Date.now()}`;
-              const llamada = { sessionId, history: [] as any[], titulado: false, sesion: null as unknown as VozSesion, muletillas: [] as Array<{ wav: Buffer; texto: string }>, aprobacion: null as Pendiente | null, plata: false, muletillaLarga: null as { wav: Buffer; texto: string } | null, herramientasTurno: [] as string[],
+              const llamada = { sessionId, history: [] as any[], titulado: false, sesion: null as unknown as VozSesion, muletillas: [] as Array<{ wav: Buffer; texto: string }>, aprobacion: null as Pendiente | null, plata: false, muletillaLarga: null as { wav: Buffer; texto: string } | null, herramientasTurno: [] as string[], externoTurno: false,
                 // J3: lo que pasó (para el resumen al colgar) y la llamada anterior (para «lo que hablamos ayer»)
                 inicio: new Date(), eventos: [] as EventoLlamada[], anterior: null as string | null, cerrada: false,
                 cerrar: async () => {} };
@@ -2610,6 +2613,7 @@ async function startServer() {
                     texto,
                     signal,
                   );
+                  llamada.externoTurno = !!r.externo; // K1: citó a otros (sus mensajes): en el historial va como dato
                   return { content: r.message.content, quick: r.quick, stopped: r.stopped };
                 },
               });
@@ -2679,9 +2683,10 @@ async function startServer() {
             ctxUso.tipo = "voz";
             voz.history.push(createMessage("user", texto));
             voz.herramientasTurno = [];
+            voz.externoTurno = false;
             const r = await voz.sesion.turno(texto, Date.now());
             // con las herramientas del turno (trace): así «¿y eso alcanza?» sigue el hilo con las mismas (ToolRouter.seguimiento)
-            if (r) voz.history.push({ ...createMessage("assistant", r.respuesta), trace: { tools: [...new Set(voz.herramientasTurno)] } });
+            if (r) voz.history.push({ ...createMessage("assistant", r.respuesta), trace: { tools: [...new Set(voz.herramientasTurno)], ...(voz.externoTurno ? { externo: true } : {}) } });
             // La llamada queda como su propia conversación de Hestia (la transcripción): no aparece en vivo en el chat
             try {
               await memory.saveConversation(voz.sessionId, voz.history, "hestia");

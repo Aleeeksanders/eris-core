@@ -11,7 +11,7 @@
 // ============================================================
 
 import { spawn } from "child_process";
-import { mkdtemp, writeFile, rm } from "fs/promises";
+import { mkdtemp, writeFile, rm, mkdir, readdir } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { parseMonto } from "./FinanceStatement.js";
@@ -80,6 +80,72 @@ function precioDe(t: string): number | null {
   return n == null ? null : n;
 }
 
+// ─── El pie leído con errores (2026-11-16, 15 fotos de la misma boleta del Jumbo sin cuadrar) ─────────────
+/** Distancia de edición (para «TOIAL» = total, «DESCUENIOS» = descuentos, «OEB]IO» = débito) */
+function distancia(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+export type EtiquetaPie = "subtotal" | "total" | "neto" | "iva" | "descuentos" | "pago" | "vuelto";
+/** ¿Qué línea del pie es? (con las letras que el OCR confunde: «]» por «I», «0» por «O») */
+export function etiquetaPie(label: string): EtiquetaPie | null {
+  const f = fold(label).replace(/[\]|!\[]/g, "i").replace(/0/g, "o").replace(/[^a-z0-9%\s]/g, " ");
+  const ws = f.split(/\s+/).filter(Boolean);
+  const cerca = (w: string, k: string) => w === k || (k.length >= 4 && w.length >= 3 && distancia(w, k) <= (k.length >= 6 ? 2 : 1));
+  const tiene = (k: string) => ws.some((w) => cerca(w, k));
+  const esIva = tiene("iva") || /\b19\s?[,.]?\s?(oo)?\s?%/.test(f);
+  if (/\bsub\s?t/.test(f) || tiene("subtotal")) return "subtotal";
+  if (tiene("descuentos") || tiene("descuento") || /\bdcto|\bdscto/.test(f)) return "descuentos";
+  if (esIva) return "iva";
+  if (tiene("neto") || tiene("afecto")) return "neto";
+  if (tiene("total")) return "total";
+  if (["debito", "credito", "efectivo", "tarjeta", "redcompra", "pagado"].some(tiene)) return "pago";
+  if (tiene("vuelto") || tiene("cambio")) return "vuelto";
+  return null;
+}
+
+/**
+ * El TOTAL por la aritmética del pie, aunque las etiquetas se lean mal o queden corridas (la del TOTAL quedó 90 px más arriba que
+ * su número y la de «TOTAL IVA 19,00%» perdió el «IVA»: el total salía $4.708). En la boleta: subtotal − descuentos = total,
+ * neto + IVA (19 % del neto) = total, el pago (débito) repite el total, y la suma de los productos también.
+ */
+export function totalDelPie(vals: Array<{ v: number; tipo: EtiquetaPie | null }>, suma: number, etiquetado?: number): number | undefined {
+  const vs = vals.map((x) => x.v).filter((v) => v >= 50);
+  if (!vs.length) return etiquetado;
+  const cerca = (a: number, b: number) => Math.abs(a - b) <= 1;
+  const esIvaDe = (i: number, n: number) => n > i && Math.abs(i - 0.19 * n) <= 0.01 * n + 2;
+  let mejor: number | undefined, pts = -Infinity;
+  for (const v of new Set([...vs, ...(etiquetado ? [etiquetado] : [])])) {
+    let p = 0;
+    if (cerca(v, suma)) p += 4;
+    // (sin contar «total − IVA = neto»: eso es el neto, no el total; la factura de precios netos elegía el neto)
+    if (vs.some((a) => a > v && vs.some((b) => b > 0 && b < a && cerca(a - b, v) && !esIvaDe(b, v)))) p += 3;
+    if (vs.some((n) => vs.some((i) => esIvaDe(i, n) && cerca(n + i, v)))) p += 3;
+    if (vs.filter((x) => cerca(x, v)).length >= 2) p += 2;
+    const tipos = vals.filter((x) => cerca(x.v, v)).map((x) => x.tipo);
+    if (tipos.includes("total") || (etiquetado != null && cerca(etiquetado, v))) p += 1;
+    if (tipos.includes("pago")) p += 1;
+    if (tipos.some((t) => t === "iva" || t === "neto" || t === "subtotal" || t === "descuentos" || t === "vuelto")) p -= 2;
+    if (vs.some((n) => esIvaDe(v, n))) p -= 3; // es el IVA de otro número
+    if (p > pts || (p === pts && mejor != null && v > mejor)) { pts = p; mejor = v; }
+  }
+  return pts >= 3 ? mejor : etiquetado;
+}
+
+/** Las cadenas: el comercio sale de su nombre en cualquier parte de la boleta, no de la primera línea («SII SANTIAGO PONIENTE») */
+const CADENAS: Array<[RegExp, string]> = [
+  [/\bjumbo\b|\boumbo of/, "Jumbo"], [/\bsanta isabel\b/, "Santa Isabel"], [/\bl[ií]der\b/, "Lider"], [/\bunimarc\b/, "Unimarc"],
+  [/\btottus\b/, "Tottus"], [/\bacuenta\b/, "aCuenta"], [/\bmayorista 10\b/, "Mayorista 10"], [/\balvi\b/, "Alvi"], [/\bcruz verde\b/, "Cruz Verde"],
+  [/\bsalcobrand\b/, "Salcobrand"], [/\bahumada\b/, "Farmacias Ahumada"], [/\beasy\b/, "Easy"], [/\bsodimac\b/, "Sodimac"],
+  [/\bc[eo]n[ct][o0]su[dn]\b/, "Cencosud"],
+];
+/** Una dirección, una comuna o la oficina del SII: nunca es el nombre del comercio */
+const NO_COMERCIO = /^(av|avda|avenida|calle|pje|pasaje|camino)\b|\b(santiago|poniente|oriente|maipu|las condes|providencia|nunoa|vitacura|la florida|puente alto|vespucio|kennedy|region|comuna|sucursal|local)\b/;
+
 // ─── Filas por posición ───────────────────────────────────────────
 interface Tok { t: string; x: number; xEnd: number; cy: number; h: number }
 interface Fila { cy: number; toks: Tok[] }
@@ -103,8 +169,11 @@ function filas(o: OcrSalida): Fila[] {
     for (const t of f.toks) {
       const last = m[m.length - 1];
       const num = (s: string) => /^[-$]?[\dOoIl.,]+$/.test(s) && /[\d.,]/.test(s);
-      if (last && num(last.t) && num(t.t) && t.x - last.xEnd < h * 0.7 && (/[.,]$/.test(last.t) || /^[.,]/.test(t.t) || t.t === "." || last.t === ".")) {
-        last.t += t.t; last.xEnd = t.xEnd;
+      // (y «5» + «300» = 5.300: el punto de miles no se leyó o quedó lejos; solo si están cerca, para no juntar «PAN 500» con su
+      // precio «990»; 15 fotos de la boleta del Jumbo: «LECHE PRO 1L CHOC 5.300» salía $300 y con el descuento, −$710)
+      const miles = last && /^-?\$?\d{1,3}[.,]?$/.test(last.t) && /^[.,]?\d{3}$/.test(t.t) && t.x - last.xEnd < h * 1.6;
+      if (last && num(last.t) && num(t.t) && (miles || (t.x - last.xEnd < h * 0.7 && (/[.,]$/.test(last.t) || /^[.,]/.test(t.t) || t.t === "." || last.t === ".")))) {
+        last.t = miles && !/[.,]$/.test(last.t) && !/^[.,]/.test(t.t) ? `${last.t}.${t.t}` : last.t + t.t; last.xEnd = t.xEnd;
       } else m.push({ ...t });
     }
     f.toks = m;
@@ -155,6 +224,10 @@ export function armarBoleta(o: OcrSalida, hoy: string = hoyLocal()): BoletaLeida
   // Productos cuyo precio no se pudo leer («5.aoo»): existen, con su código; el precio se calcula con el total si falta uno solo
   const sinPrecio: SinPrecio[] = [];
   let spUltimo: SinPrecio | null = null;
+  // Los números del pie (con su etiqueta, si se leyó): el total sale de su aritmética (totalDelPie)
+  const pieVals: Array<{ v: number; tipo: EtiquetaPie | null }> = [];
+  // Un descuento que no puede ser del producto de arriba (es mayor que él): el producto suyo no se leyó
+  let descSueltos = 0;
   const textoTodo = fs.map((f) => f.toks.map((t) => t.t).join(" "));
   // El margen izquierdo (para reconocer la continuación sangrada de una descripción) y el alto de la letra
   const margen = Math.min(...fs.map((f) => f.toks[0]?.x ?? Infinity));
@@ -168,6 +241,8 @@ export function armarBoleta(o: OcrSalida, hoy: string = hoyLocal()): BoletaLeida
     const label = resto.map((t) => t.t).join(" ").replace(/\$\s*$/, "").trim();
     const fl = fold(label);
     const todo = f.toks.map((t) => t.t).join(" ").trim();
+    // (una línea del pie, aunque el OCR la haya leído «TOIAL $» o «DESCUENIOS»; solo si es corta: no la descripción de un producto)
+    const tipo = fl.split(/\s+/).filter(Boolean).length <= 4 ? etiquetaPie(label) : null;
 
     // «2 X 1.290»: cantidad × precio unitario (va con el producto de al lado)
     const cq = todo.match(CANT);
@@ -185,24 +260,38 @@ export function armarBoleta(o: OcrSalida, hoy: string = hoyLocal()): BoletaLeida
     const pie = () => {
       if (precio == null) return;
       const v = Math.abs(precio);
-      if (/\biva\b/.test(fl)) { if (iva == null && !/exent/.test(fl)) iva = v; }
-      else if (/\b(neto|afecto)\b/.test(fl)) { if (neto == null) neto = v; }
-      else if (/\btotal\b/.test(fl) && !/exent|ahorr|desc|dcto|punto/.test(fl)) { if (total == null) total = v; }
+      pieVals.push({ v, tipo });
+      if (tipo === "iva") { if (iva == null && !/exent/.test(fl)) iva = v; }
+      else if (tipo === "neto") { if (neto == null) neto = v; }
+      else if (tipo === "total" && !/exent|ahorr|desc|dcto|punto/.test(fl)) { if (total == null) total = v; }
     };
     if (cortado) { pie(); continue; }
-    if (precio != null && CORTE.test(fl) && !/\bsub\s?total\b/.test(fl)) {
+    // SUB TOTAL: terminaron los productos (con o sin su número al lado: puede haber quedado en otra fila)
+    if (tipo === "subtotal") {
+      if (precio != null) pieVals.push({ v: Math.abs(precio), tipo });
+      if (enProductos) cortado = true;
+      continue;
+    }
+    if (precio != null && (CORTE.test(fl) || (tipo != null && tipo !== "descuentos"))) {
       if (enProductos) { pie(); cortado = true; }
       continue;
     }
-    if (precio != null && /\bsub\s?total\b/.test(fl)) continue;
+    // Una etiqueta del pie sin su número (quedó corrido a otra fila): también terminaron los productos
+    if (precio == null && tipo != null && tipo !== "descuentos" && enProductos) { cortado = true; continue; }
     // «DESCUENTOS $ 2.020», «TOTAL AHORRO»: el resumen de los descuentos que ya se restaron a cada producto (suma lo mismo), no uno nuevo
     const descHechos = items.reduce((a, i) => a + Math.abs(i.descuento ?? 0), 0);
     if (precio != null && precio > 0 && descHechos > 0 && Math.abs(precio - descHechos) <= 1 && /\b(desc\w*|dcto\w*|dscto\w*|ahorr\w*)\b/.test(fl)) continue;
-    if (precio != null && (precio < 0 || DESCUENTO.test(fl))) {
+    // «JUMBO OFERTAS» leído «OUMBO AS» y sin el signo menos: igual es la oferta del producto de arriba, no un producto
+    const prevIt = items[items.length - 1];
+    const oferta = /\b[jo0]umbo\b|\bofer\w*/.test(fl) && !/^\s*\d{8,}/.test(label) && fl.split(/\s+/).filter(Boolean).length <= 3;
+    if (precio != null && (precio < 0 || DESCUENTO.test(fl) || (oferta && prevIt && Math.abs(precio) < prevIt.monto))) {
       // va con el producto de arriba, aunque a ese no se le haya podido leer el precio
       if (spUltimo) { spUltimo.descuento = (spUltimo.descuento ?? 0) - Math.abs(precio); continue; }
-      const prev = items[items.length - 1];
-      if (prev) { prev.descuento = (prev.descuento ?? 0) - Math.abs(precio); prev.monto -= Math.abs(precio); }
+      if (prevIt) {
+        // mayor que el producto: no es suyo (el producto de esa oferta no se leyó)
+        if (Math.abs(precio) >= prevIt.monto) { descSueltos += Math.abs(precio); continue; }
+        prevIt.descuento = (prevIt.descuento ?? 0) - Math.abs(precio); prevIt.monto -= Math.abs(precio);
+      }
       continue;
     }
     if (precio != null) {
@@ -210,13 +299,23 @@ export function armarBoleta(o: OcrSalida, hoy: string = hoyLocal()): BoletaLeida
       // La descripción empezó en la fila de arriba (sin precio) y el precio quedó en esta: se juntan
       if (descPend && (!/[a-zA-ZÁÉÍÓÚÑáéíóúñ]{2,}/.test(desc) || (resto[0] && resto[0].x > margen + hMed * 1.2))) desc = /[a-zA-Z]{2,}/.test(desc) ? `${descPend} ${desc}` : descPend;
       descPend = null;
-      if (!/[a-zA-ZÁÉÍÓÚÑáéíóúñ]{2,}/.test(desc)) { if (enProductos) dudosas.push(todo); continue; }
+      if (!/[a-zA-ZÁÉÍÓÚÑáéíóúñ]{2,}/.test(desc)) {
+        // un número suelto entre los productos y el pie: puede ser el valor de una línea del pie que quedó en otra fila
+        if (enProductos) { dudosas.push(todo); pieVals.push({ v: Math.abs(precio), tipo: null }); }
+        continue;
+      }
       enProductos = true;
-      const it: ItemBoleta = { desc: limpiarDesc(desc), monto: precio };
+      // «2 X $2.650» arriba manda: si el precio leído no calza y termina igual (5.300 leído «300») o es muy poco, era cant × unit
+      let monto = precio;
+      if (cantPend) {
+        const esperado = Math.round(cantPend.cant * cantPend.unit);
+        if (Math.abs(monto - esperado) > 1 && (esperado % 1000 === monto % 1000 || monto < esperado * 0.3)) monto = esperado;
+      }
+      const it: ItemBoleta = { desc: limpiarDesc(desc), monto };
       // El código de barras al comienzo de la línea: con él, el Inventario reconoce el producto como si lo escanearas
       const ean = desc.match(/^\s*(\d{8,14})\s/)?.[1];
       if (ean && eanValido(ean)) it.ean = ean;
-      if (cantPend && Math.abs(precio - Math.round(cantPend.cant * cantPend.unit)) <= 1) { it.cant = cantPend.cant; it.unit = cantPend.unit; }
+      if (cantPend && Math.abs(monto - Math.round(cantPend.cant * cantPend.unit)) <= 1) { it.cant = cantPend.cant; it.unit = cantPend.unit; }
       cantPend = null;
       const cat = categoriaProducto(it.desc);
       if (cat) it.cat = cat;
@@ -227,7 +326,8 @@ export function armarBoleta(o: OcrSalida, hoy: string = hoyLocal()): BoletaLeida
     // Una fila de producto con el precio ilegible («LECHE PRO CAPPU 5.aoo»): el producto existe y su código de barras también
     if (last && enBorde && f.toks.length > 1 && /^[-$]?\d/.test(last.t) && !/[a-z]{4,}/i.test(last.t) && (/[.,]/.test(last.t) || last.t.length >= 4)) {
       const lab = f.toks.slice(0, -1).map((t) => t.t).join(" ").trim();
-      if (/[a-zA-Z]{3,}/.test(lab) && !CORTE.test(fold(lab)) && (enProductos || /^\d{8,14}\s/.test(lab))) {
+      // (una oferta o descuento con el monto ilegible no es un producto: «Jumbo Ofertas» salía como producto «sin precio»)
+      if (/[a-zA-Z]{3,}/.test(lab) && !CORTE.test(fold(lab)) && !etiquetaPie(lab) && !DESCUENTO.test(fold(lab)) && !/\b[jo0]umbo\b/.test(fold(lab)) && (enProductos || /^\d{8,14}\s/.test(lab))) {
         const sp: SinPrecio = { desc: limpiarDesc(lab), pos: items.length };
         const e = lab.match(/^\s*(\d{8,14})\s/)?.[1];
         if (e && eanValido(e)) sp.ean = e;
@@ -243,6 +343,9 @@ export function armarBoleta(o: OcrSalida, hoy: string = hoyLocal()): BoletaLeida
 
   if (!items.length) return { ok: false, code: "sin_productos", msg: "No encontré productos con precio en la foto. Sácala derecha, con buena luz y que se vea entera." };
   const suma = items.reduce((s, i) => s + i.monto, 0);
+  // El total por la aritmética del pie (si la etiqueta del TOTAL no se leyó, quedó corrida o era la del IVA)
+  total = totalDelPie(pieVals, suma, total);
+  void descSueltos;
   // Encabezado: comercio, RUT, fecha, hora, folio
   const cab = textoTodo.slice(0, 14).join("\n");
   const rut = cab.match(/\b(\d{1,2}\.?\d{3}\.?\d{3}-[\dkK])\b/)?.[1]?.replace(/\./g, "").toUpperCase();
@@ -258,8 +361,10 @@ export function armarBoleta(o: OcrSalida, hoy: string = hoyLocal()): BoletaLeida
   const hora = textoTodo.join("\n").match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/)?.[0];
   const folio = Number(cab.match(/\b(?:boleta[^\n\d]{0,25}|folio\D{0,5}|n[°ºo]?\s?)(\d{4,10})\b/i)?.[1]) || undefined;
   // El nombre de arriba (sin la oficina del SII que la boleta del Jumbo imprime antes que «CENCOSUD RETAIL S.A.»)
-  const comercio = textoTodo.slice(0, 5).map((x) => x.trim())
-    .find((x) => /[a-zA-Z]{3,}/.test(x) && !/\brut\b|\bgiro\b|\bboleta\b|\bfecha\b|^s[.\s]?[i1l][.\s]?[i1l]\b|\d{3,}/i.test(x));
+  // (primero la cadena, en cualquier parte: «JUMBO OFERTAS» dice Jumbo aunque arriba se lea «Centosun»; nunca una dirección)
+  const todoFold = fold(textoTodo.join("\n"));
+  const comercio = CADENAS.find(([re]) => re.test(todoFold))?.[1] ?? textoTodo.slice(0, 5).map((x) => x.trim())
+    .find((x) => /[a-zA-Z]{3,}/.test(x) && !NO_COMERCIO.test(fold(x)) && !/\brut\b|\bgiro\b|\bboleta\b|\bfecha\b|^s[.\s]?[i1l][.\s]?[i1l]\b|\d{3,}/i.test(x));
   // ¿Precios sin IVA (neto + IVA = total)? Entonces se le suma a cada producto, para que la suma sea lo que se pagó
   const aparte = !sinPrecio.length && ivaAparte({ suma, iva, neto, total, n: items.length });
   const pagado = aparte ? total ?? suma + (iva ?? Math.round(suma * 0.19)) : null;
@@ -346,9 +451,9 @@ const MAX_BYTES = 9 * 1024 * 1024;
 let ocupado = false;
 const SCRIPT = join(import.meta.dir, "..", "..", "scripts", "ocr.ps1");
 
-function correrOcr(path: string, timeoutMs = 45_000): Promise<OcrSalida> {
+function correrOcr(path: string, mejorar = false, timeoutMs = 45_000): Promise<OcrSalida> {
   return new Promise((resolve) => {
-    const p = spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCRIPT, "-Path", path], { windowsHide: true });
+    const p = spawn("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", SCRIPT, "-Path", path, ...(mejorar ? ["-Mejorar"] : [])], { windowsHide: true });
     let out = "";
     const timer = setTimeout(() => { try { p.kill(); } catch {} resolve({ ok: false, error: "tiempo" }); }, timeoutMs);
     p.stdout.on("data", (d) => { out += d.toString("utf8"); });
@@ -358,7 +463,25 @@ function correrOcr(path: string, timeoutMs = 45_000): Promise<OcrSalida> {
 }
 
 /** La foto (base64, JPEG o PNG) → la boleta. La imagen se guarda un momento en una carpeta temporal y se borra al terminar. */
-export async function leerBoletaFoto(base64: string, run: (path: string) => Promise<OcrSalida> = correrOcr): Promise<BoletaLeida | BoletaError> {
+/**
+ * Qué tan buena es una lectura (para quedarse con la mejor de las dos: la foto tal cual y la mejorada). Que cuadre con el total
+ * es lo que más pesa; después, tener el total, más productos y menos dudas.
+ */
+export function puntajeBoleta(r: BoletaLeida | BoletaError): number {
+  if (!r.ok) return -1;
+  return (r.cuadra ? 100 : 0) + (r.total != null ? 10 : 0) + r.items.length * 2 - r.dudosas.length - (r.sinPrecio?.length ?? 0) * 2
+    - (r.total != null ? Math.min(20, Math.abs(r.total - r.suma) / 500) : 0);
+}
+
+/**
+ * `opts.guardar`: una carpeta donde dejar lo que leyó el OCR (solo texto y posiciones, nunca la foto), para revisar después las
+ * boletas que no cuadran. El servidor la pasa solo para la cuenta de Alex (Ikaros); guarda las últimas 20.
+ */
+export async function leerBoletaFoto(
+  base64: string,
+  run: (path: string, mejorar?: boolean) => Promise<OcrSalida> = correrOcr,
+  opts: { guardar?: string } = {},
+): Promise<BoletaLeida | BoletaError> {
   let buf: Buffer;
   try { buf = Buffer.from(base64, "base64"); } catch { return { ok: false, code: "imagen", msg: "No pude abrir la foto." }; }
   if (buf.length > MAX_BYTES) return { ok: false, code: "grande", msg: "La foto es muy pesada." };
@@ -373,11 +496,33 @@ export async function leerBoletaFoto(base64: string, run: (path: string) => Prom
     await writeFile(path, buf);
     const o = await run(path);
     if (!o.ok) return { ok: false, code: "ocr", msg: "No pude leer la foto en el PC (el lector de texto de Windows falló)." };
-    return armarBoleta(o);
+    let r = armarBoleta(o);
+    // Si no cuadra, una segunda lectura con la imagen mejorada (gris, contraste, 2000 px) y se queda la mejor
+    // (2026-11-16: 15 fotos de la misma boleta del Jumbo, ninguna cuadró; con las dos lecturas, las 8 variantes de prueba cuadran)
+    let o2: OcrSalida | null = null;
+    if (!(r.ok && r.cuadra)) {
+      o2 = await run(path, true).catch(() => null);
+      if (o2?.ok) {
+        const r2 = armarBoleta(o2);
+        if (puntajeBoleta(r2) > puntajeBoleta(r)) r = r2;
+      }
+    }
+    if (opts.guardar) await guardarLectura(opts.guardar, o, o2, r).catch(() => {});
+    return r;
   } finally {
     ocupado = false;
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/** Lo que leyó el OCR de una boleta (solo texto y posiciones; nunca la foto) y en qué quedó: las últimas 20, para revisar las que fallan */
+async function guardarLectura(dir: string, o: OcrSalida, o2: OcrSalida | null, r: BoletaLeida | BoletaError): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  const nombre = new Date().toISOString().replace(/[:.]/g, "-");
+  const resumen = r.ok ? { cuadra: r.cuadra, total: r.total, suma: r.suma, comercio: r.comercio, items: r.items.length } : { error: r.code };
+  await writeFile(join(dir, `${nombre}.json`), JSON.stringify({ resumen, ocr: o, ...(o2 ? { ocrMejorada: o2 } : {}) }));
+  const viejos = (await readdir(dir)).filter((f) => f.endsWith(".json")).sort();
+  for (const f of viejos.slice(0, Math.max(0, viejos.length - 20))) await rm(join(dir, f), { force: true }).catch(() => {});
 }
 
 // ─── Eris administra (A2): el saldo de una captura de la app del banco ─────────────────────────

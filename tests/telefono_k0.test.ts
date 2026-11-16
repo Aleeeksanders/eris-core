@@ -24,7 +24,7 @@ test("horas y duraciones dichas", () => {
   expect(duracionTexto(5400)).toBe("1 hora y 30 minutos");
 });
 
-test("las órdenes del teléfono por código", () => {
+test("las órdenes del teléfono por código", async () => {
   expect(parseTelefono("Pon una alarma a las 7 de la mañana")).toEqual({ accion: "alarma", hora: 7, minuto: 0 });
   expect(parseTelefono("Despiértame a las 6 y media para ir al gym")).toEqual({ accion: "alarma", hora: 6, minuto: 30, mensaje: "ir al gym" });
   expect(parseTelefono("Pon un temporizador de 10 minutos para el arroz")).toEqual({ accion: "temporizador", segundos: 600, mensaje: "el arroz" });
@@ -32,12 +32,12 @@ test("las órdenes del teléfono por código", () => {
   expect(parseTelefono("Que me avise en un cuarto de hora")).toEqual({ accion: "temporizador", segundos: 900 });
   expect(parseTelefono("Necesito que el celular me suene en 15 minutos para sacar el pan del horno")).toEqual({ accion: "temporizador", segundos: 900, mensaje: "sacar el pan del horno" });
   // si el modelo igual calcula una hora para «en 15 minutos», la herramienta le pide un temporizador
-  const pre = new TelefonoTool().preflight({ accion: "alarma", hora: 15, minuto: 55 }, { userMessage: "que me suene en 15 minutos" });
+  const pre = await new TelefonoTool().preflight({ accion: "alarma", hora: 15, minuto: 55 }, { userMessage: "que me suene en 15 minutos" });
   expect(pre.ok).toBe(false);
   // «a eso de las siete y cuarto»: el código lo entiende, y si el modelo pone otra hora, se le corrige
   expect(parseTelefono("¿Me dejas una alarma para mañana temprano, a eso de las siete y cuarto?")).toEqual({ accion: "alarma", hora: 7, minuto: 15 });
-  expect(new TelefonoTool().preflight({ accion: "alarma", hora: 7, minuto: 30 }, { userMessage: "a eso de las siete y cuarto" }).ok).toBe(false);
-  expect(new TelefonoTool().preflight({ accion: "alarma", hora: 19, minuto: 15 }, { userMessage: "a las siete y cuarto" }).ok).toBe(true); // 7 o 19: igual
+  expect((await new TelefonoTool().preflight({ accion: "alarma", hora: 7, minuto: 30 }, { userMessage: "a eso de las siete y cuarto" })).ok).toBe(false);
+  expect((await new TelefonoTool().preflight({ accion: "alarma", hora: 19, minuto: 15 }, { userMessage: "a las siete y cuarto" })).ok).toBe(true); // 7 o 19: igual
   expect(parseTelefono("Prende la linterna")).toEqual({ accion: "linterna", encender: true });
   expect(parseTelefono("Apaga la linterna")).toEqual({ accion: "linterna", encender: false });
   expect(parseTelefono("Sube el volumen")).toEqual({ accion: "volumen", cambio: "subir" });
@@ -62,17 +62,17 @@ test("lo que no es del teléfono no se toma", () => {
   expect(appDelTelefono("yo", APPS)).toBeNull(); // muy corto
 });
 
-test("aprobaciones: lo que crea o abre algo se pregunta (en la llamada basta un «sí»); linterna, volumen y batería van directo", () => {
+test("aprobaciones: lo que crea o abre algo se pregunta (en la llamada basta un «sí»); linterna, volumen y batería van directo", async () => {
   const t = new TelefonoTool();
-  const alarma = t.preflight({ accion: "alarma", hora: 7, minuto: 0 });
+  const alarma = await t.preflight({ accion: "alarma", hora: 7, minuto: 0 });
   expect(alarma.ok && alarma.approval?.detail.split("\n")[0]).toBe("¿Pongo una alarma a las 07:00?");
   const req = { tool: "telefono", title: (alarma as any).approval.title, detail: (alarma as any).approval.detail, risk: "normal" as const, flags: [] };
   expect(claseAprobacion(req)).toBe("voz");
   expect(preguntaHablada(req, "voz")).toBe("¿Pongo una alarma a las 07:00? Dime sí o no.");
   expect(paraHablar(preguntaHablada(req, "voz"))).toBe("¿Pongo una alarma a las siete de la mañana? Dime sí o no.");
-  expect(t.preflight({ accion: "linterna", encender: true })).toEqual({ ok: true });
-  expect(t.preflight({ accion: "bateria" })).toEqual({ ok: true });
-  expect(t.preflight({ accion: "alarma" }).ok).toBe(false); // sin hora
+  expect(await t.preflight({ accion: "linterna", encender: true })).toEqual({ ok: true });
+  expect(await t.preflight({ accion: "bateria" })).toEqual({ ok: true });
+  expect((await t.preflight({ accion: "alarma" })).ok).toBe(false); // sin hora
   expect(preguntaTelefono({ accion: "temporizador", segundos: 600, mensaje: "el arroz" })).toBe("¿Pongo un temporizador de 10 minutos para el arroz?");
 });
 

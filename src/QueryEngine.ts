@@ -17,7 +17,7 @@ import { getAuditLog, type AuditDecision } from "./services/security/AuditLog.js
 import { createMessage } from "./types/message.js";
 import { resolveMode } from "./types/config.js";
 import { plannerFor, parseKeepAlive, CONTEXT_LEVELS } from "./services/llm/ContextPlanner.js";
-import { encajar } from "./services/llm/ContextFit.js";
+import { encajar, compactar } from "./services/llm/ContextFit.js";
 import { asksToLog, claimsLogged } from "./services/FoodParse.js";
 import { TOOL_GROUP, groupsFor } from "./services/ToolRouter.js";
 import { getFeatures } from "./services/Features.js";
@@ -100,18 +100,30 @@ export class QueryEngine {
   /** Piso de contexto para este motor (tokens). Ver `IKAROS_MIN_CONTEXT` en server.ts. */
   private minContext: number;
   private router?: ToolRouterFn;
+  /** Sin herramientas para el turno, ¿se ponen las de salud y Finanzas de respaldo? (Hestia por voz: no; ver server.ts) */
+  private respaldoHerramientas: boolean;
+  /** Techo de contexto (Hestia por voz): cambiar de nivel recarga el modelo y uno más grande no cabe entero en la tarjeta */
+  private maxContext: number;
+  /** Transmitir también la redacción después de las herramientas (Hestia por voz: lo dicho se compara con la respuesta final) */
+  private hablaTrasHerramientas: boolean;
+  /** Definiciones de herramientas en corto (Hestia por voz: menos prompt que leer en cada pasada) */
+  private herramientasCortas: boolean;
 
   constructor(
     provider: LLMProvider,
     toolRegistry: ToolRegistry,
     systemPrompt: string,
-    options?: { minContext?: number; router?: ToolRouterFn }
+    options?: { minContext?: number; router?: ToolRouterFn; respaldoHerramientas?: boolean; maxContext?: number; hablaTrasHerramientas?: boolean; herramientasCortas?: boolean }
   ) {
     this.provider = provider;
     this.toolRegistry = toolRegistry;
     this.systemPrompt = systemPrompt;
     this.minContext = options?.minContext ?? 0;
     this.router = options?.router;
+    this.respaldoHerramientas = options?.respaldoHerramientas ?? true;
+    this.maxContext = options?.maxContext ?? 0;
+    this.hablaTrasHerramientas = options?.hablaTrasHerramientas ?? false;
+    this.herramientasCortas = options?.herramientasCortas ?? false;
   }
 
   /**
@@ -276,7 +288,7 @@ Reglas:
     // selector sumaba AXS por palabras comunes ("resumen", "cómo va", "reporte", "notas") y el PC por "abre", "escribe",
     // "lee"…: Eris respondía con la bóveda o pedía aprobar un comando. Eso queda solo para el Modo AXS Executive.
     const hideAxs = (toolContext as any)?.axsMode === false;
-    const HIDDEN_IN_ERIS = new Set(["axs", "system", "admin"]);
+    const HIDDEN_IN_ERIS = new Set(["axs", "system", "admin", "telefono"]);
     if (hideAxs) {
       toolDefinitions = toolDefinitions.filter((d) => !HIDDEN_IN_ERIS.has(TOOL_GROUP[d.name]));
       // Si el mensaje solo pedía cosas ocultas acá ("cruza mi PERFIL" → administración), Eris se quedaba SIN herramientas
@@ -291,7 +303,7 @@ Reglas:
         console.log(`[Router] en modo Eris no quedaba ninguna herramienta: salud + Finanzas (${toolDefinitions.length})`);
       }
       allowedTools = new Set(toolDefinitions.map((d) => d.name));
-    } else if (this.router && !(topics.length === 1 && topics[0] === "web") && !toolDefinitions.some((d) => d.name !== "web_search")) {
+    } else if (this.router && this.respaldoHerramientas && !(topics.length === 1 && topics[0] === "web") && !toolDefinitions.some((d) => d.name !== "web_search")) {
       // Un rol sin las herramientas del grupo pedido (usuario público y «el resumen de mis notas» → AXS, que no tiene): lo
       // mismo que en el modo Eris, salud + Finanzas, en vez de dejarlo sin herramientas (revisión 2026-11-04, R2)
       toolDefinitions = this.toolRegistry.getDefinitions().filter((d) =>
@@ -309,6 +321,10 @@ Reglas:
       toolDefinitions = toolDefinitions.filter((d) => !toolsApagadas.has(d.name));
       for (const t of toolsApagadas) allowedTools?.delete(t);
     }
+    // Hestia por voz (J3): las definiciones en corto. Con este modelo Ollama vuelve a leer TODO el prompt en cada pasada (no reusa
+    // el caché: 1 828 tokens idénticos, 1,9 s cada vez), así que cada carácter cuesta: vault_note sola pesaba 2 617 y finance_tracker 3 314
+    // (solo las largas: con bash y open en corto el modelo decía «Te lo abro.» sin llamarlas; banco «voz»)
+    if (this.herramientasCortas) toolDefinitions = toolDefinitions.map((d) => (JSON.stringify(d).length > 1200 ? compactar(d) : d));
     // Las instrucciones de una herramienta que este turno no ve no viajan (services/PromptSections.ts): el prompt de Eris
     // con todo pesaba ~12 500 caracteres y, junto a las definiciones, pasaba el contexto de 8192 (banco de pruebas 2026-10-16)
     llmMessages[0] = { role: "system", content: promptForTools(this.systemPrompt, new Set(toolDefinitions.map((d) => d.name))) };
@@ -353,6 +369,7 @@ ${b.text}`;
     // ¿Alguna herramienta guardó, cambió o borró algo en este turno? (para detectar un "lo guardé / lo actualicé" inventado)
     let wroteThisTurn = false;
     let saveRetried = false;
+    let pcRetried = false;
     // El modelo escribió su razonamiento en vez de la respuesta: un reintento pidiéndole que le hable a la persona
     let reasoningRetried = false;
     let toneRetried = false;
@@ -585,7 +602,7 @@ ${b.text}`;
         const reserve = thinking ? 2500 : 700;
         let chars = llmMessages.reduce((a, m) => a + m.content.length + (m.toolCalls ? JSON.stringify(m.toolCalls).length : 0), 0)
           + (toolDefinitions.length > 0 ? JSON.stringify(toolDefinitions).length : 0);
-        let ctx = planner.pick({ chars, reserve, floor: Math.max(modeConfig.contextLength, this.minContext) });
+        let ctx = planner.pick({ chars, reserve, floor: Math.max(modeConfig.contextLength, this.minContext), cap: this.maxContext || undefined });
         // Que quepa (2026-11-05): si no, Ollama corta el COMIENZO (las instrucciones y las herramientas). Se recorta acá lo
         // viejo de la conversación, después las herramientas menos útiles y al final el resumen del día. Si ni así cabe,
         // se pide el contexto que alcanza (más lento, pero con sus reglas).
@@ -600,7 +617,7 @@ ${b.text}`;
           }
           if (!enc.cabe) {
             const alcanza = CONTEXT_LEVELS.find((l) => l >= enc.tokens + reserve) ?? CONTEXT_LEVELS[CONTEXT_LEVELS.length - 1];
-            if (alcanza > ctx) { console.warn(`[Contexto] Ni recortando cabe en ${ctx} (≈${enc.tokens} tokens): se pide ${alcanza}.`); ctx = alcanza; }
+            if (alcanza > ctx && !(this.maxContext && alcanza > this.maxContext)) { console.warn(`[Contexto] Ni recortando cabe en ${ctx} (≈${enc.tokens} tokens): se pide ${alcanza}.`); ctx = alcanza; }
           }
         }
         // De qué está hecho lo que se manda (ERIS_DEBUG_PROMPT=1): para achicar el prompt con datos, no a ojo
@@ -622,7 +639,8 @@ ${b.text}`;
               // Con los resultados de las herramientas ya en mano, redactar NO necesita razonamiento largo:
               // en Deep se quedaba pensando minutos y la respuesta se perdía por tiempo.
               enableThinking: thinking,
-              onToken: isFirstOrToolIteration ? undefined : callbacks?.onToken,
+              // (Hestia por voz: también después de las herramientas, para empezar a hablar mientras se redacta)
+              onToken: isFirstOrToolIteration && !this.hablaTrasHerramientas ? undefined : callbacks?.onToken,
               onThinking: isFirstOrToolIteration ? undefined : callbacks?.onThinking,
               signal,
             }
@@ -651,7 +669,8 @@ ${b.text}`;
           const obs = planner.observe(chars, response.tokensUsed?.prompt ?? 0, ctx);
           if (!obs.truncated) break;
           console.warn(`[Contexto] El prompt llenó ${ctx} tokens: se sube a ${obs.next}${isFirstOrToolIteration && attempt === 0 && !response.stopped ? " y se repite esta pasada" : ""}.`);
-          if (!(isFirstOrToolIteration && attempt === 0) || response.stopped || obs.next <= ctx) break;
+          // (si ya se transmitió, repetir la pasada lo diría dos veces)
+          if (!(isFirstOrToolIteration && attempt === 0) || response.stopped || obs.next <= ctx || this.hablaTrasHerramientas) break;
           ctx = obs.next;
         }
       } catch (err) {
@@ -754,6 +773,18 @@ ${b.text}`;
             : money
             ? "No alcancé a anotarlo en Finanzas: no quedó guardado. Dímelo así: «gasté 5 lucas en almuerzo con la BCI» y lo anoto."
             : "No alcancé a registrarlo: no quedó guardado. Dime cada alimento con su cantidad (por ejemplo, «registra 1 hallulla y ½ palta») y lo anoto." };
+        } else if (!pcRetried && !doneTools.length && allowedTools && (allowedTools.has("open") || allowedTools.has("bash"))
+          && /\b(abre|abr[ií]|abrir|borra|elimina|revisa|mira|ejecuta|corre|lanza|crea|instala|cierra)\w*\b/i.test(String(userText ?? ""))
+          && /\b(te lo abro|la abro|lo abro|abriendo|lo borro|la borro|borrad[oa]|borrando|lo reviso|lo voy a|reviso|revisando|dame un segundo|d[eé]jame (ver|revisar)|ya est[aá]|listo|hecho|abierto|abiert[oa])\b/i.test(response.content || "")
+          && iterations < MAX_TOOL_ITERATIONS) {
+          // Una acción en el PC prometida o dada por hecha SIN llamar a la herramienta (banco «voz», 2026-11-16: «Te lo abro.» y
+          // nada; «Dame un segundo para ver si el archivo está ahí» y nada). Se le exige llamarla una vez.
+          pcRetried = true;
+          llmMessages.push({ role: "assistant", content: response.content || "" });
+          llmMessages.push({ role: "user", content: "[Sistema] Dijiste que lo harías, pero NO llamaste a ninguna herramienta: en su PC no pasó nada. " +
+            "Llama ahora a la herramienta que corresponde (open: abrir una página, un archivo o una aplicación; bash: un comando de PowerShell para revisar o hacer algo). " +
+            "La acción pide su aprobación igual. Si no hay herramienta para esto, dile con honestidad que no lo hiciste." });
+          continue;
         } else if (!loggedThisTurn && !wroteThisTurn && asksToSave(userText) && claimsSaved(response.content)) {
           // Lo mismo con cualquier otra cosa: "solo déjalo para hoy" → "Contexto actualizado" sin llamar a nada (2026-10-07)
           if (!saveRetried && iterations < MAX_TOOL_ITERATIONS) {

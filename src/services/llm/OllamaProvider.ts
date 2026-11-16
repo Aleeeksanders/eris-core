@@ -30,6 +30,13 @@ const LOOP_PATTERNS = [/\*\*Decisión\*\*/g, /\*\*Refinamiento\*\*/g, /\*\*Plan 
 const LOOP_THRESHOLD = 4; // si algún patrón aparece ≥4 veces, es bucle
 const LOOP_MAX_CHARS  = 32000; // cortar si el thinking supera 4000 chars sin cerrar
 
+/** ERIS_DEBUG_TIEMPOS=1 (J3, voz): cuánto fue leer el prompt y cuánto escribir, y cuánto del prompt venía del caché de Ollama */
+function tiemposOllama(data: any): void {
+  if (process.env.ERIS_DEBUG_TIEMPOS !== "1" || !data) return;
+  const ms = (ns?: number) => (typeof ns === "number" ? Math.round(ns / 1e6) : 0);
+  console.log(`[Tiempos] carga ${ms(data.load_duration)} ms · prompt ${data.prompt_eval_count ?? 0} tok en ${ms(data.prompt_eval_duration)} ms · escribir ${data.eval_count ?? 0} tok en ${ms(data.eval_duration)} ms · total ${ms(data.total_duration)} ms`);
+}
+
 export class OllamaProvider implements LLMProvider {
   readonly name = "ollama";
   private baseUrl: string;
@@ -371,6 +378,7 @@ export class OllamaProvider implements LLMProvider {
           }
 
           if (data.done) {
+            tiemposOllama(data);
             promptTokens = data.prompt_eval_count || 0;
             completionTokens = data.eval_count || 0;
             if (typeof data.total_duration === "number") modeloMs = data.total_duration / 1e6;
@@ -470,6 +478,7 @@ export class OllamaProvider implements LLMProvider {
         ? this.removeToolCallsFromContent(content)
         : content;
 
+    tiemposOllama(data);
     return {
       content: cleanContent,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,

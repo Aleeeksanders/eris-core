@@ -99,6 +99,8 @@ export abstract class Tool<TInput = unknown> {
   async run(rawInput: unknown, context?: any): Promise<ToolExecutionResult> {
     try {
       const parsed = this.inputSchema.parse(rawInput);
+      // ERIS_DEBUG_TOOLS=1: qué le pasó el modelo a cada herramienta (para el banco de pruebas; nunca en el servidor real)
+      if (process.env.ERIS_DEBUG_TOOLS === "1") console.log(`[Tool] ${this.name} ${JSON.stringify(parsed).slice(0, 500)}`);
       return await this.execute(parsed, context);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -154,10 +156,14 @@ export abstract class Tool<TInput = unknown> {
       // "ZodOptional"/"ZodDefault", no "ZodNumber"/"ZodBoolean"/etc. Eso hacía
       // que el modelo mandara "0.5" (string) en vez de 0.5 (number), y la
       // validación Zod real (que sí exige number) lo rechazaba en cada intento.
+      // (y ZodEffects: un z.preprocess que tolera variantes, 2026-11-16. Sin desenvolverlo, la lista de valores no llegaba al
+      // modelo y el campo figuraba como texto obligatorio: «area» de vault_note, «createDirs» de file_write, «day» de sleep_log)
       let innerType: any = value;
       let def = outerDef;
-      while (def?.typeName === "ZodOptional" || def?.typeName === "ZodDefault") {
-        innerType = def.innerType;
+      let opcional = false;
+      while (def?.typeName === "ZodOptional" || def?.typeName === "ZodDefault" || def?.typeName === "ZodEffects") {
+        if (def.typeName !== "ZodEffects") opcional = true;
+        innerType = def.typeName === "ZodEffects" ? def.schema : def.innerType;
         def = innerType?._def;
       }
 
@@ -179,10 +185,8 @@ export abstract class Tool<TInput = unknown> {
       }
       properties[key] = prop;
 
-      // Requerido a menos que el wrapper de afuera sea Optional/Default.
-      if (outerDef?.typeName !== "ZodOptional" && outerDef?.typeName !== "ZodDefault") {
-        required.push(key);
-      }
+      // Requerido a menos que haya un Optional/Default en la cadena de envoltorios.
+      if (!opcional) required.push(key);
     }
 
     return {

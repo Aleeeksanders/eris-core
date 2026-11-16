@@ -1,0 +1,124 @@
+// ============================================================
+// Hestia Manos (K0, 2026-11-16): las órdenes del teléfono que se entienden por CÓDIGO (al instante, sin el modelo de 4B):
+// «pon una alarma a las 7», «despiértame a las 6 y media», «temporizador de 10 minutos», «prende la linterna», «sube el volumen»,
+// «¿cuánta batería tengo?», «llévame a la casa de mi mamá», «abre Spotify». Si el mensaje habla del PC, no es del teléfono.
+// ============================================================
+
+import type { TelefonoOp } from "./TelefonoBridge.js";
+
+const fold = (t: string) => String(t ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[¿?¡!.,;]+/g, " ").replace(/\s+/g, " ").trim();
+
+/** Habla del computador: no es del teléfono */
+const PC = /\b(pc|computador\w*|computadora|notebook|laptop|windows|escritorio de|en el equipo)\b/;
+/** Dice explícitamente el teléfono */
+const TEL = /\b(celu\w*|telefono|movil|en mi cel)\b/;
+
+const NUM: Record<string, number> = { una: 1, uno: 1, un: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10, once: 11, doce: 12,
+  quince: 15, veinte: 20, treinta: 30, cuarenta: 40, cincuenta: 50, media: 30, medio: 30 };
+const numero = (s: string): number | null => (/^\d+$/.test(s) ? Number(s) : NUM[s] ?? null);
+
+/** «a las 7», «a las 7:30», «a las 7 y media», «a las 8 y cuarto», «a la una de la tarde», «a las 19:00», «7 am» → {hora, minuto} */
+export function horaDicha(texto: string): { hora: number; minuto: number } | null {
+  const t = fold(texto);
+  // («a eso de las siete y cuarto», «como a las 8», «tipo 7»: el modelo de 4B leyó «siete y cuarto» como 7:30; banco «voz»)
+  const m = /\b(?:a|para|como a|tipo|cerca de)\s+(?:eso de\s+)?(?:las?\s+)?(\d{1,2}|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)(?:\s*[:.h]\s*(\d{2})|\s+y\s+(media|cuarto|\d{1,2}))?\s*(am|pm|de la manana|de la tarde|de la noche|de la madrugada|hrs?|horas)?\b/.exec(t)
+    ?? /\b(\d{1,2})(?:\s*[:.]\s*(\d{2}))?()\s*(am|pm)\b/.exec(t);
+  if (!m) return null;
+  let h = numero(m[1]);
+  if (h == null || h > 23) return null;
+  let min = m[2] ? Number(m[2]) : m[3] === "media" ? 30 : m[3] === "cuarto" ? 15 : m[3] ? Number(m[3]) : 0;
+  if (min > 59) return null;
+  const q = m[4] ?? "";
+  if (/pm|tarde|noche/.test(q) && h < 12) h += 12;
+  if (/am|manana|madrugada/.test(q) && h === 12) h = 0;
+  return { hora: h, minuto: min };
+}
+
+/** «10 minutos», «una hora y media», «media hora», «30 segundos», «1 h 20 min» → segundos */
+export function duracionDicha(texto: string): number | null {
+  const t = fold(texto);
+  if (/\bmedia hora\b/.test(t) && !/\by media\b/.test(t)) return 1800;
+  if (/\b(un )?cuarto de hora\b/.test(t)) return 900;
+  let total = 0;
+  const re = /\b(\d+|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|quince|veinte|treinta|cuarenta|cincuenta)\s*(horas?|hrs?|h|minutos?|mins?|m|segundos?|segs?|s)\b(\s+y\s+media)?/g;
+  for (const m of t.matchAll(re)) {
+    const n = numero(m[1]);
+    if (n == null) continue;
+    const u = m[2];
+    const f = /^h/.test(u) ? 3600 : /^m/.test(u) ? 60 : 1;
+    total += n * f + (m[3] ? f / 2 : 0);
+  }
+  return total > 0 ? Math.round(total) : null;
+}
+
+/** «… para ir al gym» → «ir al gym» (el nombre de la alarma o del temporizador) */
+function para(t: string): string | undefined {
+  const m = /\bpara\s+(?!las?\b|la una\b|el (?:celu|telefono)\b)(.{3,40})$/.exec(t);
+  return m ? m[1].trim() : undefined;
+}
+
+const plano = (s: string) => fold(s).replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+/** Cómo se le dice a las apps más usadas */
+const ALIAS: Record<string, string> = { wsp: "whatsapp", wasap: "whatsapp", guasap: "whatsapp", whats: "whatsapp", mapas: "maps", "google maps": "maps",
+  galeria: "fotos", insta: "instagram", yt: "youtube", correo: "gmail", ajustes: "ajustes", configuracion: "ajustes" };
+
+/** ¿El nombre dicho es una de sus apps? (la etiqueta tal cual, o el comienzo) */
+export function appDelTelefono(nombre: string, apps: string[]): string | null {
+  const q0 = plano(nombre).replace(/^(la app( de)?|app|el|la)\s+/, "");
+  const q = ALIAS[q0] ?? q0;
+  if (!q) return null;
+  const lista = apps.map((a) => ({ a, p: plano(a) }));
+  return lista.find((x) => x.p === q)?.a ?? lista.find((x) => x.p.startsWith(q) && q.length >= 3)?.a ?? null;
+}
+
+/** La orden del teléfono dicha, o null si no es una (o habla del PC). `apps`: las del teléfono, para «abre X». */
+export function parseTelefono(texto: string, apps: string[] = []): TelefonoOp | null {
+  const t = fold(texto);
+  if (!t || t.length > 160 || PC.test(t)) return null;
+
+  // Alarma
+  if (/\b(alarma|despiertame|despertador)\b/.test(t) && !/\b(apaga|quita|borra|elimina|cancela|desactiva)\w*\b/.test(t)) {
+    const h = horaDicha(t);
+    if (h && /\b(pon\w*|crea\w*|programa\w*|configura\w*|agenda\w*|activa\w*|deja\w*|dej(as|es|ame)|hazme|puedes|podrias|despiertame|necesito|quiero)\b|\balarma (a|para) la/.test(t)) {
+      const mensaje = para(t);
+      return { accion: "alarma", hora: h.hora, minuto: h.minuto, ...(mensaje ? { mensaje } : {}) };
+    }
+  }
+  // Temporizador
+  // (y «que suene / avísame / recuérdame EN 15 minutos»: un temporizador; la hora no la calcula el modelo de 4B, que se equivoca:
+  // banco «voz», 14:41 + 15 min → «alarma a las 15:55»)
+  if (/\b(temporizador|timer|cronometro|cuenta regresiva)\b|\b(avisame|me avises?|avisa|suene|sonar|recuerdame|me recuerdes?)\s+en\b/.test(t)) {
+    const s = duracionDicha(t);
+    if (s) { const mensaje = para(t); return { accion: "temporizador", segundos: s, ...(mensaje ? { mensaje } : {}) }; }
+  }
+  // Linterna
+  if (/\blinterna\b/.test(t)) {
+    if (/\b(apaga\w*|desactiva\w*|quita\w*|saca\w*)\b/.test(t)) return { accion: "linterna", encender: false };
+    if (/\b(prende\w*|enciende\w*|activa\w*|pon\w*|necesito|dame)\b|^linterna$/.test(t)) return { accion: "linterna", encender: true };
+  }
+  // Volumen
+  if (/\b(volumen|sonido)\b|\bsilencia\w*\b|\bmutea\w*\b/.test(t)) {
+    const n = /\bvolumen\s+(?:al|a|en)\s+(\d{1,3})\s*(?:%|por ciento)?/.exec(t);
+    if (n && Number(n[1]) <= 100) return { accion: "volumen", cambio: "nivel", nivel: Number(n[1]) };
+    if (/\bvolumen\s+(al|a)\s+(maximo|tope|full)\b|\btodo el volumen\b/.test(t)) return { accion: "volumen", cambio: "maximo" };
+    if (/\b(silencia\w*|mutea\w*|sin sonido|volumen (a|en) cero)\b/.test(t)) return { accion: "volumen", cambio: "silencio" };
+    if (/\b(sube\w*|mas)\s+(el\s+)?(volumen|sonido)\b|\bsubele\b/.test(t)) return { accion: "volumen", cambio: "subir" };
+    if (/\b(baja\w*|menos)\s+(el\s+)?(volumen|sonido)\b|\bbajale\b/.test(t)) return { accion: "volumen", cambio: "bajar" };
+  }
+  // Batería
+  if (/\bbateria\b/.test(t) && /\b(cuant[ao]|como|que|nivel|tengo|queda|porcentaje)\b|^(la )?bateria$/.test(t) && !/\b(compr|cambi|reemplaz)\w*\b/.test(t)) return { accion: "bateria" };
+  // Navegar (Maps)
+  const nav = /\b(?:llevame|navega(?:r)?|guiame|como llego|ruta|indicaciones)\s+(?:a|al|hasta|hacia|para)\s+(.{2,80})$/.exec(t);
+  if (nav) {
+    const destino = nav[1].replace(/\b(por favor|porfa|en (el )?(auto|maps))\b/g, "").trim();
+    if (destino) return { accion: "navegar", destino };
+  }
+  // Abrir una app del teléfono (si no, «abre X» sigue siendo del PC)
+  const ab = /^(?:oye\s+)?(?:abre(?:me)?|abrir|lanza|inicia|entra a|entra en)\s+(.+?)(?:\s+(?:en (?:el|mi)\s+)?(?:celu\w*|telefono|movil))?$/.exec(t);
+  if (ab) {
+    const app = appDelTelefono(ab[1], apps);
+    if (app) return { accion: "abrir_app", nombre: app };
+    if (TEL.test(t)) return { accion: "abrir_app", nombre: ab[1].trim() };
+  }
+  return null;
+}

@@ -47,18 +47,37 @@ const AREA_MAP: Partial<Record<keyof typeof AREAS, string>> = {
 };
 const TAGS = ["Producto", "Core", "Salud", "Finanzas", "Comercial", "Marketing", "Administración", "TI", "Infraestructura", "Seguridad", "Hardware", "TSN", "Dashboard", "Roadmap"] as const;
 
+/**
+ * Un valor de una lista dicho de otra forma («activo», «#AXS/Infraestructura», «técnica»): se acepta el de la lista. (2026-11-16, banco
+ * «voz»: con «Gobernanza» como tag la nota se rechazaba y Hestia terminó explicándole a Alex el formato de los tags.) Si no calza con
+ * ninguno: en lo opcional se descarta (la nota igual se crea), en lo obligatorio queda tal cual y la validación lo explica.
+ */
+function aLaLista(valores: readonly string[], v: unknown, opcional: boolean): unknown {
+  const f = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+  if (typeof v !== "string") return opcional ? undefined : v;
+  const limpio = v.replace(/^#?\s*AXS\s*\//i, "");
+  return valores.find((x) => f(x) === f(limpio)) ?? (opcional ? undefined : v);
+}
+function suave<T extends readonly [string, ...string[]]>(valores: T, opcional: true): z.ZodEffects<z.ZodOptional<z.ZodEnum<z.Writeable<T>>>>;
+function suave<T extends readonly [string, ...string[]]>(valores: T, opcional: false): z.ZodEffects<z.ZodEnum<z.Writeable<T>>>;
+function suave<T extends readonly [string, ...string[]]>(valores: T, opcional: boolean) {
+  return opcional
+    ? z.preprocess((v) => aLaLista(valores, v, true), z.enum(valores).optional())
+    : z.preprocess((v) => aLaLista(valores, v, false), z.enum(valores));
+}
+
 const Schema = z.object({
   title: z.string().describe("Título de la nota, en español y con espacios (p. ej. «Plan de Backups»). Sin guiones bajos ni kebab-case."),
-  area: z.enum(["gobernanza", "estrategia", "tecnica", "negocio", "estandares"]).describe(
+  area: suave(["gobernanza", "estrategia", "tecnica", "negocio", "estandares"] as const, false).describe(
     "Dónde va: tecnica = documentación técnica/módulos (20-29); estrategia = visión (10-19); negocio = comercial/finanzas/marketing/administración (30-39); estandares = procedimientos (40-49); gobernanza = gobierno y mapas (00-09)"),
-  subarea: z.enum(SUBAREAS).optional().describe("Solo con area=negocio: Administración, Comercial, Finanzas o Marketing"),
-  seccion: z.enum(["nucleo", "modulos", "plataforma", "laboratorio", "vision", "runbooks"]).optional().describe(
+  subarea: suave(SUBAREAS, true).describe("Solo con area=negocio: Administración, Comercial, Finanzas o Marketing"),
+  seccion: suave(["nucleo", "modulos", "plataforma", "laboratorio", "vision", "runbooks"] as const, true).describe(
     "Con area=tecnica (SOLO lo que ya existe en el código): nucleo (motor, memoria, herramientas, voz), modulos (lo que se usa en la app), " +
     "plataforma (TI, seguridad, conectividad) o laboratorio (I+D; por defecto). Con area=estrategia: vision (módulos o productos que " +
     "AÚN NO existen: hardware, ideas, conceptos). Con area=estandares: runbooks (cómo operar)."),
   body: z.string().optional().describe("Contenido en markdown. Los enlaces a otras notas deben ser [[ruta/completa/Nota.md|Alias]]."),
-  status: z.enum(["Concepto", "Planificado", "Activo"]).optional().describe("Por defecto Concepto (lo que aún no está construido)"),
-  tag: z.enum(TAGS).optional().describe("Etiqueta del área (#AXS/<tag>)"),
+  status: suave(["Concepto", "Planificado", "Activo"] as const, true).describe("Por defecto Concepto (lo que aún no está construido)"),
+  tag: suave(TAGS, true).describe(`Etiqueta del área (#AXS/<tag>), una de: ${TAGS.join(", ")}`),
   related: z.string().optional().describe("Nombres de notas relacionadas, separados por coma (se enlazan con ruta completa)"),
   parent: z.string().optional().describe("Nota YA EXISTENTE que recibirá un enlace a la nueva (para que no quede huérfana). Si el usuario dice «enlázala desde Forge» / «cuélgala de Toji», ese nombre va AQUÍ (p. ej. «Forge»). No crea nada con ese nombre."),
 });

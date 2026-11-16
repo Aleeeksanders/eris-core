@@ -24,6 +24,8 @@ export interface PlanInput {
   reserve: number;
   /** Piso pedido por quien llama (p. ej. la configuración del modo). */
   floor?: number;
+  /** Techo pedido por quien llama (Hestia por voz: 8192; si no cabe, se recorta lo viejo antes que recargar el modelo). */
+  cap?: number;
 }
 
 export class ContextPlanner {
@@ -84,6 +86,7 @@ export class ContextPlanner {
     if (this.current) level = Math.max(level, this.current); // mientras esté cargado, nunca se achica
     const cap = this.maxLevel;
     if (cap !== null) level = Math.min(level, cap); // …salvo que no quepa en la tarjeta: mejor perder historial viejo que tardar minutos
+    if (p.cap) level = Math.min(level, this.levelFor(p.cap));
     this.current = level;
     this.lastUse = t;
     return level;

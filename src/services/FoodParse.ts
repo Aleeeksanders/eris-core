@@ -12,17 +12,20 @@
 // ============================================================
 
 import { normText, stemWord, phonWord, editDistance } from "./FoodText.js";
+import { armarPlato, rolDe, type PerfilPlato, type AjustePlato } from "./PlatoChat.js";
 import { slotAt, fitsSlot, slotIsPast, typicalTimeOf, hhmm, hourOf, dayStartHour, MEAL_NAME, MEAL_ORDER, wakeHourFor, nutritionDayOf, type DayCtx } from "./MealSchedule.js";
 
 export type MealType = "desayuno" | "colacion_am" | "almuerzo" | "once" | "cena" | "colacion_pm";
 export interface FoodParse {
-  action: "log_meal"; mealType: MealType; items: Array<{ name: string; grams: number }>;
+  action: "log_meal"; mealType: MealType; items: Array<{ name: string; grams: number; ajuste?: AjustePlato }>;
   /** aviso si se asumió una porción ("una hallulla con palta": la palta sin cantidad) */
   assumed?: string;
   /** "ayer", "anoche"…: la comida NO es de hoy (la herramienta no la registra y explica dónde hacerlo) */
   otherDay?: string;
   /** nombres tomados con un error de tipeo: «chocapig» como Cereal azucarado (tipo Zucaritas / Chocapic) */
   corrected?: string[];
+  /** los gramos los armó el código (un plato, PlatoChat): la herramienta no los cambia */
+  exacto?: boolean;
 }
 
 /** Lo que el reconocedor necesita de la base: el alimento local que corresponde a un nombre, con su porción. */
@@ -446,7 +449,8 @@ function searchVariants(name: string): string[] {
 }
 
 /** El alimento de la base para un nombre, solo si hay UNO claramente mejor ("pan" solo empata marraqueta, hallulla…: null). */
-async function resolveLocal(name: string, lookup: LocalFoodLookup): Promise<(LocalFoodHit & { fuzzy?: boolean }) | null> {
+/** `desempate`: entre los que empatan arriba, cuál conviene (más = mejor); sin él, un empate es null (hay que preguntar). */
+async function resolveLocal(name: string, lookup: LocalFoodLookup, desempate?: (h: LocalFoodHit) => number): Promise<(LocalFoodHit & { fuzzy?: boolean }) | null> {
   // Se juntan los candidatos de TODAS las variantes y gana el mejor: antes mandaba la primera variante con resultados,
   // y con la base ampliada "huevos" (plural) empataba "Huevo frito" con "Huevos revueltos" sin llegar a "huevo", donde
   // "Huevo duro" calza perfecto.
@@ -459,7 +463,12 @@ async function resolveLocal(name: string, lookup: LocalFoodLookup): Promise<(Loc
   }
   const scored = [...best.values()].sort((a, b) => b.s - a.s);
   if (!scored.length) return null;
-  if (scored.length > 1 && scored[1].s === scored[0].s) return null;
+  if (scored.length > 1 && scored[1].s === scored[0].s) {
+    if (!desempate) return null;
+    const top = scored.filter((x) => x.s === scored[0].s).map((x) => ({ ...x, d: desempate(x.h) })).sort((a, b) => b.d - a.d);
+    if (top[1] && top[1].d === top[0].d) return null;
+    return { ...top[0].h, fuzzy: top[0].fuzzy };
+  }
   return { ...scored[0].h, fuzzy: scored[0].fuzzy };
 }
 
@@ -507,7 +516,7 @@ function gramsFor(item: RawItem, hit: LocalFoodHit): number | null {
  * Reconoce un pedido explícito de registrar comida. Devuelve los alimentos con sus gramos y el tipo de comida, o null
  * si hay cualquier duda (el mensaje va entonces al modelo).
  */
-export async function parseFoodMessage(message: unknown, lookup: LocalFoodLookup, now: Date = new Date()): Promise<FoodParse | null> {
+export async function parseFoodMessage(message: unknown, lookup: LocalFoodLookup, now: Date = new Date(), opts: { perfil?: PerfilPlato | null } = {}): Promise<FoodParse | null> {
   if (typeof message !== "string") return null;
   if (message.length > 220) return null;
   // La hora ("a las 8", "hace una hora") dice CUÁNDO se comió (mealTimingOf), no es parte de los alimentos
@@ -548,7 +557,14 @@ export async function parseFoodMessage(message: unknown, lookup: LocalFoodLookup
   // Sin cantidades («añade lechuga, repollo y choclo al almuerzo»): si PIDIÓ anotar (no si solo contó que comió), la porción
   // típica de cada uno, avisando para que corrija (revisión 2026-11-04, C3: el mensaje se iba al modelo y terminó en Suplementos)
   const parsed = (await parseItemsText(t, lookup)) ?? (VERB.test(req) ? await parseItemsText(t, lookup, true) : null);
-  if (!parsed) return null;
+  if (!parsed) {
+    // Un plato contado como se comió («tallarines con salsa y carne molida, tenía pimentón»), sin cantidades: se arma POR
+    // CÓDIGO (services/PlatoChat.ts) — el plato de la base o sus partes en porciones de plato. Antes iba al modelo, que lo
+    // pasaba entero y terminaba como 100 g de carne molida (almuerzo real, 2026-11-15). Si algo no se encuentra, decide el modelo.
+    const plato = await platoDelTexto(t, lookup, opts.perfil);
+    if (!plato) return null;
+    return { action: "log_meal", mealType, items: plato.items, exacto: true, ...(plato.notas.length ? { assumed: plato.notas.join(" ") } : {}), ...(otherDay ? { otherDay } : {}) };
+  }
   const { items, assumedNames, corrected } = parsed;
   const assumed = assumedNames.length
     ? `Asumí una porción normal de ${assumedNames.join(" y ")}; si fue otra cantidad, dímelo y lo corrijo.`
@@ -619,6 +635,42 @@ export async function parseMultiMealMessage(message: unknown, lookup: LocalFoodL
     else multi.push({ mealType: t.meal, items: parsed.items, said: `anota ${text} ${MEAL_SAID[t.meal]}`, ...(parsed.corrected.length ? { corrected: parsed.corrected } : {}) });
   }
   return multi.length >= 2 ? { action: "log_meal", multi } : null;
+}
+
+/**
+ * El texto ya limpio de un plato («tallarines con salsa y carne molida, tenia pimenton», «un plato de cazuela», «300 g de
+ * arroz con pollo») → lo que se anota, con PlatoChat. null si lo principal o algún agregado no está en la base.
+ */
+export async function platoDelTexto(t: string, lookup: LocalFoodLookup, perfil?: PerfilPlato | null): Promise<{ items: Array<{ name: string; grams: number; ajuste?: AjustePlato }>; notas: string[] } | null> {
+  let s = t.replace(/^(?:que\s+)?(?:me\s+)?/, "").trim();
+  if (!s || s.length > 140 || /[?¿]/.test(s)) return null;
+  let gramos: number | undefined, porciones: number | undefined;
+  const g = s.match(/^(\d+(?:\.\d+)?)\s*(g|gr|grs|gramos|kg|kilos?)\s+(?:de\s+)?/);
+  if (g) { gramos = Number(g[1]) * (/^k/.test(g[2]) ? 1000 : 1); s = s.slice(g[0].length); }
+  const p = s.match(new RegExp(`^(${QTY})\\s+(?:platos?|porcion(?:es)?)\\s+(?:de\\s+)?`));
+  if (!g && p) { porciones = parseQty(p[1]) ?? undefined; s = s.slice(p[0].length); }
+  // «un completo», «una cazuela»: dijo cuánto (uno); «el», «los»… no
+  else if (!g && /^(?:un|una)\s+/.test(s)) { porciones = 1; s = s.replace(/^(?:un|una)\s+/, ""); }
+  else if (!g && /^(?:el|la|los|las)\s+/.test(s)) s = s.replace(/^(?:el|la|los|las)\s+/, "");
+  // Otras cantidades en medio («con 2 huevos») las lee el modelo; acá solo el plato tal como se dice
+  if (/\d/.test(s) || !s) return null;
+  if (gramos != null && !(gramos > 0 && gramos <= 3000)) return null;
+  // Si dos de la base empatan: como plato principal, el plato («lentejas» → Guiso de lentejas); como agregado, el ingrediente
+  // simple («arvejas» → Arvejas cocidas)
+  // («pollo» como principal: Pollo asado, no un Shawarma que también lo tiene)
+  const r = await armarPlato(s, async (q, papel) => {
+    const q0 = fold(q).split(" ")[0];
+    return resolveLocal(q, lookup, (h) => {
+      const n = fold(h.name), plato = rolDe(h.name) === "plato";
+      const empieza = n.startsWith(q0) ? 2 : 0;
+      // las legumbres como plato son el guiso («lentejas» → Guiso de lentejas); lo demás, lo simple («pollo» → Pollo asado)
+      const guiso = /^(lentejas?|porotos?|garbanzos?|arvejas?|habas?)$/.test(q0) && new RegExp(`^(guiso|cazuela|sopa|crema)\\s+de\\s+${q0}`).test(n) ? 4 : 0;
+      if (papel === "base") return guiso + empieza + (/cocid|asad|natural|entero|blanco|plancha/.test(n) ? 1 : 0) + (plato && empieza ? 0.5 : 0) - n.length / 1000;
+      return (plato ? -2 : 0) + empieza + (/cocid|natural|blanco|lata|en agua/.test(n) ? 1 : 0) - n.length / 1000;
+    });
+  }, { gramos, porciones, perfil });
+  if (!r || r.faltan.length || !r.items.length) return null;
+  return { items: r.items, notas: r.notas };
 }
 
 async function parseItemsText(t: string, lookup: LocalFoodLookup, defaultPortion = false):

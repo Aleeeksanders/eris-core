@@ -392,6 +392,8 @@ export const ALIAS_MOVES: Record<string, string[]> = {
   "cl:bife_vacuno": ["posta", "asado", "lomo liso"],
   "cl:lomo_cerdo": ["chuleta de cerdo", "costilla cerdo"],
   "cl:maní": ["maní salado"],
+  // «Boloñesa» es con carne: va con los tallarines con salsa bolognesa (2026-11-15)
+  "cl:fideos_salsa": ["espagueti boloñesa"],
 };
 /** Alias nuevos para alimentos que ya estaban. */
 export const ALIAS_ADDS: Record<string, string[]> = {
@@ -730,7 +732,7 @@ NEW_FOODS.push(
 
   // ─── Platos caseros ───────────────────────────────────────
   { id: "cl:arroz_verduras", name: "Arroz con verduras", aliases: ["arroz primavera", "arroz graneado con verduras"], category: "platos", group: "plato_casero", nova: 1, recipe: [[ARROZ, 150], [ARVEJAS, 25], [ZANAHORIA, 20], [CHOCLO, 25], [ACEITE, 5], ["sal", 1]], servings: [["1 taza", 200]] },
-  { id: "cl:tallarines_bolognesa", name: "Tallarines con salsa bolognesa", aliases: ["tallarines con salsa", "espaguetis a la bolognesa", "fideos con carne"], category: "platos", group: "plato_casero", nova: 3, recipe: [[FIDEOS, 200], [CARNE_MOLIDA, 60], [SALSA_TOMATE, 90], [CEBOLLA, 20], [ACEITE, 5], [PARMESANO, 5]], servings: [["1 plato", 380]] },
+  { id: "cl:tallarines_bolognesa", name: "Tallarines con salsa bolognesa", aliases: ["tallarines con salsa", "espaguetis a la bolognesa", "fideos con carne", "tallarines con carne molida", "tallarines con salsa y carne molida", "tallarines con salsa y carne", "tallarines con salsa de carne", "tallarines a la bolognesa", "tallarines bolognesa", "fideos con carne molida", "fideos con salsa y carne", "fideos con salsa y carne molida", "espaguetis con carne", "espagueti boloñesa", "pasta bolognesa", "spaghetti bolognesa"], category: "platos", group: "plato_casero", nova: 3, recipe: [[FIDEOS, 200], [CARNE_MOLIDA, 60], [SALSA_TOMATE, 90], [CEBOLLA, 20], [ACEITE, 5], [PARMESANO, 5]], servings: [["1 plato", 380]] },
   { id: "cl:lomo_saltado", name: "Lomo saltado", aliases: ["lomo saltado peruano"], category: "platos", group: "plato_casero", nova: 3, recipe: [["Beef, top sirloin, steak, separable lean only, trimmed to 1/8\" fat, choice, cooked, broiled", 130], [CEBOLLA, 60], [TOMATE, 60], [PAPAS_FRITAS, 100], [ARROZ, 150], ["Soy sauce made from soy and wheat (shoyu)", 10], [ACEITE, 10]], servings: [["1 plato", 520]] },
   { id: "cl:aji_gallina", name: "Ají de gallina", aliases: ["aji de gallina"], category: "platos", group: "plato_casero", nova: 3, recipe: [[POLLO_GUISADO, 120], [PAN_MOLDE, 25], ["Milk, canned, evaporated, without added vitamin A", 60], [PARMESANO, 10], ["Nuts, walnuts, english", 10], [CEBOLLA, 30], [ACEITE, 8], [ARROZ, 150], [HUEVO_DURO, 15], ["sal", 1.5]], servings: [["1 plato", 430]] },
   { id: "cl:ceviche", name: "Ceviche", aliases: ["cebiche", "ceviche de pescado"], category: "platos", group: "pescado", nova: 1, recipe: [["Fish, cod, Atlantic, raw", 150], [LIMON, 50], [CEBOLLA, 40], [CILANTRO, 4], ["Peppers, hot chili, green, raw", 5], ["sal", 1.5]], servings: [["1 porción", 250]] },
@@ -799,3 +801,25 @@ for (const [id, als] of Object.entries({
 // Con la base ampliada, lo de siempre tiene que seguir ganando sin empate: «carne molida» es la de vacuno (no la magra 90/10
 // ni la de cerdo) y «yogur» es el natural (no el de sabor)
 for (const [id, als] of Object.entries({ "cl:carne_molida": ["carne molida"], "cl:yogur_natural": ["yogur"] })) ALIAS_ADDS[id] = [...(ALIAS_ADDS[id] ?? []), ...als];
+
+// ─── Platos comunes que faltaban (2026-11-15, banco de platos dichos en el chat) ───────────────────────────────────────
+// «Almorcé ñoquis con salsa», «un poke de salmón», «guiso de porotos verdes»… no se anotaban. Recetas promedio con
+// ingredientes de la caché USDA (scripts/agregar_platos_2026_11_15.ts los agregó sin rearmar toda la base).
+export const PLATOS_2026_11_15: RecipeSpec[] = [
+  { id: "cl:noquis_salsa", name: "Ñoquis con salsa de tomate", aliases: ["ñoquis", "noquis", "ñoquis con salsa", "ñoquis de papa", "gnocchi", "ñoquis con salsa de tomate"], category: "platos", group: "plato_casero", nova: 3, recipe: [[PAPA, 150], [HARINA, 45], [HUEVO, 10], [SALSA_TOMATE, 100], [PARMESANO, 5], ["sal", 1]], servings: [["1 plato", 311]] },
+  { id: "cl:poke_salmon", name: "Poke bowl de salmón", aliases: ["poke", "poke bowl", "poke de salmón", "poke de salmon", "bowl de salmón"], category: "platos", group: "pescado", nova: 2, recipe: [["Rice, white, short-grain, enriched, cooked", 150], ["Fish, salmon, Atlantic, farmed, raw", 90], [PALTA, 40], ["Cucumber, with peel, raw", 30], [ZANAHORIA, 20], ["Edamame, frozen, prepared", 20], ["Soy sauce made from soy and wheat (shoyu)", 10], ["Seeds, sesame seeds, whole, dried", 3]], servings: [["1 bowl", 363]] },
+  { id: "cl:guiso_porotos_verdes", name: "Guiso de porotos verdes", aliases: ["porotos verdes guisados", "porotos verdes con papas", "guiso de porotos verdes"], category: "platos", group: "plato_casero", nova: 1, recipe: [["Beans, snap, green, cooked, boiled, drained, without salt", 150], [PAPA, 120], [CEBOLLA, 30], [ZANAHORIA, 20], [HUEVO, 25], [ACEITE, 8], ["sal", 1.5]], servings: [["1 plato", 354]] },
+  { id: "cl:pollo_al_jugo", name: "Pollo al jugo", aliases: ["pollo guisado", "pollo a la cacerola", "pollo al jugo con verduras"], category: "platos", group: "proteina_magra", nova: 1, recipe: [["Chicken, broilers or fryers, thigh, meat only, cooked, stewed", 150], [CEBOLLA, 30], [ZANAHORIA, 30], ["Peppers, sweet, red, raw", 20], [ACEITE, 5], ["sal", 1]], servings: [["1 presa con su jugo", 236]] },
+  { id: "cl:pimenton_relleno", name: "Pimentón relleno", aliases: ["pimentones rellenos", "pimiento relleno", "pimentón relleno con carne"], category: "platos", group: "plato_casero", nova: 1, recipe: [["Peppers, sweet, red, raw", 150], [CARNE_MOLIDA, 70], [ARROZ, 60], [CEBOLLA, 20], [SALSA_TOMATE, 40], [ACEITE, 5], ["sal", 1]], servings: [["1 unidad", 346]] },
+  { id: "cl:tallarines_pesto", name: "Tallarines al pesto", aliases: ["pasta al pesto", "fideos al pesto", "tallarines con pesto", "espaguetis al pesto"], category: "platos", group: "plato_casero", nova: 3, recipe: [[FIDEOS, 200], ["Basil, fresh", 10], [OLIVA, 15], [PARMESANO, 10], ["Nuts, walnuts, english", 8], ["sal", 0.5]], servings: [["1 plato", 243]] },
+  { id: "cl:fettuccine_alfredo", name: "Fettuccine Alfredo", aliases: ["fetuccini alfredo", "pasta alfredo", "tallarines a la crema", "fideos con crema", "pasta con salsa blanca"], category: "platos", group: "plato_casero", nova: 3, recipe: [[FIDEOS, 200], ["Cream, fluid, heavy whipping", 50], [MANTEQUILLA, 10], [PARMESANO, 20], ["sal", 0.5]], servings: [["1 plato", 280]] },
+  { id: "cl:pasta_carbonara", name: "Pasta a la carbonara", aliases: ["carbonara", "pasta carbonara", "tallarines a la carbonara", "espaguetis a la carbonara", "fideos a la carbonara"], category: "platos", group: "plato_casero", nova: 3, recipe: [[FIDEOS, 200], ["Pork, cured, bacon, cooked, pan-fried", 25], [HUEVO, 30], [PARMESANO, 15], [OLIVA, 5], ["sal", 0.5]], servings: [["1 plato", 275]] },
+  { id: "cl:anticucho", name: "Anticucho", aliases: ["anticuchos", "brocheta", "brochetas", "anticucho de vacuno"], category: "platos", group: "carne_roja", nova: 1, recipe: [[VACUNO, 100], [CEBOLLA, 20], ["Peppers, sweet, red, raw", 20], [ACEITE, 3], ["sal", 0.8]], servings: [["1 unidad", 144]] },
+  { id: "cl:pollo_curry", name: "Pollo al curry", aliases: ["pollo con curry", "curry de pollo", "pollo en salsa curry"], category: "platos", group: "proteina_magra", nova: 3, recipe: [[POLLO_GUISADO, 150], ["Milk, canned, evaporated, without added vitamin A", 50], [CEBOLLA, 30], [ACEITE, 8], ["sal", 1]], servings: [["1 porción", 239]] },
+  { id: "cl:milanesa_vacuno", name: "Milanesa de vacuno", aliases: ["milanesa", "milanesa de carne", "escalopa", "escalopa de vacuno", "bistec apanado", "escalopa apanada"], category: "platos", group: "carne_roja", nova: 3, recipe: [[VACUNO, 120], [HARINA, 8], [HUEVO, 10], ["Bread, crumbs, dry, grated, plain", 20], [ACEITE, 12], ["sal", 0.8]], servings: [["1 unidad", 171]] },
+];
+NEW_FOODS.push(...PLATOS_2026_11_15);
+// «escalopa» es una milanesa (carne apanada), no la posta sola
+ALIAS_MOVES["cl:vacuno_posta"] = [...(ALIAS_MOVES["cl:vacuno_posta"] ?? []), "escalopa"];
+// «ensalada de tomate» es la ensalada chilena (tomate con cebolla)
+ALIAS_ADDS["cl:ensalada_chilena"] = [...(ALIAS_ADDS["cl:ensalada_chilena"] ?? []), "ensalada de tomate", "ensalada de tomates"];

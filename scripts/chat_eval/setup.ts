@@ -28,6 +28,6 @@ if (!(await access(tokensPath).then(() => true, () => false))) {
 const day = new Date().toDateString();
 const dir = join(home, ".eris", "profiles", "ikaros");
 // + el último snapshot del teléfono: su `nutrition` de otra corrida quedaba pegado (1.808 kcal «de hoy» con 713 anotadas)
-const borrar = [`kv_nutrition_log_${day}.json`, `kv_hydration_log_${day}.json`, `kv_nutrition_deleted_${day}.json`, "kv_sleep_log.json", "kv_sleep_pending.json", "kv_health_snapshot_latest.json", "kv_antojo_pending.json", "kv_antojo_trato.json"];
+const borrar = [`kv_nutrition_log_${day}.json`, `kv_hydration_log_${day}.json`, `kv_nutrition_deleted_${day}.json`, "kv_sleep_log.json", "kv_sleep_pending.json", "kv_health_snapshot_latest.json", "kv_antojo_pending.json", "kv_antojo_trato.json", "kv_plato_perfil.json"];
 for (const f of borrar) await rm(join(dir, f), { force: true });
 console.log(`día limpio para ikaros (${day})`);

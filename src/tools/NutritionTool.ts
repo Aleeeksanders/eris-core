@@ -7,6 +7,10 @@
 import { assessFood, formatRisks, type ItemRisk } from "../services/FoodSafetyCheck.js";
 import { deriveRestrictions } from "../services/DietaryRestrictions.js";
 import { resolveFood, correctFoodName, foodFit, cleanMyFoods, myFoodFor } from "../services/FoodResolve.js";
+import { armarPlato, esCompuesto, rolDe, leerRespuestaPlato, botonesPerfil, botonesCorreccion, AJUSTE_PLATO, TEXTO_PERFIL, type PerfilPlato, type AjustePlato } from "../services/PlatoChat.js";
+import { leerPlato, guardarPlato, votar, sugerenciaProteina } from "../services/PlatoPerfil.js";
+import { lastInventoryState } from "../services/InventoryBackup.js";
+import { wasFoodLogReply } from "../services/FoodParse.js";
 import { waterToday, waterLine, fmtLiters } from "../services/WaterToday.js";
 import { beverageTypeOf, amountText } from "../services/Beverage.js";
 import { itemWaterL } from "../services/FoodWater.js";
@@ -119,6 +123,7 @@ const NutritionInputSchema = z.object({
     "meal_order", // «¿Cuál es el orden de las comidas del día?»: por código, con los nombres de Chile (MealSchedule)
     "antojo_respuesta", // Respuesta a la contrapartida de un antojo («Acepto la contrapartida» / «Mejor no»): services/Antojo.ts
     "yo_lo_anoto", // «Yo lo anoto», «lo registro yo con el código de barras»: Eris no insiste (revisión 2026-11-04, Q3)
+    "plato_perfil", // interno: «más arroz que carne» / «fue más carne» (tu plato, services/PlatoPerfil.ts); lo pone el código
   ]).describe("Acción a ejecutar"),
   accept: z.boolean().optional().describe("antojo_respuesta: true si aceptó la contrapartida."),
 
@@ -141,8 +146,16 @@ const NutritionInputSchema = z.object({
       protein: z.number(),
       carbs: z.number(),
       fat: z.number(),
-    }).optional().describe("Solo si log_meal ya te dijo que no encontró el alimento: sus macros por CADA 100 g, buscadas con web_search.")
+    }).optional().describe("Solo si log_meal ya te dijo que no encontró el alimento: sus macros por CADA 100 g, buscadas con web_search."),
+    // interno (PlatoChat): el reparto de SU plato sobre un plato armado de la base (más arroz que carne o al revés)
+    ajuste: z.object({ carbs: z.number(), protein: z.number(), fat: z.number() }).optional(),
   })).optional().describe("Lista de alimentos con sus porciones en gramos"),
+  // interno (tu plato, 2026-11-15): la respuesta a «¿cómo suele ser tu plato?» o una corrección («fue más fideos»)
+  platoTipo: z.enum(["carbo", "mitad", "proteina"]).optional(),
+  platoCorreccion: z.boolean().optional(),
+  // interno: rearmar un plato con este reparto (al corregirlo) y sin volver a mostrar los botones
+  perfilPlato: z.enum(["carbo", "mitad", "proteina"]).optional(),
+  sinBotones: z.boolean().optional(),
 
   goals: z.object({
     calories: z.number().optional(),
@@ -157,6 +170,7 @@ const NutritionInputSchema = z.object({
     "agua", "te_cafe", "jugo_natural", "jugo_artificial", "bebida_fantasia", "bebida_isotonica", "alcohol"
   ]).optional().describe("Tipo de bebida ingerida para calcular hidratación real"),
   assumed: z.string().optional(), // interno: aviso de tamaño asumido (lo pone el reconocimiento por código; no es un parámetro para el modelo)
+  exacto: z.boolean().optional(), // interno: los gramos los calculó el código (PlatoChat): no se cambian por la porción de la base
   otherDay: z.string().optional(), // interno: "ayer", "anoche"… (lo pone el reconocimiento por código): no se registra
   corrected: z.array(z.string()).optional(), // interno: nombres tomados con un error de tipeo (lo pone el reconocimiento por código)
   said: z.string().max(200).optional(), // interno: cómo nombró lo que piensa comer («un completo»), para simulate (lo pone el reconocimiento por código)
@@ -237,13 +251,25 @@ const COMMON_FOODS: Record<string, { cal: number; prot: number; carbs: number; f
   "avena":           { cal: 389, prot: 17,  carbs: 66,  fat: 7,   fiber: 10 },
 };
 
-function lookupMacros(name: string): typeof COMMON_FOODS[string] | null {
-  const lower = name.toLowerCase();
-  // Búsqueda exacta
-  if (COMMON_FOODS[lower]) return COMMON_FOODS[lower];
-  // Búsqueda parcial
-  const key = Object.keys(COMMON_FOODS).find(k => lower.includes(k) || k.includes(lower.split(" ")[0]));
-  return key ? COMMON_FOODS[key] : null;
+/**
+ * Solo el MISMO alimento (sin tildes, sin «de» ni la preparación, en singular). Antes bastaba con que el nombre CONTUVIERA
+ * uno de la lista: «tallarines con salsa y carne molida» quedó como 100 g de carne molida (250 kcal y 0 g de carbohidratos,
+ * almuerzo real del 2026-11-15), y «té» calzaba con «tomate».
+ */
+/** ¿El mensaje no dice NINGUNA cantidad? (ni números ni «un», «medio», «un plato», «harto»…): los gramos no los dijo la persona */
+export function sinCantidad(message: unknown): boolean {
+  if (typeof message !== "string" || !message.trim()) return false;
+  const t = message.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  return !/\d/.test(t) && !/\b(un|una|uno|unos|unas|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|medio|media|mitad|cuarto|par|harto|harta|hartos|hartas|mucho|mucha|poco|poca|pocos|pocas|plato|platos|porcion|porciones|taza|tazas|vaso|vasos|cucharadas?|cucharaditas?|gramos?|kilos?|unidad|unidades|rebanadas?|trozos?|presas?|pedazos?|doble|triple)\b/.test(t);
+}
+const PREP_LOOKUP = new Set(["de", "del", "cocido", "cocida", "cocidos", "cocidas", "hervido", "hervida", "asado", "asada", "a", "la", "plancha", "al", "horno", "natural"]);
+export function lookupMacros(name: string): typeof COMMON_FOODS[string] | null {
+  const words = String(name ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9ñ ]+/g, " ").split(/\s+/).filter(Boolean);
+  const k = words.filter((w) => !PREP_LOOKUP.has(w)).join(" ");
+  if (!k) return null;
+  if (COMMON_FOODS[k]) return COMMON_FOODS[k];
+  const sing = k.split(" ").map((w) => (w.length > 3 && w.endsWith("es") && !w.endsWith("tes") ? w.slice(0, -2) : w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w)).join(" ");
+  return COMMON_FOODS[sing] ?? null;
 }
 
 // ─── Tool ─────────────────────────────────────────────────────────
@@ -304,11 +330,21 @@ export class NutritionTool extends Tool<NutritionInput> {
     // «Son 250g, no 150g» justo después de anotar un alimento: se corrige la cantidad de ese mismo alimento
     const fix = parseAmountFix(message, context?.lastAssistantMessage);
     if (fix) return { action: "log_meal", items: [{ name: fix.name, grams: fix.grams }], mealType: fix.mealType, fixedMeal: true, replaceLast: { name: fix.name, from: fix.from, grams: fix.grams, unit: fix.unit } };
+    // Tu plato (2026-11-15): la respuesta a «¿cómo suele ser tu plato?», un botón «Fue más carne» justo después de anotar, o
+    // «mi plato suele tener más arroz que carne» dicho en cualquier momento
+    const rp = leerRespuestaPlato(message);
+    if (rp) {
+      const last = String(context?.lastAssistantMessage ?? "");
+      const trasPlato = /c[oó]mo suele ser tu plato|Opción: Fue (más|mitad)/.test(last);
+      const general = !rp.correccion && /\b(mi plato|mis platos|suelo|siempre|normalmente|en (mi|la) casa|por lo general)\b/i.test(message);
+      if (trasPlato || general) return { action: "plato_perfil", platoTipo: rp.tipo, platoCorreccion: rp.correccion && trasPlato };
+    }
     const lookup = async (q: string) => foodService.searchLocal(q);
+    const perfil = (await leerPlato(context?.memory)).tipo;
     // «Te faltó la carne molida, unos 150 g» justo después de anotar: a esa misma comida
     const add = addToLastMeal(message, context?.lastAssistantMessage);
     if (add) {
-      const f = await parseFoodMessage(add.text, lookup);
+      const f = await parseFoodMessage(add.text, lookup, new Date(), { perfil });
       if (f) return { ...f, mealType: add.mealType, origMessage: add.text };
     }
     // "¿y si me como un completo?": se simula, no se anota (services/WhatIfFood.ts)
@@ -317,7 +353,7 @@ export class NutritionTool extends Tool<NutritionInput> {
     // «3 empanadas para la cena y una para la once»: antes iba al modelo y tardaba hasta 98 s (banco de pruebas 2026-10-16)
     const mm = await parseMultiMealMessage(message, lookup);
     if (mm) return { ...mm };
-    const f = await parseFoodMessage(message, lookup);
+    const f = await parseFoodMessage(message, lookup, new Date(), { perfil });
     if (f) return { ...f };
     // "borra la empanada", "me equivoqué, borra lo último" (esto último solo si lo anterior de Eris fue anotar comida)
     const d = await parseDeleteMessage(message, lookup, context?.lastAssistantMessage);
@@ -374,6 +410,8 @@ export class NutritionTool extends Tool<NutritionInput> {
           metadata: quick ? { quickReply: parts.map((p) => p.metadata!.quickReply).join("\n\n") } : undefined,
         };
       }
+      case "plato_perfil":
+        return this.handlePlatoPerfil(input, context, memory, wsClient, foodService, medical);
       case "log_water":
         return this.handleLogWater(input.waterLiters || 0.25, input.beverageType || "agua", memory, wsClient, context?.userMessage, (input as any).assumed);
       case "get_daily_log":
@@ -594,6 +632,47 @@ export class NutritionTool extends Tool<NutritionInput> {
     return { output: `Guardé ${saved} alimento(s) en la base de datos local y alimentos frecuentes.` };
   }
 
+  // ─── Tu plato (2026-11-15) ────────────────────────────────────────
+  /**
+   * «Más arroz que carne» (cómo es su plato) o «fue más carne» (el plato recién anotado). Se guarda, y el plato recién anotado
+   * se rearma con ese reparto. Dos correcciones seguidas iguales cambian su plato de siempre (PlatoPerfil.votar).
+   */
+  private async handlePlatoPerfil(input: NutritionInput, context: any, memory: any, wsClient: any, foodService: UnifiedFoodService | null, medical?: MedicalProfile): Promise<ToolExecutionResult> {
+    const tipo = (input as any).platoTipo as PerfilPlato | undefined;
+    if (!tipo) return { output: "", error: "Falta cómo es el plato" };
+    const correccion = !!(input as any).platoCorreccion;
+    const datos = await leerPlato(memory);
+    const antes = datos.tipo;
+    const cambio = correccion ? votar(datos, tipo) : antes !== tipo;
+    if (!correccion) datos.tipo = tipo;
+    await guardarPlato(memory, datos);
+    // El plato recién anotado (lo último que respondió Eris y hace menos de 3 h) se rearma con ese reparto
+    const u = datos.ultimo;
+    const reciente = !!u && Date.now() - Date.parse(u.at) < 3 * 3600_000 && wasFoodLogReply(context?.lastAssistantMessage);
+    const hayQueRearmar = reciente && (correccion || tipo !== "mitad" || (!!antes && antes !== "mitad"));
+    const comida = MEAL_NAME[(u?.mealType ?? "almuerzo") as MealType] ?? "plato";
+    let rearmado = "";
+    if (hayQueRearmar && u) {
+      const del = await this.handleDeleteEntry(LAST_ENTRY, memory, wsClient, foodService, medical, u.frase);
+      if (!del.error && !(del.metadata as any)?.notLogged) {
+        const f = foodService ? await parseFoodMessage(u.frase, async (q: string) => foodService.searchLocal(q), new Date(), { perfil: tipo }).catch(() => null) : null;
+        const relog: any = f ? { ...f, ...(u.mealType ? { mealType: u.mealType } : {}), perfilPlato: tipo, sinBotones: true } : { ...(u.input ?? {}), perfilPlato: tipo, sinBotones: true };
+        const r = await this.handleLogMeal(relog, memory, wsClient, foodService, medical, u.frase);
+        rearmado = String(r.metadata?.quickReply ?? r.output ?? "").replace(/\n+\[(Guía médica|Cómo presentarlo)[\s\S]*$/, "").trim();
+      }
+    }
+    let out: string;
+    if (correccion) {
+      out = rearmado ? `✏️ Listo, rearmé tu ${comida.toLowerCase()} con ${TEXTO_PERFIL[tipo]}:\n\n${rearmado}` : `Anotado: lo tengo en cuenta para tus próximos platos.`;
+      if (cambio) out += `\n\nComo ya van dos veces, desde ahora armo tus platos así (${TEXTO_PERFIL[tipo]}). Si cambia, dímelo.`;
+    } else {
+      out = `Listo: desde ahora armo tus platos con ${TEXTO_PERFIL[tipo]}.`;
+      if (rearmado) out += ` Ajusté tu ${comida.toLowerCase()}:\n\n${rearmado}`;
+      out += `\n\nSi algún plato fue distinto, corrígelo con un toque.`;
+    }
+    return { output: out, metadata: { quickReply: out } };
+  }
+
   // ─── Registrar comida ─────────────────────────────────────────────
   private async handleLogMeal(
     input: NutritionInput,
@@ -649,7 +728,8 @@ export class NutritionTool extends Tool<NutritionInput> {
     const mealType = timing.mealType;
 
     // Solo lo que el usuario pidió: el modelo a veces arrastra alimentos de registros anteriores de la conversación.
-    if (foodService && asksToLog(userMessage)) {
+    // (No con lo que armó el código desde sus palabras: «salsa bolognesa» sobre ñoquis es carne molida aunque no la nombre)
+    if (foodService && asksToLog(userMessage) && !(input as any).exacto) {
       const extra = await unmentionedItems(userMessage, input.items.map((i) => i.name), async (q) => foodService.searchLocal(q));
       if (extra.length) {
         return {
@@ -684,15 +764,29 @@ export class NutritionTool extends Tool<NutritionInput> {
 
     // Gramos corregidos con lo que dijo la persona ("3 empanadas" = 3 × la unidad de la base), para decírselo
     const gramFixes: string[] = [];
-    const pushFood = async (fullFood: any, item: { name: string; grams?: number }) => {
+    // Lo que se anotó en su porción normal porque no se dijo cuánto («1 plato de Tallarines con salsa bolognesa (380 g)»)
+    const porcionNormal: string[] = [];
+    // Tu plato (2026-11-15): cómo sirve la persona (más arroz que carne, mitad y mitad, más carne); `perfilPlato` lo fuerza
+    // al rearmar un plato corregido («fue más fideos»)
+    const datosPlato = await leerPlato(memory);
+    const perfilPlato: PerfilPlato | null = (input as any).perfilPlato ?? datosPlato.tipo;
+    let ajustado = false;
+    const pushFood = async (fullFood: any, item: { name: string; grams?: number; fijo?: boolean; ajuste?: AjustePlato }) => {
       const serving = fullFood.defaultServing;
       const servingGrams = serving.metricServingAmount || 100;
       const said = saidGramsFor(userMessage, {
         meal: mealType, names: [item.name, fullFood.name], servingDescription: String(serving.description ?? ""),
         servingGrams, onlyItem: input.items?.length === 1,
       });
-      // Sin gramos (el modelo no los puso): lo dicho por la persona o una porción normal de la base
-      let grams: number = item.grams && item.grams > 0 ? item.grams : (said ?? servingGrams);
+      // Sin gramos (el modelo no los puso): lo dicho por la persona o una porción normal de la base. Si la persona no dijo
+      // NINGUNA cantidad («comí tallarines con salsa…»), los gramos del modelo son inventados (ponía 100 g a un plato de
+      // almuerzo, 2026-11-15): va la porción normal de la base y se dice
+      const inventados = !!item.grams && !item.fijo && !(input as any).exacto && said == null && sinCantidad(userMessage);
+      let grams: number = item.grams && item.grams > 0 && !inventados ? item.grams : (said ?? servingGrams);
+      // Sin cantidad dicha (ni por la persona ni, si inventó, por el modelo): la porción normal, y se dice una sola vez al final
+      if (said == null && !item.fijo && !(input as any).exacto && (inventados || !(item.grams && item.grams > 0)) && sinCantidad(userMessage)) {
+        porcionNormal.push(`${String(serving.description ?? "1 porción").replace(/\s*\(.*\)$/, "")} de ${String(fullFood.name).split(/\s*[/(]/)[0].trim()} (${grams} g)`);
+      }
       if (said && Math.abs(said - grams) > Math.max(10, said * 0.2)) {
         console.warn(`[NutritionTool] ${fullFood.name}: el modelo puso ${grams} g, lo dicho son ${said} g`);
         // "un pan con palta" = 1 porción de la base (145 g): se dice así, porque "Pan con palta 145 g" sonaba a que la persona
@@ -705,7 +799,7 @@ export class NutritionTool extends Tool<NutritionInput> {
         grams = said;
       }
       const normFactor = grams / servingGrams;
-      resolvedItems.push({
+      const it = {
         name: fullFood.name,
         grams,
         calories: Math.round(serving.calories * normFactor),
@@ -713,7 +807,18 @@ export class NutritionTool extends Tool<NutritionInput> {
         carbs:    Math.round(serving.carbs    * normFactor * 10) / 10,
         fat:      Math.round(serving.fat      * normFactor * 10) / 10,
         fiber:    Math.round((serving.fiber || 0) * normFactor * 10) / 10,
-      });
+      };
+      // Un plato ya armado de la base (cazuela, pollo con arroz) en su porción normal: el reparto de SU plato (más arroz que
+      // carne, o al revés). Solo si el plato trae de los dos (no una ensalada ni una sopa de verduras).
+      const porcionSupuesta = said == null && (!(item.grams && item.grams > 0) || inventados);
+      const aj = item.ajuste ?? (perfilPlato && perfilPlato !== "mitad" && porcionSupuesta && rolDe(fullFood.name) === "plato" && /^(almuerzo|cena)$/.test(String(mealType)) ? AJUSTE_PLATO[perfilPlato] : undefined);
+      if (aj && it.carbs >= 12 && it.protein >= 6) {
+        const c = it.carbs * aj.carbs, p = it.protein * aj.protein, g = it.fat * aj.fat;
+        it.calories = Math.max(0, Math.round(it.calories + 4 * (c - it.carbs) + 4 * (p - it.protein) + 9 * (g - it.fat)));
+        it.carbs = Math.round(c * 10) / 10; it.protein = Math.round(p * 10) / 10; it.fat = Math.round(g * 10) / 10;
+        ajustado = true;
+      }
+      resolvedItems.push(it);
       { const risk = assessFood(fullFood.name, fullFood.safety, restrictions); if (risk) risks.push(risk); }
       // Si vino de USDA u OFF, guardarlo en la base local para no repetir búsqueda a API
       // Solo si calza con todas las palabras: "carne roja" quedó guardado como alias de un chili enlatado (2026-10-11)
@@ -732,10 +837,14 @@ export class NutritionTool extends Tool<NutritionInput> {
       if (own) { await pushFood(own, item); resolved = true; }
 
       // 1. UnifiedFoodService: Local Chile DB → USDA → OFF (prioridad máxima)
+      // Un plato compuesto («fideos con salsa y harto queso») que solo calza AFUERA (USDA/OFF) se arma primero con la base: el
+      // banco con el modelo real lo anotó como «Dip, salsa con queso» de 400 g (2026-11-15). Lo de afuera queda de respaldo.
+      let deAfuera: any = null;
       if (!resolved && foodService) {
         try {
-          const hit = await resolveFood(foodService, item.name);
-          if (hit) { await pushFood(hit, item); resolved = true; }
+          const hit: any = await resolveFood(foodService, item.name);
+          if (hit && esCompuesto(item.name) && /^(usda:|off:|cl:ext_)/.test(String(hit.id))) deAfuera = hit;
+          else if (hit) { await pushFood(hit, item); resolved = true; }
         } catch (e) {
           console.warn("[NutritionTool] foodService error para", item.name, e);
         }
@@ -777,9 +886,17 @@ export class NutritionTool extends Tool<NutritionInput> {
         const macros = override ? { cal: override.calories, prot: override.protein, carbs: override.carbs, fat: override.fat, fiber: 0 } : lookupMacros(item.name);
         if (macros) {
           { const risk = assessFood(item.name, undefined, restrictions); if (risk) risks.push(risk); }
+          // Los macros vienen por 100 g, pero un plato casi nunca es de 100 g (el usuario, 2026-11-15: «normalmente son 300 g
+          // más o menos»). Sin cantidad dicha: un plato normal (~300 g) en almuerzo o cena o si es un plato; si no, 100 g. Se dice.
+          const dijoG = item.grams && item.grams > 0 && !sinCantidad(userMessage) ? item.grams : null;
+          const esPlato = /^(almuerzo|cena)$/.test(String(mealType)) || esCompuesto(item.name)
+            || /\b(plato|guiso|cazuela|sopa|crema|pasta|arroz|fideos|tallarines|noquis|ñoquis|bowl|poke|curry|estofado|pastel|lasa[ñn]a|risotto|paella|ramen|wok|chaufa|charquican|porotos|lentejas|garbanzos)\b/i.test(item.name);
+          const g = dijoG ?? (esPlato ? 300 : 100);
+          if (!dijoG) porcionNormal.push(`${esPlato ? "un plato normal" : "100 g"} de ${item.name} (${g} g)`);
+          const factor = g / 100;
           resolvedItems.push({
             name: item.name,
-            grams: item.grams ?? 100,
+            grams: g,
             calories: Math.round(macros.cal   * factor),
             protein:  Math.round(macros.prot  * factor * 10) / 10,
             carbs:    Math.round(macros.carbs * factor * 10) / 10,
@@ -797,27 +914,50 @@ export class NutritionTool extends Tool<NutritionInput> {
         if (hit) { await pushFood(hit, item); corrections.push(`«${item.name}» como ${hit.name}`); resolved = true; }
       }
 
-      // 4. Una mezcla ("80 g de choclo con lechuga y repollo", 2026-10-09): si cada ingrediente está en las bases, se reparten
-      //    los gramos en partes iguales y se dice. Antes no se anotaba nada y el modelo inventaba un "Error de búsqueda".
-      if (!resolved && foodService) {
-        const parts = item.name
-          .replace(/^\s*(?:una?\s+)?(?:ensalada|mezcla|bowl|plato)\s+(?:de\s+)?/i, "")
-          .split(/\s*(?:,|\bcon\b|\by\b|\be\b|\+)\s*/i)
-          .map((p) => p.replace(/^(?:de|del|la|el|las|los)\s+/i, "").trim())
-          .filter(Boolean);
-        if (parts.length >= 2 && parts.length <= 5) {
-          const hits = await Promise.all(parts.map(async (p) => (await resolveFood(foodService, p).catch(() => null)) ??
-            (correctFoodName(p) ? await resolveFood(foodService, correctFoodName(p)!).catch(() => null) : null)));
-          if (hits.every(Boolean)) {
-            const each = item.grams ? Math.round((item.grams / parts.length) * 10) / 10 : 0; // 0 = cada uno con su porción normal
-            for (const h of hits) await pushFood(h, { name: h!.name, grams: each });
-            if (item.grams) splitNotes.push(`Repartí los ${Math.round(item.grams)} g de «${item.name}» en partes iguales: ${hits.map((h) => h!.name).join(", ")}.`);
-            resolved = true;
-          }
+      // 4. Un plato dicho como se comió («tallarines con salsa y carne molida», «arroz con pollo y ensalada», 2026-11-15):
+      //    PlatoChat arma el plato de la base o sus partes en porciones de plato (antes: partes iguales, o la lista de respaldo
+      //    tomaba «carne molida» por todo el plato). Con los gramos que dijo la persona, se reparten en proporción.
+      if (!resolved && foodService && esCompuesto(item.name)) {
+        const vistos = new Map<string, any>();
+        const resolver = async (q: string) => {
+          const h: any = (await resolveFood(foodService, q).catch(() => null)) ?? (correctFoodName(q) ? await resolveFood(foodService, correctFoodName(q)!).catch(() => null) : null);
+          if (!h?.defaultServing) return null;
+          vistos.set(h.name, h);
+          return { name: h.name, servingGrams: h.defaultServing.metricServingAmount || 100, servingDescription: String(h.defaultServing.description ?? ""), aliases: h.aliases };
+        };
+        const dijo = item.grams && item.grams > 0 && !sinCantidad(userMessage) ? item.grams : undefined;
+        const plato = await armarPlato(item.name, resolver, { gramos: dijo, perfil: perfilPlato });
+        if (plato && plato.items.length) {
+          for (const it of plato.items) { const h = vistos.get(it.name); if (h) await pushFood(h, { name: it.name, grams: it.grams, fijo: true, ...(it.ajuste ? { ajuste: it.ajuste } : {}) }); }
+          splitNotes.push(...plato.notas);
+          resolved = true;
         }
       }
 
+      // Lo de afuera, solo si el plato no se pudo armar con la base
+      if (!resolved && deAfuera) { await pushFood(deAfuera, item); resolved = true; }
       if (!resolved) unresolvedNames.push(item.name);
+    }
+
+    // «Tenía pimentón», «llevaba cebolla», «con harto tomate»: la verdura que la persona nombró y que no quedó anotada se suma
+    // en una porción chica (≤ 30 g, estimada y dicha). Pasó el 2026-11-15: los tallarines «tenían pimentón», el modelo no lo
+    // pasó y el almuerzo quedó «sin verduras».
+    if (resolvedItems.length && foodService && typeof userMessage === "string") {
+      const t = userMessage.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+      const ya = (v: string) => [...resolvedItems.map((i) => i.name), ...(input.items ?? []).map((i) => i.name)].some((n) => n.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().includes(v));
+      const VERDURA = "pimenton(?:es)?|cebollas?|tomates?|zanahorias?|lechuga|pepinos?|brocoli|espinacas?|acelgas?|zapallo italiano|zapallito|betarraga|repollo|coliflor|apio|champinon(?:es)?|porotos verdes|berenjenas?|esparragos?|alcachofas?";
+      const rx = new RegExp(`\\b(?:tenia|tenian|llevaba|llevaban|traia|traian|le puse|le eche|le agregue|con)\\s+(?:un poco de |harto |harta |mucho |mucha |algo de |su )?(?:el |la |los |las )?(${VERDURA})(?:\\s+(?:y|e)\\s+(${VERDURA}))?\\b`, "g");
+      const vistas = new Set<string>();
+      for (const m of t.matchAll(rx)) for (const v of [m[1], m[2]].filter(Boolean)) {
+        const base = v.replace(/(?:es|s)$/, "").replace(/^pimenton$/, "pimenton");
+        if (vistas.has(base) || ya(base) || new RegExp(`\\bsin\\s+(?:el |la |los |las )?${v}`).test(t) || vistas.size >= 2) continue;
+        vistas.add(base);
+        const hit: any = await resolveFood(foodService, v).catch(() => null);
+        const sv = hit?.defaultServing;
+        if (!sv?.metricServingAmount) continue;
+        await pushFood(hit, { name: hit.name, grams: Math.min(30, sv.metricServingAmount), fijo: true });
+        splitNotes.push(`Sumé ${String(hit.name).split(/\s*[/(]/)[0].toLowerCase()} que dijiste que llevaba (~${Math.min(30, sv.metricServingAmount)} g, estimado).`);
+      }
     }
 
     // Nada se encontró: no se anota nada (inventar calorías es peor que preguntar)
@@ -921,6 +1061,7 @@ export class NutritionTool extends Tool<NutritionInput> {
     if (corrections.length) output += `\n(Entendí ${corrections.join(" y ")}.)`;
     if (timing.note) output += `\n(${timing.note})`;
     if (gramFixes.length) output += `\n(Según lo que dijiste: ${gramFixes.join("; ")}.)`;
+    if (porcionNormal.length) output += `\n(No dijiste cuánto: anoté ${porcionNormal.join(", ")}. Si fue más o menos, dímelo y lo corrijo.)`;
     if (splitNotes.length) output += `\n(${splitNotes.join(" ")})`;
     if (unresolvedNames.length) {
       output += `\n\n⚠️ No anoté ${unresolvedNames.map((n) => `«${n}»`).join(" ni ")}: no está en mis bases y no quiero inventar sus calorías. ` +
@@ -932,6 +1073,37 @@ export class NutritionTool extends Tool<NutritionInput> {
 
     const riskNote = formatRisks(risks, restrictions);
     if (riskNote) output += `\n\n${riskNote}`;
+
+    // ─── Tu plato (2026-11-15) ───
+    // Un almuerzo o cena con arroz/fideos/papas Y proteína, en porciones supuestas: la pregunta (una vez) o los botones para
+    // corregir el reparto; y si trajo poca proteína, la que hay en la casa con lo que costó (Inventario + boletas).
+    if (!pastDay && !otherDay && /^(almuerzo|cena)$/.test(String(mealType)) && resolvedItems.length) {
+      const roles = resolvedItems.map((i) => rolDe(i.name));
+      const mixto = (roles.some((r) => r === "almidon" || r === "pan") && roles.some((r) => r === "proteina" || r === "huevo"))
+        || resolvedItems.some((i, k) => roles[k] === "plato" && i.carbs >= 15 && i.protein >= 8);
+      const supuesto = porcionNormal.length > 0 || /No dijiste cu[aá]nt/.test(String((input as any).assumed ?? "")) || splitNotes.some((n) => /No dijiste cu[aá]nt/.test(n));
+      const datos = await leerPlato(memory);
+      if (ajustado && perfilPlato && perfilPlato !== "mitad" && !splitNotes.some((n) => /tu plato de siempre/.test(n)) && !/tu plato de siempre/.test(String((input as any).assumed ?? ""))) {
+        output += `\n(Lo armé como tu plato de siempre: ${TEXTO_PERFIL[perfilPlato]}.)`;
+      }
+      if (mixto && supuesto && !(input as any).sinBotones) {
+        datos.ultimo = { at: new Date().toISOString(), frase: String(userMessage ?? ""), mealType: String(mealType), input: { ...input, perfilPlato: undefined, sinBotones: undefined } };
+        if (!datos.tipo && !datos.preguntado) {
+          output += `\n\n🍽️ Para que tus platos queden como los sirves: ¿cómo suele ser tu plato?\n${botonesPerfil()}`;
+          datos.preguntado = new Date().toISOString();
+        } else output += `\n${botonesCorreccion(perfilPlato)}`;
+      }
+      const prot = resolvedItems.reduce((a, i) => a + i.protein, 0), carb = resolvedItems.reduce((a, i) => a + i.carbs, 0);
+      const hoy = await todayIsoOf(memory).catch(() => new Date().toISOString().slice(0, 10));
+      if (prot < 20 && carb >= 40 && datos.sugeridoDia !== hoy) {
+        const inv = await lastInventoryState(memory).catch(() => null);
+        const diabetes = (medical?.conditions ?? []).some((c) => /diabetes|prediabetes/.test(String(c.id)));
+        const s = sugerenciaProteina({ proteina: prot, inventario: inv?.state ?? null, diabetes });
+        output += `\n\n${s.texto}${s.botones ? `\n${s.botones}` : ""}`;
+        datos.sugeridoDia = hoy;
+      }
+      await guardarPlato(memory, datos);
+    }
 
     // Si el mensaje solo pedía este registro, la respuesta sale tal cual, sin otra pasada del modelo (5-10 s menos).
     const quickReply = isPure(userMessage, ["food"]) ? output : undefined;

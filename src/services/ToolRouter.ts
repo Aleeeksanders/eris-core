@@ -9,7 +9,7 @@
 // Es solo un filtro de visibilidad: no da permisos. Los permisos, la aprobación y la política de rutas siguen intactos.
 // ============================================================
 
-export type ToolGroup = "axs" | "system" | "admin" | "health" | "health_extra" | "finance" | "inventory" | "web";
+export type ToolGroup = "axs" | "system" | "admin" | "health" | "health_extra" | "finance" | "inventory" | "web" | "telefono";
 
 export const TOOL_GROUP: Record<string, ToolGroup> = {
   axs_briefing: "axs", knowledge_search: "axs", vault_audit: "axs", vault_healer: "axs", vault_note: "axs",
@@ -25,6 +25,8 @@ export const TOOL_GROUP: Record<string, ToolGroup> = {
   day_agenda: "health",
   day_plan: "health",
   web_search: "web",
+  // Hestia Manos (K0, 2026-11-16): el teléfono de Alex (solo Ikaros en Modo AXS)
+  telefono: "telefono",
 };
 
 import { readFileSync } from "node:fs";
@@ -43,6 +45,8 @@ const RULES: Array<[ToolGroup, RegExp]> = [
   ["admin", /\b(usuarios?|perfiles?|registrad\w*|cuentas?|sesion(es)?|roles?|acceso|accesos|intentos?|seguridad|incidentes?|quien (entro|esta|se conecto)|conectad\w*|suspend\w*|bitacora de auditoria)\b/],
   ["health", /\b(calambres?|dolor(es)?|duele\w*|mare\w+|nausea\w*|vomit\w*|diarrea|fiebre|tos|resfri\w*|gripe|garganta|cabeza|espalda|estomago|acidez|migrana|sintomas?|enferm\w*|herida|corte|quemadura\w*|torcedura|esguince|insomnio|ansiedad|panico|estrenimiento|deshidrat\w*|hinchad\w*|lesion\w*|tobillo|rodilla|glucos\w*|glucemia|azucar|insulina|diabet\w*|comi|comida|comer|desayun\w*|almuerz\w*|cena|colacion|snack|hambre|agua|hidrat\w*|litros?|calorias?|kcal|proteinas?|carbo\w*|macros?|alimentos?|recetas?|dieta|keto|vegan\w*|alergi\w*|celiac\w*|lactosa|peso|medic\w*|pastillas?|remedios?|farmacos?|tratamiento|\w*gliptin\w*|\w*gliflozin\w*|metformin\w*|dosis|presion|hemoglobina|glicosilada|glucosilada|glicada|hba1c|a1c|examen(es)?|laboratorio|colesterol|ldl|hdl|trigliceridos|creatinina|sueno|dormi|duermo|dormir|durmiendo|desvel\w*|descans\w*|cansad\w*|energia|pasos|ejercicio|nutri\w*|hipo|hiper|cgm|libre|mi salud|cuanto (llevo|me falta)|que hago ahora|registra\w*|anota\w*|ingres\w*|onces?|tome once|merienda|merend\w*|almorc\w*|al ?mor[csz]e|cene|cenamos|comimos|porcion\w*|gramos)\b/],
   ["finance", /\b(gast\w*|pagu\w*|pague|compr\w*|lucas?|luquitas?|palos?|pesos|plata|dinero|efectivo|cajero|gir\w*|saque|transfer\w*|deposit\w*|abon\w*|prest\w*|devolvi\w*|me debe\w*|ahorr\w*|sueldo|finanzas|wallet|presupuesto|tarjeta|debito|credito|banco|saldos?|deudas?|cuenta rut|(me |nos )?queda\w* (este mes|del mes|a fin de mes|hasta (el |mi |que llegue el )?(sueldo|pago|fin de mes)))\b/],
+  // Hestia Manos (K0, 2026-11-16): el teléfono (solo Ikaros en Modo AXS; en el modo Eris el grupo no existe)
+  ["telefono", /\b(alarmas?|despiertame|despertador|temporizador|timer|cronometro|linterna|volumen|silencia\w*|bateria|llevame|navegar|navegame|navega a|como llego|maps|mapas|celu\w*|telefono|movil|avisame|me avises?)\b/],
   // El Inventario de la casa (2026-10-22). Sin «tengo» suelto: «tengo hambre» no es del inventario. «¿Cuánto me queda este
   // mes?» es de Finanzas (2026-10-23); «¿me queda leche?» sigue siendo del Inventario
   ["inventory", /\b(inventario|despensa|refri\w*|refrigerador|alacena|bodega|botiquin|stock|lista de (las )?compras?|que (me |nos )?falta(n)?|se (me |nos )?(acabo|acabaron|termino|terminaron|agoto|agotaron|vencio|vencieron)|no (me |nos )?queda\w*|me quedan?(?! (este mes|del mes|a fin de mes|hasta))|por vencer|vencimientos?|vencid[oa]s?|caduc\w*|bote|tire|repuse|use|ocupe|compre|compramos|traje)\b/],

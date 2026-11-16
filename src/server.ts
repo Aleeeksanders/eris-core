@@ -8,10 +8,19 @@ import { QueryEngine } from "./QueryEngine.js";
 import { ToolRegistry } from "./tools.js";
 import { OllamaProvider } from "./services/llm/OllamaProvider.js";
 import { WhisperProvider } from "./services/stt/WhisperProvider.js";
+import { VozSesion } from "./services/voz/VozSesion.js";
+import { claseAprobacion, preguntaHablada, respuestaSiNo, type ClaseAprobacion } from "./services/voz/AprobacionVoz.js";
+import { respuestaDirecta } from "./services/voz/Directas.js";
+import { resumenLlamada, guardarLlamada, llamadaReciente, CLAVE_LLAMADAS, type EventoLlamada } from "./services/voz/ResumenLlamada.js";
+import { armarSaludo, detalleSaludo } from "./services/voz/Saludo.js";
+import { immediateRoadmap } from "./services/vault/VaultBriefing.js";
+import { afinarVoz, mencionaAntes } from "./services/voz/RutaVoz.js";
+import { CacheVoz, ARRANQUES } from "./services/voz/CacheVoz.js";
+import { paraHablar } from "./services/voz/Hablar.js";
 import { PiperProvider } from "./services/tts/PiperProvider.js";
 import { buildSpokenVersion } from "./services/SpokenVersion.js";
 import { ContextCompressor } from "./services/ContextCompressor.js";
-import { loadSystemPrompt } from "./context.js";
+import { loadSystemPrompt, getSystemContext } from "./context.js";
 import { DEFAULT_CONFIG, THINKING_MODES } from "./types/config.js";
 import type { ThinkingMode } from "./types/config.js";
 import { FileSystemAdapter, type MemoryAdapter, type ChatPersona, TEMP_MAX_AI_REPLIES } from "./memory.js";
@@ -25,6 +34,8 @@ import { sanitizeDump, saveFinanceBackup, listFinanceBackups, pullFinanceBackup 
 import { sanitizeForgeDump, saveForgeBackup, listForgeBackups, pullForgeBackup } from "./services/ForgeBackup.js";
 import { sanitizeInventoryDump, saveInventoryBackup, listInventoryBackups, pullInventoryBackup } from "./services/InventoryBackup.js";
 import { resolveInventoryOp } from "./services/InventoryBridge.js";
+import { resolveTelefonoOp } from "./services/TelefonoBridge.js";
+import { TelefonoTool } from "./tools/TelefonoTool.js";
 import { resolveSupplementOp } from "./services/SupplementBridge.js";
 import { saveIntent, sanitizeProjection, PROJECTION_KEY, intentFor } from "./services/TrainingIntent.js";
 import { sanitizeIntent } from "./services/forge/forgeTrain.js";
@@ -99,6 +110,8 @@ const WS_TOPES: Record<string, number> = {
   finance_backup_push: 8_000_000, forge_backup_push: 8_000_000, inventory_backup_push: 8_000_000, backfill_rollup: 4_000_000, sync_nutrition_days: 4_000_000,
   // lo que va a la memoria y al contexto del modelo: acotado
   update_health_snapshot: 600_000, sync_toji_context: 400_000, save_profile: 200_000, update_financial_context: 120_000, update_inventory_context: 120_000,
+  // Hestia por voz: solo texto (el audio lo reconoce el teléfono)
+  voz_turno: 4_000, voz_inicio: 2_000, voz_cortar: 1_000, voz_colgar: 1_000,
   update_supplement_context: 40_000, add_journal_entry: 20_000, create_project: 20_000, rename_project: 20_000, update_project: 20_000, tts_request: 20_000,
   save_preference: 12_000, set_tone: 2_000, set_strict_mode: 2_000, set_persona: 2_000, rename_chat: 4_000,
 };
@@ -200,8 +213,14 @@ async function shouldWelcome(memory: MemoryAdapter): Promise<boolean> {
   return true;
 }
 
+/** Hestia por voz (J2): preguntas de plata, que se responden enteras y revisadas antes de decirlas */
+/** Hestia por voz (J3): los WAV de las frases cortas que se repiten (services/voz/CacheVoz.ts), para todas las llamadas */
+const CACHE_VOZ = new CacheVoz();
+
+const PLATA_VOZ = /plata|dinero|pesos|\blucas?\b|gast[oaée]|ahorr|sueldo|alcanza|presupuesto|deuda|saldo|finanzas|tarjeta|\bcuotas?\b|\bpag(ar|o|u)/i;
+
 /** Grupos de herramientas que solo existen para Ikaros en el Modo AXS Executive (PC, administración, bóveda de AXS). */
-const IKAROS_ONLY_GROUPS = new Set(["axs", "system", "admin"]);
+const IKAROS_ONLY_GROUPS = new Set(["axs", "system", "admin", "telefono"]);
 const activeGlucoServices = new Map<string, GlucoService>();
 // Clientes WebSocket activos por profileId → para push de alertas CGM
 const activeClients = new Map<string, Set<any>>(); // profileId → Set<ServerWebSocket>
@@ -233,10 +252,15 @@ interface PendingApproval { ws: any; profileId: string; finish: (d: ApprovalDeci
 const pendingApprovals = new Map<string, PendingApproval>();
 const lastLoginAudit = new Map<string, number>(); // `${perfil}:${tipo}` → último registro de acceso en la bitácora
 
-function askApproval(ws: any, profileId: string, req: ApprovalRequest, signal?: AbortSignal): Promise<ApprovalDecision> {
+function askApproval(
+  ws: any, profileId: string, req: ApprovalRequest, signal?: AbortSignal,
+  /** Llamada de voz (J2): `extra` va en la tarjeta (cómo se aprueba) y `onId` deja responderla diciendo «sí» o «no» */
+  opts?: { extra?: Record<string, unknown>; onId?: (id: string) => void },
+): Promise<ApprovalDecision> {
   // Una app vieja no sabe mostrar la tarjeta: se deniega de inmediato en vez de dejar colgado el chat 3 minutos
   if (!(ws.data as any)?.canApprove) return Promise.resolve("unavailable");
   const id = crypto.randomUUID();
+  opts?.onId?.(id);
   return new Promise<ApprovalDecision>((resolve) => {
     let timer: ReturnType<typeof setTimeout>;
     const finish = (d: ApprovalDecision, notify: boolean) => {
@@ -252,7 +276,7 @@ function askApproval(ws: any, profileId: string, req: ApprovalRequest, signal?: 
     try {
       ws.send(JSON.stringify({
         type: "confirm_request", id, tool: req.tool, title: req.title,
-        detail: String(req.detail).slice(0, 3000), risk: req.risk, flags: req.flags, ttlMs: APPROVAL_TTL_MS,
+        detail: String(req.detail).slice(0, 3000), risk: req.risk, flags: req.flags, ttlMs: APPROVAL_TTL_MS, ...(opts?.extra ?? {}),
       }));
     } catch { finish("denied", false); }
   });
@@ -438,6 +462,8 @@ async function startServer() {
   toolRegistry.register(new GlucoTool());
   toolRegistry.register(new NutritionTool());
   toolRegistry.register(new ProfileManagementTool());
+  // Hestia Manos (K0): el teléfono, solo para Ikaros en Modo AXS (grupo «telefono», oculto en el modo Eris)
+  toolRegistry.register(new TelefonoTool());
 
   // ─── Administración y auditoría ─────────────────────────────────────
   const audit = getAuditLog();
@@ -786,6 +812,8 @@ async function startServer() {
           (ws.data as any).canInventory = Array.isArray(data.caps) && data.caps.includes("inventory_ops");
           // …y con «Mis suplementos» (SupplementBridge, 2026-10-23)
           (ws.data as any).canSupplement = Array.isArray(data.caps) && data.caps.includes("supplement_ops");
+          // …y Hestia Manos en el teléfono (K0): solo la anuncia Eris si la app aparte está instalada y firmada igual
+          (ws.data as any).canTelefono = Array.isArray(data.caps) && data.caps.includes("telefono_ops");
 
           if (data.type === 'auth_google' || data.type === 'auth_session') {
             // ─── SSO de Google: el SERVIDOR verifica la identidad; el perfil sale de la cuenta, no de lo que diga el cliente ───
@@ -886,6 +914,48 @@ async function startServer() {
               const erisPrompt = await loadSystemPrompt(ROLE_PROMPTS.eris, [profileText, erisModeNote].filter(Boolean).join('\n'), 'eris');
               const erisRegistry = new ToolRegistry(toolRegistry.getAll().filter((t) => !IKAROS_ONLY_GROUPS.has(TOOL_GROUP[t.name])));
               queryEngines.set(`${profileKey}#eris`, new QueryEngine(provider, erisRegistry, erisPrompt, { router: routeTools }));
+            }
+            // Hestia por voz (J1, 2026-11-16): las mismas herramientas de Hestia con un prompt corto de conversación hablada. J0 midió
+            // que el prompt completo de Hestia (~10 KB + la bóveda) es lo que hace lento el primer token; con este, ~1 s.
+            if (profileRole === 'ikaros' && !queryEngines.has(`${profileKey}#voz`)) {
+              const vozPrompt = await readFile(join((import.meta as any).dir || process.cwd(), '..', 'data', 'prompts', 'hestia-voz.md'), 'utf-8').catch(() => '');
+              // Solo las herramientas de una intención clara: sin ella, el selector juntaba 13 a 19 herramientas («¿y si mañana amanezco
+              // cansado…?») y el primer audio tardaba 18-29 s (prueba J1). Lo que se responde por código (los atajos) sigue igual.
+              // J2: también lo que el MENSAJE pide del PC, la bóveda o la web (grupos de pocas herramientas). Sin eso, «borra el archivo…»
+              // llegaba sin herramientas y el modelo respondía «Borrado.» sin haber hecho nada (banco «voz», 2026-11-16).
+              // La búsqueda web se suma a casi todo; en voz, solo si la pide (cada herramienta de más alarga el primer audio: con la
+              // bóveda + web eran 9 herramientas y 8 s). Seguir el hilo («¿y eso alcanza?») trae lo del turno anterior, si es poco:
+              // sin eso el modelo contestaba de memoria con cifras inventadas que la guardia quitaba cuando ya se habían dicho.
+              const PIDE_WEB = /internet|en la web|google|en l[ií]nea|noticias|busca(r|me)? en (la )?red/i;
+              const routerVoz: typeof routeTools = (msg, prev, available, hint) => {
+                const r = routeTools(msg, prev, available, hint);
+                const vacio = { ...r, tools: new Set<string>(), deferred: [] as string[] };
+                // (J3: y dentro de la bóveda y del PC, solo las que pide el mensaje: services/voz/RutaVoz.ts)
+                const sinWeb = (x: typeof r) => {
+                  const y = PIDE_WEB.test(msg) ? x
+                    : { ...x, tools: new Set([...x.tools].filter((n) => TOOL_GROUP[n] !== "web")), deferred: (x.deferred ?? []).filter((n) => TOOL_GROUP[n] !== "web") };
+                  return { ...y, tools: afinarVoz(msg, y.tools) };
+                };
+                if (r.intent === "seguimiento") return r.tools.size <= 4 ? sinWeb(r) : vacio;
+                if (r.intent) return sinWeb(r);
+                if (r.reason === "mensaje" && r.groups.some((g) => IKAROS_ONLY_GROUPS.has(g))) return sinWeb(r);
+                return vacio;
+              };
+              // El PC (J2): sin esto el modelo escribía comandos de Linux («ps aux», «rm /home/alex/Desktop/…») en un Windows
+              const pc = (await getSystemContext('ikaros').catch(() => '')).split('\n').filter((l) => /^- (SO|Shell|Home|Escritorio|Documentos):/.test(l)).join('\n');
+              if (vozPrompt) queryEngines.set(`${profileKey}#voz`, new QueryEngine(provider, filteredRegistry, `${vozPrompt}${pc ? `\n\n### Su PC\n${pc}` : ''}\n\n### Perfil\n${profileText ?? ''}`, {
+                router: routerVoz,
+                // Sin herramientas para el turno, de verdad ninguna: el respaldo de salud + Finanzas llevaba el prompt a ~7.200 tokens,
+                // pasaba de 8192 y Ollama recargaba el modelo en cada turno (4 s cada vez; prueba J1)
+                respaldoHerramientas: false,
+                // J2: con las herramientas del PC el prompt pedía 10240 → Ollama recargaba el modelo y quedaba 59 % en la tarjeta (6-10 s
+                // hasta la pregunta de aprobación). En la llamada, siempre 8192: si no cabe, se recorta la conversación vieja.
+                maxContext: 8192,
+                // y la redacción después de una herramienta también por tokens (antes llegaba entera: 6-9 s de silencio tras la muletilla)
+                hablaTrasHerramientas: true,
+                // J3: las definiciones en corto (Ollama lee todo el prompt en cada pasada con este modelo)
+                herramientasCortas: true,
+              }));
             }
 
             if (!sessions.has(sessionId)) sessions.set(sessionId, memory.getConversation(sessionId));
@@ -1357,6 +1427,7 @@ async function startServer() {
             await memory.saveProfile(data.profile);
             queryEngines.delete(`${profileId}:${pin || ''}`);
             queryEngines.delete(`${profileId}:${pin || ''}#eris`);
+            queryEngines.delete(`${profileId}:${pin || ''}#voz`);
             const oldGluco = activeGlucoServices.get(profileId);
             if (oldGluco) { oldGluco.stopPolling(); activeGlucoServices.delete(profileId); }
             ws.send(JSON.stringify({ type: "profile_saved", profile: data.profile }));
@@ -1519,6 +1590,15 @@ async function startServer() {
             return;
           }
           // ─── Resultado de una operación de Inventario pedida por inventory_tracker ───
+          // ─── Hestia Manos (K0): el resultado de algo hecho en el teléfono, y sus apps (para «abre Spotify») ───
+          if (data.type === "telefono_op_result") {
+            resolveTelefonoOp(ws, data);
+            return;
+          }
+          if (data.type === "telefono_apps") {
+            (ws.data as any).telefonoApps = Array.isArray(data.apps) ? data.apps.map((a: unknown) => String(a).slice(0, 60)).slice(0, 300) : [];
+            return;
+          }
           if (data.type === "inventory_op_result") {
             resolveInventoryOp(ws, data);
             return;
@@ -2252,6 +2332,11 @@ async function startServer() {
             const traceTools: string[] = [];
             const traceErrors: string[] = [];
             let queryResult;
+            // J3: en el chat de Hestia (Modo AXS), la llamada de voz reciente (su resumen, armado por código al colgar)
+            const llamadaPrevia = (ws.data as any).role === "ikaros" && data.axs === true
+              ? llamadaReciente(await memory.get(CLAVE_LLAMADAS).catch(() => null), new Date())?.resumen ?? null : null;
+            const resumenTurno = llamadaPrevia
+              ? [ctx.summary, `La última llamada de voz con él (por si la menciona):\n${llamadaPrevia}`].filter(Boolean).join("\n\n") : ctx.summary;
             try {
               queryResult = await engine.query(
                 userText,
@@ -2283,7 +2368,7 @@ async function startServer() {
                   // Acciones sensibles: tarjeta "Aprobar / Rechazar" en la app (se cancela si se pulsa "detener")
                   onConfirm: (req) => askApproval(ws, profileId, req, ac.signal),
                 },
-                ctx.summary,
+                resumenTurno,
                 requestedMode,
                 {
                   profileId,
@@ -2403,6 +2488,212 @@ async function startServer() {
             return;
           }
 
+          // ─── Hestia por voz (J1, 2026-11-16): una llamada en tiempo real ───
+          // El teléfono reconoce la voz (en el aparato) y manda el texto de cada turno; acá el motor de voz responde por tokens, se
+          // corta en trozos y Piper los dice uno tras otro (VozSesion). Solo Hestia: rol ikaros en Modo AXS Executive.
+          if (data.type === "voz_inicio" || data.type === "voz_turno" || data.type === "voz_cortar" || data.type === "voz_colgar") {
+            const enviar = (m: Record<string, unknown>) => { try { ws.send(JSON.stringify(m)); } catch {} };
+            type Pendiente = { id: string; clase: ClaseAprobacion; tool: string; dudas: number };
+            const voz = (ws.data as any).voz as { sesion: VozSesion; sessionId: string; history: any[]; titulado: boolean; aprobacion: Pendiente | null; herramientasTurno: string[]; cerrar: () => Promise<void> } | undefined;
+            /** Responde la aprobación pendiente de la llamada (como si tocara la tarjeta: la tarjeta se cierra sola) */
+            const resolverAprobacion = (d: "approved" | "denied", porVoz?: string) => {
+              const a = voz?.aprobacion;
+              if (!a) return;
+              voz!.aprobacion = null;
+              const p = pendingApprovals.get(a.id);
+              if (!p || p.ws !== ws || p.profileId !== profileId) return;
+              if (porVoz != null) {
+                console.log(`[Voz] ${a.tool}: ${d === "approved" ? "aprobada" : "rechazada"} por voz («${porVoz.slice(0, 40)}»)`);
+                void audit.record({ event: "security", profileId, role: (ws.data as any).role, tool: a.tool, detail: `${d === "approved" ? "aprobado" : "rechazado"} por voz en la llamada: «${porVoz.slice(0, 40)}»`, ok: true });
+              }
+              p.finish(d, true);
+            };
+            if (data.type === "voz_cortar") {
+              // Tocó «Cortar» con una pregunta pendiente: es un no
+              resolverAprobacion("denied");
+              voz?.sesion.cortar(); enviar({ type: "voz_cortado" }); return;
+            }
+            if (data.type === "voz_colgar") {
+              resolverAprobacion("denied");
+              voz?.sesion.cortar();
+              (ws.data as any).voz = undefined;
+              await voz?.cerrar().catch(() => {}); // J3: el resumen queda en la memoria de Hestia
+              enviar({ type: "voz_colgada" });
+              enviar({ type: "conversations_updated", conversations: convList(memory, ws) });
+              return;
+            }
+            if (data.type === "voz_inicio") {
+              if ((ws.data as any).role !== "ikaros" || data.axs !== true) { enviar({ type: "voz_error", mensaje: "La llamada de voz es solo con Hestia, en el Modo AXS Executive." }); return; }
+              const engine = queryEngines.get(`${profileId}:${pin || ''}#voz`);
+              if (!engine) { enviar({ type: "voz_error", mensaje: "Tu sesión cambió. Reconecta y vuelve a llamar." }); return; }
+              voz?.sesion.cortar();
+              void voz?.cerrar().catch(() => {});
+              const sessionId = `voz_${Date.now()}`;
+              const llamada = { sessionId, history: [] as any[], titulado: false, sesion: null as unknown as VozSesion, muletillas: [] as Array<{ wav: Buffer; texto: string }>, aprobacion: null as Pendiente | null, plata: false, muletillaLarga: null as { wav: Buffer; texto: string } | null, herramientasTurno: [] as string[],
+                // J3: lo que pasó (para el resumen al colgar) y la llamada anterior (para «lo que hablamos ayer»)
+                inicio: new Date(), eventos: [] as EventoLlamada[], anterior: null as string | null, cerrada: false,
+                cerrar: async () => {} };
+              llamada.anterior = llamadaReciente(await memory.get(CLAVE_LLAMADAS).catch(() => null), new Date())?.resumen ?? null;
+              llamada.cerrar = async () => {
+                if (llamada.cerrada) return;
+                llamada.cerrada = true;
+                const fin = new Date();
+                const resumen = resumenLlamada({ inicio: llamada.inicio, fin, history: llamada.history, eventos: llamada.eventos });
+                if (!resumen) return;
+                const previas = await memory.get(CLAVE_LLAMADAS).catch(() => null);
+                await memory.set(CLAVE_LLAMADAS, guardarLlamada(previas, { at: llamada.inicio.toISOString(), fin: fin.toISOString(), resumen }));
+                console.log(`[Voz] ${profileId}: llamada guardada (${llamada.history.filter((m: any) => m.role === "user").length} turnos)`);
+              };
+              llamada.sesion = new VozSesion({
+                enviar,
+                log: (s) => console.log(s),
+                // (J3: lo corto y repetido, «Claro,», «Mira,», del caché: suena apenas llega)
+                sintetizar: (texto) => CACHE_VOZ.decir(texto, (t) => piperProvider.synthesize(t, "daniela")),
+                muletilla: async () => (llamada.muletillas.length ? llamada.muletillas[Math.floor(Math.random() * llamada.muletillas.length)] : null),
+                muletillaLarga: async () => llamada.muletillaLarga,
+                generar: async (texto, onToken, signal) => {
+                  const ahora = new Date();
+                  // La hora y la fecha, por código y al instante (J2)
+                  const directa = respuestaDirecta(texto, ahora);
+                  if (directa) return { content: directa, quick: true };
+                  const dia = ahora.toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" });
+                  const hora = ahora.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
+                  // Plata (J2): la respuesta entera y revisada antes de decirla. Por tokens, la guardia de cifras de dinero quitaba
+                  // lo inventado cuando ya se había dicho («te sobran $797.000», banco «voz»). Mientras, la muletilla.
+                  // (y lo que sigue a una respuesta de plata: «¿y eso alcanza?»)
+                  const plata = PLATA_VOZ.test(texto) || llamada.plata;
+                  llamada.plata = false;
+                  if (plata) llamada.sesion.herramienta();
+                  const r = await engine.query(
+                    texto,
+                    llamada.history.slice(-12),
+                    {
+                      onToken: plata ? undefined : onToken,
+                      // Mientras corre una herramienta, una muletilla («Dame un segundo.») para que no quede en silencio
+                      onToolCall: (tc) => {
+                        enviar({ type: "voz_herramienta", name: tc.name }); llamada.sesion.herramienta();
+                        llamada.plata = tc.name === "finance_tracker";
+                        llamada.herramientasTurno.push(tc.name);
+                        llamada.eventos.push({ tipo: "herramienta", nombre: tc.name });
+                      },
+                      // Acciones en el PC (J2): la misma tarjeta de siempre en el teléfono, y Hestia lo pregunta en voz alta.
+                      // Lo seguro también se aprueba diciendo «sí» (lo interpreta el código, no el modelo); lo riesgoso, tocando;
+                      // borrar o lo que no se deshace, nunca por voz.
+                      onConfirm: async (req) => {
+                        if (!(ws.data as any)?.canApprove) return askApproval(ws, profileId, req, signal); // app vieja: se deniega
+                        const clase = claseAprobacion(req);
+                        const decision = askApproval(ws, profileId, req, signal, {
+                          extra: { voz: clase },
+                          onId: (id) => { llamada.aprobacion = { id, clase, tool: req.tool, dudas: 0 }; },
+                        });
+                        enviar({ type: "voz_aprobacion", estado: "pendiente", clase, turno: llamada.sesion.turnoActual });
+                        llamada.sesion.anunciar(preguntaHablada(req, clase));
+                        const d = await decision;
+                        llamada.aprobacion = null;
+                        llamada.eventos.push({ tipo: "aprobacion", nombre: req.tool, decision: d, que: `${req.title} (${String(req.detail).split("\n")[0].slice(0, 60)})` });
+                        enviar({ type: "voz_aprobacion", estado: "fin", decision: d, turno: llamada.sesion.turnoActual });
+                        return d;
+                      },
+                    },
+                    // La hora de AHORA en cada turno (el prompt del motor se arma una vez y su hora queda vieja). Como dato interno:
+                    // escrita «Ahora: …», el modelo la leía en voz alta al comienzo de cada respuesta (prueba J1)
+                    `(Dato interno, no lo repitas: hoy es ${dia} y son las ${hora}, hora de Chile.)` +
+                      // (J3: solo si habla de algo anterior: son ~300 tokens que se leen en cada pasada)
+                      (llamada.anterior && mencionaAntes(texto) ? `\n(La llamada anterior, por si la menciona; no la repitas si no:\n${llamada.anterior})` : ""),
+                    "flash",
+                    {
+                      profileId, memory, role: (ws.data as any).role, wsClient: ws,
+                      llm: { provider, model: THINKING_MODES.flash.model },
+                      glucoService: activeGlucoServices.get(profileId) || null,
+                      foodService: unifiedFood, axsMode: true, voz: true,
+                    },
+                    texto,
+                    signal,
+                  );
+                  return { content: r.message.content, quick: r.quick, stopped: r.stopped };
+                },
+              });
+              (ws.data as any).voz = llamada;
+              // Precalentar: el modelo (J0: frío, el primer turno tardaba 8 s) y Piper
+              void provider.warmup(THINKING_MODES.flash.model, THINKING_MODES.flash.contextLength).catch(() => false);
+              // (y Piper, con las muletillas que se dicen mientras corre una herramienta: quedan listas para toda la llamada)
+              void (async () => {
+                for (const texto of ["Dame un segundo.", "Déjame ver.", "Ya, lo reviso."]) {
+                  const wav = await piperProvider.synthesize(texto, "daniela").catch(() => null);
+                  if (wav?.length) llamada.muletillas.push({ wav, texto });
+                }
+                const larga = "Sigo en eso, ya casi.";
+                const wl = await piperProvider.synthesize(larga, "daniela").catch(() => null);
+                if (wl?.length) llamada.muletillaLarga = { wav: wl, texto: larga };
+                // J3: los arranques de siempre, una vez por servidor y solo mientras Piper esté libre (si habla, se dejan)
+                for (const a of ARRANQUES) {
+                  const h = paraHablar(a);
+                  if (llamada.sesion.ocupada || llamada.cerrada) break;
+                  if (!CACHE_VOZ.tiene(h)) await CACHE_VOZ.decir(h, (t) => piperProvider.synthesize(t, "daniela")).catch(() => null);
+                }
+              })();
+              enviar({ type: "voz_lista", sessionId });
+              console.log(`[Voz] ${profileId}: llamada iniciada (${sessionId})`);
+              // J3: la primera llamada del día parte con un saludo armado por código: la agenda del día (la misma de «¿qué tengo
+              // hoy?») y lo inmediato de AXS. Corto en voz, el día completo en la pantalla. saludo:false = sin saludo; true = igual
+              // (las pruebas). Si alcanzó a hablar antes, no va.
+              void (async () => {
+                if (data.saludo === false) return;
+                const hoy = new Date().toDateString();
+                if (data.saludo !== true && (await memory.get("voz_saludo_dia").catch(() => null)) === hoy) return;
+                const toolCtx = {
+                  profileId, memory, role: (ws.data as any).role, wsClient: ws, glucoService: activeGlucoServices.get(profileId) || null,
+                  foodService: unifiedFood, axsMode: true, voz: true,
+                };
+                const ag = await toolRegistry.get("day_agenda")?.run({}, toolCtx).catch(() => null);
+                const agenda = ag && !ag.error ? String((ag.metadata as any)?.quickReply ?? ag.output ?? "") : null;
+                const inmediatas = await VaultIndex.build(new VaultService().getVaultPath()).then(immediateRoadmap).catch(() => [] as string[]);
+                const nombre = (await memory.getProfile().catch(() => null))?.displayName ?? null;
+                if ((ws.data as any).voz !== llamada || llamada.cerrada || llamada.history.length || llamada.sesion.ocupada) return;
+                const datos = { nombre, ahora: new Date(), agenda, inmediatas };
+                const texto = armarSaludo(datos);
+                await memory.set("voz_saludo_dia", hoy);
+                llamada.history.push(createMessage("assistant", texto));
+                await llamada.sesion.turno("", Date.now(), { respuesta: texto, detalle: detalleSaludo(datos) });
+              })().catch((e) => console.warn("[Voz] no pude saludar:", e));
+              return;
+            }
+            // voz_turno
+            if (!voz) { enviar({ type: "voz_error", mensaje: "La llamada no está iniciada." }); return; }
+            const texto = String(data.texto ?? "").trim().slice(0, 1000);
+            if (!texto) return;
+            // ¿Contesta la pregunta de una aprobación? (J2) Lo decide este código; el turno que espera sigue con la respuesta
+            if (voz.aprobacion) {
+              const a = voz.aprobacion;
+              const r = respuestaSiNo(texto);
+              if (r === "no") { resolverAprobacion("denied", texto); return; }
+              if (r === "si") {
+                if (a.clase === "voz") { resolverAprobacion("approved", texto); return; }
+                voz.sesion.anunciar(a.clase === "nunca_voz" ? "Eso no lo apruebo por voz: toca Aprobar en la pantalla, o dime que no." : "Esa la apruebas tocando la pantalla.");
+                return;
+              }
+              // No se entendió: una vez se vuelve a preguntar; si dice otra cosa (más larga), cambió de tema y lo pendiente queda en no
+              if (texto.split(/\s+/).length <= 3 && a.dudas === 0) { a.dudas++; voz.sesion.anunciar("¿Sí o no?"); return; }
+              resolverAprobacion("denied", texto);
+            }
+            ctxUso.tipo = "voz";
+            voz.history.push(createMessage("user", texto));
+            voz.herramientasTurno = [];
+            const r = await voz.sesion.turno(texto, Date.now());
+            // con las herramientas del turno (trace): así «¿y eso alcanza?» sigue el hilo con las mismas (ToolRouter.seguimiento)
+            if (r) voz.history.push({ ...createMessage("assistant", r.respuesta), trace: { tools: [...new Set(voz.herramientasTurno)] } });
+            // La llamada queda como su propia conversación de Hestia (la transcripción): no aparece en vivo en el chat
+            try {
+              await memory.saveConversation(voz.sessionId, voz.history, "hestia");
+              if (!voz.titulado) {
+                const d = new Date();
+                await memory.renameConversation(voz.sessionId, `Llamada · ${d.toLocaleDateString("es-CL", { day: "numeric", month: "short" })} ${d.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" })}`);
+                voz.titulado = true;
+              }
+            } catch (e) { console.warn("[Voz] no pude guardar la llamada:", e); }
+            return;
+          }
+
           if (data.type === "voice_message") {
             try {
               ctxUso.tipo = "voz"; // medición de la beta: entender el audio es trabajo de voz; la respuesta, del chat
@@ -2492,6 +2783,7 @@ async function startServer() {
 
       close(ws) {
         const pid = (ws.data as any)?.profileId;
+        void (ws.data as any)?.voz?.cerrar?.().catch(() => {}); // J3: una llamada cortada igual queda resumida
         denyApprovals({ ws }); // lo que esperaba respuesta en esta conexión ya no se puede aprobar
         if (pid) unregisterClient(pid, ws);
       },

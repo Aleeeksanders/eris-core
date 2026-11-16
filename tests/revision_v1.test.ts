@@ -69,8 +69,11 @@ test("C3: «añade», «pon», «suma» anotan comida, también sin cantidades (
   expect(r.texto).toMatch(/Choclo/);
   expect(await tool("pon 2 huevos en el desayuno")).toBe("nutrition_tracker");
   expect(await tool("suma un pan con palta a la once")).toBe("nutrition_tracker");
-  // contar lo que comió sin cantidad sigue yendo al modelo (no se asume)
-  expect(await tool("comí lechuga y choclo")).not.toBe("nutrition_tracker");
+  // Contar lo que comió sin cantidad también se anota por código desde el 2026-11-15 (PlatoChat): una porción normal, avisando.
+  // Antes iba al modelo, que lo anotaba igual pero con gramos inventados (el almuerzo de tallarines quedó en 100 g de carne molida).
+  const c = await quien("comí lechuga y choclo");
+  expect(c.tool).toBe("nutrition_tracker");
+  expect(c.texto).toMatch(/No dijiste cuánto/);
 }, T);
 
 test("Alimentos con dos nombres en la base («Plátano / Banana», «Palta / Aguacate») se anotan", async () => {

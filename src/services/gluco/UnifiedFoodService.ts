@@ -12,7 +12,8 @@ import { searchPackagedHits, packagedIndex, getByCode, packagedToFoodItem, packa
 import { FoodIndex, nameKeys, normText, correctText, naturalBoost, type FoodKey, type SearchOpts } from "../FoodText.js";
 import type { FoodSafety } from "../DietaryRestrictions.js";
 import catalogData from "../../data/food_catalog.json";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import * as os from "node:os";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -40,16 +41,27 @@ interface LocalServing {
 
 // ─── Carga del DB local ───────────────────────────────────────
 
+/**
+ * Lo aprendido de USDA u OFF (saveToLocalDB) va a la carpeta de datos (~/.eris), NO a src/data/chilean-foods.json: el
+ * 2026-11-15 el servidor de pruebas guardó ahí un «Dip, salsa con queso» de USDA y reescribió las 546 entradas de la base
+ * que viene con el código (y que la app copia).
+ */
+const aprendidosPath = () => path.join(os.homedir(), ".eris", "alimentos_aprendidos.json");
+function loadAprendidos(): LocalFood[] {
+  try { const v = JSON.parse(readFileSync(aprendidosPath(), "utf-8")); return Array.isArray(v) ? v : []; } catch { return []; }
+}
+
 function loadLocalDB(): LocalFood[] {
+  let base: LocalFood[] = [];
   try {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname  = path.dirname(__filename);
     const dbPath = path.resolve(__dirname, "../../data/chilean-foods.json");
-    return JSON.parse(readFileSync(dbPath, "utf-8")) as LocalFood[];
+    base = JSON.parse(readFileSync(dbPath, "utf-8")) as LocalFood[];
   } catch {
     console.warn("[UnifiedFoodService] No se pudo cargar chilean-foods.json");
-    return [];
   }
+  return [...base, ...loadAprendidos()];
 }
 
 /**
@@ -354,11 +366,11 @@ export class UnifiedFoodService {
     this.localIx = null;
     
     try {
-      const __filename = fileURLToPath(import.meta.url);
-      const __dirname  = path.dirname(__filename);
-      const dbPath = path.resolve(__dirname, "../../data/chilean-foods.json");
-      writeFileSync(dbPath, JSON.stringify(this.localDB, null, 2), "utf-8");
-      console.log(`[UnifiedFoodService] Alimento guardado en DB local: ${newLocal.name}`);
+      // Solo lo aprendido, en la carpeta de datos (la base del código no se toca)
+      const p = aprendidosPath();
+      mkdirSync(path.dirname(p), { recursive: true });
+      writeFileSync(p, JSON.stringify([...loadAprendidos().filter((x) => x.id !== newLocal.id), newLocal], null, 1), "utf-8");
+      console.log(`[UnifiedFoodService] Alimento aprendido guardado: ${newLocal.name}`);
     } catch (e) {
       console.error("[UnifiedFoodService] Error guardando local DB", e);
     }

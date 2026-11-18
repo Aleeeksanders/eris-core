@@ -76,7 +76,7 @@ export class DayAgendaTool extends Tool<Input> {
   async execute(input: Input, context?: any): Promise<ToolExecutionResult> {
     const memory = context?.memory;
     if (!memory) return { output: "", error: "Sin acceso al perfil." };
-    if (input.semana) return this.week(memory);
+    if (input.semana) return this.week(memory, context?.sinPlata === true);
     if (input.remedios) {
       const prof = await memory.getProfile?.().catch(() => null);
       const meds = ((prof?.medical?.medications ?? []) as Array<{ name: string; dose?: string; schedule?: string; active?: boolean }>).filter((m) => m && m.active !== false && m.name);
@@ -187,7 +187,8 @@ export class DayAgendaTool extends Tool<Input> {
     }
 
     // ── Plata (Finanzas): pagos de los próximos 3 días y el sueldo por confirmar ──
-    const fin: any = (await moduloOn(memory, "finanzas")) ? await memory.get("financial_summary_latest").catch(() => null) : null; // A2
+    // (K5: con el teléfono bloqueado y tu voz, sin la plata)
+    const fin: any = !context?.sinPlata && (await moduloOn(memory, "finanzas")) ? await memory.get("financial_summary_latest").catch(() => null) : null; // A2
     const fs = fin?.summary ?? fin;
     if (fs && typeof fs === "object") {
       const partes: string[] = [];
@@ -248,13 +249,13 @@ export class DayAgendaTool extends Tool<Input> {
    * «¿Cómo vengo esta semana?»: los últimos 7 días (sin hoy, que va a medias) del registro diario (daily_rollup_log), los
    * entrenos de Forge y lo de Finanzas. Primero lo que va bien, y UNA cosa para la próxima semana, sin culpa.
    */
-  private async week(memory: any): Promise<ToolExecutionResult> {
+  private async week(memory: any, sinPlata = false): Promise<ToolExecutionResult> {
     const now = new Date();
     const key = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const hoy = key(now);
     const desde = key(new Date(now.getTime() - 7 * 86_400_000));
     const log: any[] = ((await memory.get("daily_rollup_log").catch(() => null)) ?? []).filter((e: any) => e && e.date >= desde && e.date < hoy);
-    const [t, proj, fin] = await Promise.all([loadTargets(memory).catch(() => null), getProjection(memory).catch(() => null), memory.get("financial_summary_latest").catch(() => null)]);
+    const [t, proj, fin] = await Promise.all([loadTargets(memory).catch(() => null), getProjection(memory).catch(() => null), sinPlata ? Promise.resolve(null) : memory.get("financial_summary_latest").catch(() => null)]);
     const avg = (xs: number[]) => (xs.length ? xs.reduce((x, y) => x + y, 0) / xs.length : null);
     const nums = (k: string, ok: (e: any) => boolean = () => true) => log.filter((e) => typeof e[k] === "number" && e[k] > 0 && ok(e)).map((e) => e[k] as number);
     const bien: string[] = [];

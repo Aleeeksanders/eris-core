@@ -16,7 +16,7 @@ test("bloqueado: pasa solo lo que no expone nada tuyo ni afecta a otros", () => 
   for (const t of ["Léeme los mensajes", "¿Qué me dijo mi mamá?", "Llama a mi mamá", "Mándale un SMS a Brian que llego tarde",
     "Respóndele que pongo la alarma a las 7", "¿Qué tengo en el calendario mañana?", "Agéndame una reunión mañana a las 10",
     "Abre Spotify", "Llévame a la casa", "¿Cuánta plata tengo?", "¿Qué comí hoy?", "Hola", ""]) expect([t, permitidoBloqueado(t)]).toEqual([t, false]);
-  expect([...SEGURAS_BLOQUEADO].sort()).toEqual(["alarma", "bateria", "linterna", "musica", "temporizador", "volumen"]);
+  expect([...SEGURAS_BLOQUEADO].sort()).toEqual(["alarma", "bateria", "linterna", "musica", "no_molestar", "temporizador", "volumen"]); // (L5: el No molestar, 2026-11-18)
 });
 
 /** Una herramienta cualquiera con atajo que calza con todo (como si fuera tu nutrición o tus finanzas) */

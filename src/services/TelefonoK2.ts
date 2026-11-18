@@ -81,9 +81,21 @@ export function etiquetaDia(d: Date, ahora = new Date()): string {
 }
 
 /** El rango que pregunta: hoy (por defecto), mañana, un día, esta semana / la próxima */
-export function rangoDicho(texto: string, ahora = new Date()): { desde: Date; hasta: Date; etiqueta: string; semana: boolean } {
+export function rangoDicho(texto: string, ahora = new Date()): { desde: Date; hasta: Date; etiqueta: string; semana: boolean; primero?: boolean } {
   const t = fold(texto);
   const hoy = inicioDia(ahora);
+  // (2026-11-17, banco telefono_banco) «¿cuándo es mi próxima reunión?»: lo primero que viene, en dos semanas
+  if (/\bproxim[oa]s? (reunion|evento|cita|compromiso)\b/.test(t)) {
+    return { desde: hoy, hasta: masDias(hoy, 15), etiqueta: "en las próximas dos semanas", semana: true, primero: true };
+  }
+  // «¿tengo algo este fin de semana?»: sábado y domingo (un domingo, desde hoy); «el próximo fin de semana», el siguiente
+  if (/\bfin de semana\b/.test(t)) {
+    const dow = hoy.getDay();
+    let sab = dow === 6 ? hoy : dow === 0 ? masDias(hoy, -1) : masDias(hoy, 6 - dow);
+    const prox = /\b(proximo|que viene|otro|siguiente)\b/.test(t);
+    if (prox) sab = masDias(sab, 7);
+    return { desde: sab < hoy ? hoy : sab, hasta: masDias(sab, 2), etiqueta: prox ? "el próximo fin de semana" : "este fin de semana", semana: true };
+  }
   if (/\b(esta|la) semana\b|\bsemana que viene\b|\bproxima semana\b|\bproximos dias\b/.test(t)) {
     const prox = /\b(que viene|proxima)\b/.test(t);
     const desde = prox ? masDias(hoy, 7 - hoy.getDay() + 1) : hoy;
@@ -94,9 +106,14 @@ export function rangoDicho(texto: string, ahora = new Date()): { desde: Date; ha
 }
 
 /** Lo que se dice de los eventos (por código; los títulos entre «»: pueden ser de invitaciones de otras personas) */
-export function formatearEventos(evs: EventoTel[], etiqueta: string, semana: boolean, ahora = new Date()): string {
-  if (!evs.length) return `No tienes nada en el calendario ${etiqueta}.`;
+export function formatearEventos(evs: EventoTel[], etiqueta: string, semana: boolean, ahora = new Date(), primero = false): string {
   const uno = (e: EventoTel) => (e.todoElDia ? `«${e.titulo}» (todo el día)` : `a las ${hhmm(e.inicio)}, «${e.titulo}»`);
+  if (primero) {
+    // lo que viene (lo que ya terminó no cuenta)
+    const prox = evs.filter((e) => (e.todoElDia ? e.inicio >= inicioDia(ahora).getTime() : e.fin > ahora.getTime())).sort((a, b) => a.inicio - b.inicio)[0];
+    return prox ? `Lo próximo en tu calendario es ${etiquetaDia(new Date(prox.inicio), ahora)}, ${uno(prox)}.` : `No tienes nada en el calendario ${etiqueta}.`;
+  }
+  if (!evs.length) return `No tienes nada en el calendario ${etiqueta}.`;
   if (!semana) {
     const cab = etiqueta === "hoy" ? "Hoy" : etiqueta.charAt(0).toUpperCase() + etiqueta.slice(1);
     return `${cab} tienes ${evs.length === 1 ? "una cosa" : `${evs.length} cosas`} en el calendario: ${evs.slice(0, 8).map(uno).join("; ")}.`;
@@ -108,14 +125,31 @@ export function formatearEventos(evs: EventoTel[], etiqueta: string, semana: boo
 }
 
 /** ¿Pide leer el calendario? → lo que dijo (para el rango) */
+/** Un día o un rango dicho («el viernes», «mañana», «esta semana», «el fin de semana») */
+const DIA_DICHO = /\b(manana|pasado manana|(el|este|esta|para el|para este|para esta|proximo|proxima) (domingo|lunes|martes|miercoles|jueves|viernes|sabado|semana|fin de semana|\d{1,2})|(esta|la|la proxima|la otra) semana|fin de semana|domingo|lunes|martes|miercoles|jueves|viernes|sabado)\b/;
+
 export function pideCalendario(texto: string): boolean {
   const t = fold(texto);
-  return /\b(calendario|agendad[oa]s?|reuniones?|eventos?|citas?|compromisos?)\b/.test(t)
-    && /\b(que|tengo|hay|cuales|cuando|mis|leeme|dime|revisa|algo)\b/.test(t)
-    && !CREAR.test(t);
+  if (CREAR.test(sinCortesia(t))) return false;
+  // («reuniones?» pedía «reunione»: «¿cuándo es mi próxima reunión?» no se entendía; banco telefono_banco, 2026-11-17)
+  if (/\b(calendario|agendad[oa]s?|reunion(es)?|eventos?|citas?|compromisos?)\b/.test(t)
+    && /\b(que|tengo|hay|cuales|cuando|mis|leeme|dime|revisa|algo|proxim[oa])\b/.test(t)) return true;
+  // (2026-11-17) «¿tengo algo el viernes?», «¿tengo algo que hacer mañana?», «léeme mi agenda de la semana»
+  if (/\btengo algo\b/.test(t) && DIA_DICHO.test(t)) return true;
+  // «¿qué tengo mañana?», «¿qué tengo el próximo fin de semana?» (solo eso: «¿qué tengo que comer mañana?» no; y «¿qué tengo hoy?»
+  // es el día completo: day_agenda)
+  if (/^(?:y )?que (?:tengo|hay) (?:para |agendado (?:para )?|planeado (?:para )?)?(?:el |este |esta |la |para el )?(?:proxim[oa] )?(?:manana|pasado manana|lunes|martes|miercoles|jueves|viernes|sabado|domingo|fin de semana|semana|semana que viene|\d{1,2})$/.test(t)) return true;
+  return /\b(mi|la) agenda\b/.test(t) && DIA_DICHO.test(t) && /\b(que|leeme|dime|revisa|como|hay|tengo|cuentame)\b/.test(t);
 }
 
-const CREAR = /^(?:oye )?(?:agendame|agenda(?:me)?|agendar|agendemos|anota(?:me)? en (?:el|mi) calendario|pon(?:me)? en (?:el|mi) calendario|crea(?:me)? un evento(?: de| para)?|programa(?:me)? (?=una? (?:reunion|cita|llamada)))\s*(?:una?\s+)?/;
+/**
+ * Lo que va antes de la orden (2026-11-17, su llamada real: «Necesito que agregues un evento el 27 de este mes» se entendía como
+ * LEER el calendario y el modelo terminó diciendo «ya está en tu agenda» sin haberlo agendado).
+ */
+const CORTESIA = /^(?:(?:oye|hestia|ya|ok|okey|bueno|porfa|por favor|necesito que|quiero que|puedes|podrias|me puedes|me podrias|ayudame a)\s+)*/;
+const CREAR = /^(?:agendame|agenda(?:me)?|agendar|agendemos|anota(?:me)? en (?:el|mi) (?:calendario|agenda)|pon(?:me)? en (?:el|mi) (?:calendario|agenda)|(?:crea(?:me|s|r)?|crees|agreg(?:a|ar|ame|ues|uemos)|anad(?:e|ir|as|eme)|pon(?:me|gas|er)?|anot(?:a|ar|ame|es))\s+(?:en (?:el|mi) (?:calendario|agenda)\s+)?(?:un evento|una cita|una reunion)(?:\s+en (?:el|mi) (?:calendario|agenda))?(?: de| para| que se llama| que se llame| llamad[oa])?|programa(?:me)? (?=una? (?:reunion|cita|llamada)))\s*(?:una?\s+)?/;
+/** «Necesito que agregues un evento…» → «agregues un evento…» (para CREAR) */
+const sinCortesia = (t: string) => t.slice(CORTESIA.exec(t)?.[0].length ?? 0);
 /** Dónde termina el título: el primer marcador de día u hora */
 const CORTE_TITULO = /\s(?:para (?:hoy|manana|el|este|pasado)\b|el (?:proximo )?(?:domingo|lunes|martes|miercoles|jueves|viernes|sabado|\d)|este (?:domingo|lunes|martes|miercoles|jueves|viernes|sabado)|proximo (?:domingo|lunes|martes|miercoles|jueves|viernes|sabado)|(?:domingo|lunes|martes|miercoles|jueves|viernes|sabado)\b|hoy\b|(?<!de la )manana\b|pasado manana\b|a las? \d|a las? (?:una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)\b|al mediodia|por (?:\d|una|dos|media)|de \d{1,2} a \d)/;
 
@@ -127,7 +161,10 @@ export type PlanAgendar =
 export function planAgendar(p: { titulo?: string; cuando?: string; duracionMin?: number; lugar?: string }, ahora = new Date()): PlanAgendar {
   const titulo = String(p.titulo ?? "").trim().slice(0, 120);
   const cuando = String(p.cuando ?? "");
-  if (!titulo) return { tipo: "preguntar", texto: "¿Qué agendo? Dime el nombre del evento y cuándo." };
+  if (!titulo) {
+    const d0 = fechaDicha(cuando, ahora);
+    return { tipo: "preguntar", texto: d0 ? `¿Cómo se llama lo que agendo ${etiquetaDia(d0, ahora)}, y a qué hora?` : "¿Qué agendo? Dime el nombre del evento y cuándo." };
+  }
   const dia = fechaDicha(cuando, ahora);
   const todoElDia = /\btodo el dia\b/.test(fold(cuando));
   const h = todoElDia ? null : horaDeEvento(cuando);
@@ -165,16 +202,37 @@ export function respuestaAgendar(plan: PlanAgendar, ok: boolean, code?: string, 
 export function parseAgendar(original: string): { titulo: string; cuando: string } | null {
   const m = plegarConMapa(original);
   if (/\b(alarma|temporizador|despertador)\b/.test(m.t)) return null;
-  const r = CREAR.exec(m.t);
+  const pre = CORTESIA.exec(m.t)?.[0].length ?? 0;
+  const r = CREAR.exec(m.t.slice(pre));
   if (!r) return null;
-  const resto = m.t.slice(r[0].length);
+  const ini = pre + r[0].length;
+  const resto = m.t.slice(ini);
   const c = CORTE_TITULO.exec(` ${resto}`);
-  const finTitulo = r[0].length + (c ? Math.max(0, c.index - 1) : resto.length);
-  const desde = m.pos[r[0].length] ?? original.length;
+  const finTitulo = ini + (c ? Math.max(0, c.index - 1) : resto.length);
+  const desde = m.pos[ini] ?? original.length;
   const hasta = finTitulo < m.pos.length ? m.pos[finTitulo] : original.length;
   let titulo = original.slice(desde, c ? hasta : original.length).trim().replace(/[\s.!?¿¡,;]+$/, "")
     .replace(/^(?:el|la|los|las|mi|mis)\s+(?=\S)/i, ""); // «agenda el dentista» → «Dentista»
   titulo = titulo.charAt(0).toUpperCase() + titulo.slice(1);
   const cuando = c ? original.slice(hasta).trim() : "";
-  return { titulo: titulo || "Evento", cuando };
+  // (sin nombre, «agrega un evento el 27»: se pregunta, no se agenda un «Evento»)
+  return { titulo: /^(?:evento|un evento|algo)$/i.test(titulo) ? "" : titulo, cuando };
+}
+
+/**
+ * Lo que respondes después de que Hestia preguntó para agendar («¿A qué hora?», «¿Cómo se llama?»): lo completa el CÓDIGO.
+ * Antes lo contestaba el modelo, que dijo «ya está en tu agenda» sin agendar nada (su llamada real, 2026-11-17). null = no es
+ * una respuesta a eso (cambió de tema o dijo que no).
+ */
+export function completarAgendar(p: { titulo: string; cuando: string }, texto: string): { accion: "agendar"; titulo: string; cuando: string } | null {
+  const t = fold(texto);
+  if (!t || /[?¿]\s*$/.test(String(texto).trim()) || t.split(" ").length > 16) return null;
+  if (/^(no|nada|cancela\w*|olvida\w*|dejalo|dejala|mejor no|despues|ahora no)\b/.test(t)) return null;
+  if (!p.titulo) {
+    // la respuesta trae el nombre (y a lo mejor el cuándo): «Fiesta de disfraces a la una de la tarde»
+    const a = parseAgendar(`agenda ${String(texto).trim()}`);
+    if (!a?.titulo) return null;
+    return { accion: "agendar", titulo: a.titulo, cuando: [p.cuando, a.cuando].filter(Boolean).join(" ") };
+  }
+  return { accion: "agendar", titulo: p.titulo, cuando: [p.cuando, String(texto).trim()].filter(Boolean).join(" ") };
 }

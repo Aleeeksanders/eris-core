@@ -20,7 +20,8 @@ const lista = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -
 const quien = (m: MsgTel) => (m.grupo ? `el grupo ${m.chat}` : m.de);
 
 /** Lo que se dice al leer los mensajes (por código: corto arriba, el detalle en lista para la pantalla) */
-export function formatearMensajes(msgs: MsgTel[], persona?: string, sinAcceso = false): string {
+/** `soloNombres` (K5, el teléfono bloqueado con tu voz): quién y cuántos, sin lo que escribieron ni el detalle en pantalla */
+export function formatearMensajes(msgs: MsgTel[], persona?: string, sinAcceso = false, soloNombres = false): string {
   if (sinAcceso) return "Para leer tus mensajes necesito el «Acceso a notificaciones» de Hestia Manos (ábrela y dale el permiso).";
   if (!msgs.length) return persona ? `No tengo mensajes de ${persona} de las últimas 24 horas.` : "No te ha llegado nada en las últimas 24 horas.";
   if (persona) {
@@ -41,6 +42,7 @@ export function formatearMensajes(msgs: MsgTel[], persona?: string, sinAcceso = 
   const resumen = orden.slice(0, 5).map(([k, g]) => `${g.n} de ${k}`);
   const mas = orden.length > 5 ? ` y ${orden.length - 5} conversaciones más` : "";
   const cabeza = `Tienes ${msgs.length} ${msgs.length === 1 ? "mensaje" : "mensajes"}: ${lista(resumen)}${mas}.`;
+  if (soloNombres) return `${cabeza} Para leerlos, desbloquea el teléfono.`;
   // (lo que escribió otra persona, siempre entre «»: es de ella, no de Hestia)
   const detalle = orden.slice(0, 10).map(([k, g]) => `- **${k}** · ${[...g.apps].join(", ")} · ${hhmm(g.ult.hora)}: «${corta(g.ult.texto, 120)}»`);
   return [cabeza, "", ...detalle, "", "Pídeme «¿qué me dijo …?» para el resto, o «respóndele a … que …»."].join("\n");
@@ -49,7 +51,7 @@ export function formatearMensajes(msgs: MsgTel[], persona?: string, sinAcceso = 
 /** Lo que se va a hacer, ya resuelto */
 export type Plan =
   | { tipo: "responder"; chat: string; app: string; texto: string }
-  | { tipo: "whatsapp"; nombre: string; numero: string; texto: string }
+  | { tipo: "whatsapp"; nombre: string; numero: string; texto: string; /** K4: con la accesibilidad, Hestia lo envía (aprobado) */ enviar?: boolean }
   | { tipo: "sms"; nombre: string; numero: string; texto: string }
   | { tipo: "llamar"; nombre: string; numero: string }
   | { tipo: "preguntar"; texto: string }
@@ -97,7 +99,10 @@ export async function planear(ws: any, p: PedidoK1, ultimo?: UltimoChat | null):
   const conChat = [...msgs].reverse().find((m) => m.puedeResponder);
   if (conChat) return { tipo: "responder", chat: conChat.chat, app: conChat.app, texto };
   const c = await contacto(ws, persona, "whatsapp", texto);
-  return "tipo" in c ? c : { tipo: "whatsapp", nombre: c.nombre, numero: c.numero, texto };
+  if ("tipo" in c) return c;
+  // K4: con la accesibilidad encendida, Hestia lo envía (después de tu «sí», con el texto exacto); si no, te lo deja listo
+  const est = await requestTelefonoOp(ws, { accion: "estado" });
+  return { tipo: "whatsapp", nombre: c.nombre, numero: c.numero, texto, ...(est.ok && est.data?.accesibilidad === true ? { enviar: true } : {}) };
 }
 
 /** La pregunta de la aprobación (la primera línea se dice en la llamada). null = no se pregunta (no se envía nada solo). */
@@ -106,7 +111,8 @@ export function preguntaPlan(plan: Plan): string | null {
     case "responder": return `¿Le respondo a ${plan.chat} por ${plan.app}: «${plan.texto}»?`;
     case "sms": return `¿Le mando a ${plan.nombre} un SMS: «${plan.texto}»?`;
     case "llamar": return `¿Llamo a ${plan.nombre}?`;
-    default: return null; // WhatsApp con el texto listo (lo envías tú), preguntar, error
+    case "whatsapp": return plan.enviar ? `¿Le mando a ${plan.nombre} por WhatsApp: «${plan.texto}»?` : null; // sin K4: lo envías tú
+    default: return null; // preguntar, error
   }
 }
 
@@ -127,8 +133,12 @@ export async function ejecutarPlan(ws: any, plan: Plan): Promise<{ texto: string
       return r.ok ? { texto: `Listo, le respondí a ${plan.chat} por ${plan.app}.`, ok: true }
         : { texto: r.code === "sin_respuesta" ? `${r.msg} ¿Te lo dejo listo en WhatsApp?` : r.msg ?? "No pude responder.", ok: false };
     case "whatsapp":
-      r = await requestTelefonoOp(ws, { accion: "whatsapp", numero: plan.numero, texto: plan.texto });
-      return r.ok ? { texto: `Te dejé el mensaje para ${plan.nombre} listo en WhatsApp: toca enviar.`, ok: true } : { texto: r.msg ?? "No pude abrir WhatsApp.", ok: false };
+      r = await requestTelefonoOp(ws, { accion: "whatsapp", numero: plan.numero, texto: plan.texto, ...(plan.enviar ? { enviar: true } : {}) });
+      if (!r.ok) return { texto: r.msg ?? "No pude abrir WhatsApp.", ok: false };
+      if (r.data?.enviado === true) return { texto: `Listo, le mandé el WhatsApp a ${plan.nombre}.`, ok: true };
+      // (K4: si el texto del campo no calzaba o no se pudo confirmar, queda listo y lo envías tú: nunca se manda otra cosa)
+      return { texto: plan.enviar && r.data?.motivo !== "sin_accesibilidad" ? `Te lo dejé listo en WhatsApp para ${plan.nombre}, pero no pude confirmar que se envió: revisa y toca enviar si falta.`
+        : `Te dejé el mensaje para ${plan.nombre} listo en WhatsApp: toca enviar.`, ok: true };
     case "sms":
       r = await requestTelefonoOp(ws, { accion: "sms", numero: plan.numero, texto: plan.texto });
       return r.ok ? { texto: `Listo, le mandé el SMS a ${plan.nombre}.`, ok: true }

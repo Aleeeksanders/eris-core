@@ -30,4 +30,7 @@ const dir = join(home, ".eris", "profiles", "ikaros");
 // + el último snapshot del teléfono: su `nutrition` de otra corrida quedaba pegado (1.808 kcal «de hoy» con 713 anotadas)
 const borrar = [`kv_nutrition_log_${day}.json`, `kv_hydration_log_${day}.json`, `kv_nutrition_deleted_${day}.json`, "kv_sleep_log.json", "kv_sleep_pending.json", "kv_health_snapshot_latest.json", "kv_antojo_pending.json", "kv_antojo_trato.json", "kv_plato_perfil.json"];
 for (const f of borrar) await rm(join(dir, f), { force: true });
+// Hestia como JARVIS (L0/L1): su estado parte de cero (sin pausa, sin bienvenida ya dada: los casos «hestia-l1-*» la esperan)
+await rm(join(home, ".eris", "hestia.json"), { force: true });
+await rm(join(home, ".eris", "hestia_trabajos.json"), { force: true }); // L4: la cola de trabajos de fondo
 console.log(`día limpio para ikaros (${day})`);

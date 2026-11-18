@@ -10,7 +10,8 @@ const normalizar = (t: string) =>
 const PREVIO = /^((oye|hola|ya|ok|okey|y|hestia|oye hestia|hola hestia|hestia oye)\s+)*/;
 
 const HORA = /^(que hora (es|son)|me (dices|das) la hora|dime la hora|que hora tenemos|la hora|tienes la hora)( porfa| por favor)?$/;
-const FECHA = /^(que (dia|fecha) (es|tenemos)( hoy)?|a que (dia|fecha) estamos( hoy)?|que dia es hoy|dime la fecha|en que (dia|fecha) estamos)( porfa| por favor)?$/;
+// («¿a cuánto estamos?», «¿qué día es?»: banco telefono_banco, 2026-11-17)
+const FECHA = /^(que (dia|fecha) (es|tenemos)( hoy)?|a que (dia|fecha) estamos( hoy)?|que dia es hoy|dime la fecha|en que (dia|fecha) estamos|a cuanto estamos( hoy)?|que fecha es)( porfa| por favor)?$/;
 
 /** «Son las 7:52.» / «Hoy es lunes 16 de noviembre.» (en cifras: Hablar las dice en palabras). null = no es una pregunta así. */
 export function respuestaDirecta(texto: string, ahora: Date = new Date()): string | null {

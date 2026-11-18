@@ -333,6 +333,23 @@ Reglas:
       toolDefinitions = toolDefinitions.filter((d) => !toolsApagadas.has(d.name));
       for (const t of toolsApagadas) allowedTools?.delete(t);
     }
+    // K5: la llamada con el teléfono bloqueado y tu voz reconocida: solo estas herramientas (ni sus atajos ni el modelo ven otras)
+    const soloHerramientas = Array.isArray((toolContext as any)?.soloHerramientas) ? new Set<string>((toolContext as any).soloHerramientas) : null;
+    if (soloHerramientas) {
+      toolDefinitions = toolDefinitions.filter((d) => soloHerramientas.has(d.name));
+      deferredDefs = deferredDefs.filter((d) => soloHerramientas.has(d.name));
+      allowedTools = new Set([...(allowedTools ?? soloHerramientas)].filter((t) => soloHerramientas.has(t)));
+    }
+    // (2026-11-17, su pedido: «todo lo que reviso y lo que pido es referente al celu, nunca al PC») Hestia sin nombrar el PC: las
+    // herramientas del PC (bash, open, archivos, system_info) ni se ofrecen ni corren sus atajos. En su llamada real, «Abre la
+    // aplicación» terminó en explorer.exe y «abre el calendario» en «¿te lo busco en tu PC?»
+    const sinPC = (toolContext as any)?.sinPC === true;
+    if (sinPC) {
+      const esPC = (n: string) => TOOL_GROUP[n] === "system";
+      toolDefinitions = toolDefinitions.filter((d) => !esPC(d.name));
+      deferredDefs = deferredDefs.filter((d) => !esPC(d.name));
+      if (allowedTools) allowedTools = new Set([...allowedTools].filter((t) => !esPC(t)));
+    }
     // Hestia por voz (J3): las definiciones en corto. Con este modelo Ollama vuelve a leer TODO el prompt en cada pasada (no reusa
     // el caché: 1 828 tokens idénticos, 1,9 s cada vez), así que cada carácter cuesta: vault_note sola pesaba 2 617 y finance_tracker 3 314
     // (solo las largas: con bash y open en corto el modelo decía «Te lo abro.» sin llamarlas; banco «voz»)
@@ -344,7 +361,7 @@ Reglas:
     // No cuando el mensaje no tocó ningún tema (conjunto «por defecto»): con los números a la vista, «¿qué zapatillas de
     // básquet uso?» terminó en «ya llevas 2.000 kcal… cómpralas con los $202.187 que tienes» (chat real, 2026-10-16)
     if (toolContext?.memory && routeReason !== "por defecto" && topics.some((g) => g === "health" || g === "finance" || g === "health_extra")) {
-      const brief = await buildTodayBrief(toolContext.memory, String(rawUserMessage ?? userMessage)).catch(() => "");
+      const brief = await buildTodayBrief(toolContext.memory, String(rawUserMessage ?? userMessage), { sinPlata: (toolContext as any)?.sinPlata === true }).catch(() => "");
       if (brief) llmMessages.splice(historyStart, 0, { role: "system", content: brief });
     }
 
@@ -381,6 +398,14 @@ ${b.text}`;
     // ¿Alguna herramienta guardó, cambió o borró algo en este turno? (para detectar un "lo guardé / lo actualicé" inventado)
     let wroteThisTurn = false;
     let saveRetried = false;
+    // (2026-11-17, su llamada real) Lo pidió en un turno y lo completa en el siguiente: «agrega un evento el 27» → «¿a qué hora?» →
+    // «a la una». Esa respuesta no pide guardar nada, pero «ya está en tu agenda» sin herramienta igual es mentira.
+    const pidioAntes = () => {
+      const h = conversationHistory ?? [];
+      const prevAsist = [...h].reverse().find((m) => m.role === "assistant");
+      const usuarios = h.filter((m) => m.role === "user").slice(-3);
+      return !!prevAsist && /\?\s*$/.test(String(prevAsist.content ?? "").trim()) && usuarios.some((m) => asksToSave(String(m.content ?? "")));
+    };
     let pcRetried = false;
     // El modelo escribió su razonamiento en vez de la respuesta: un reintento pidiéndole que le hable a la persona
     let reasoningRetried = false;
@@ -552,7 +577,10 @@ ${b.text}`;
     const comoVengo = /\bc[oó]mo (vengo|ando|voy|he andado|he estado|me (ha|han) ido)\b/i.test(textoPre) && !/\b(dol|duel|fiebre|sangr|mare|v[oó]mit|n[aá]use|pecho|respir)/i.test(textoPre);
     const urgente = detectRedFlags(textoPre).length > 0 || (!comoVengo && matchSymptoms(textoPre, 1).length > 0 && /[?¿]|^\s*(que|qué|como|cómo|tengo|me tomo|puedo)\b/i.test(textoPre));
     const todas = this.toolRegistry.getAll();
-    const enOrden = urgente ? [...todas.filter((t) => t.name === "symptom_guide"), ...todas.filter((t) => t.name !== "symptom_guide")] : todas;
+    // (2026-11-17, banco del teléfono: «Pon pausa» terminó en «Colación registrada: pasas (30 g)». Una orden del teléfono la entiende
+    // un código estricto, así que va antes que la comida; sin Hestia Manos su atajo no corre y no cambia nada)
+    const primero = urgente ? ["symptom_guide", "telefono"] : ["telefono"];
+    const enOrden = [...primero.flatMap((n) => todas.filter((t) => t.name === n)), ...todas.filter((t) => !primero.includes(t.name))];
     let atajo = false;
     // K3: la llamada abierta sobre la pantalla de bloqueo. Solo corren los atajos de estas herramientas y NUNCA el modelo (que
     // tiene tu perfil y tu memoria en el contexto: cualquiera con el teléfono en la mano lo escucharía). Sin atajo, este texto.
@@ -561,8 +589,10 @@ ${b.text}`;
     for (const t of enOrden) {
       if (!t.preroute) continue;
       if (soloAtajos && !soloAtajos.herramientas.includes(t.name)) continue;
+      if (soloHerramientas && !soloHerramientas.has(t.name)) continue; // K5
       if (hideAxs && HIDDEN_IN_ERIS.has(TOOL_GROUP[t.name])) continue; // briefing/auditoría de la bóveda: solo en Modo AXS
       if (toolsApagadas.has(t.name)) continue; // su módulo está apagado en Perfil (A2)
+      if ((toolContext as any)?.sinPC === true && TOOL_GROUP[t.name] === "system") continue; // sin nombrar el PC, el PC no
       let input: Record<string, unknown> | null = null;
       try { input = await t.preroute(textoPre, toolContext); } catch { input = null; }
       if (!input) continue;
@@ -574,7 +604,9 @@ ${b.text}`;
       if (!res.error && (t.untrustedOutput || (res.metadata as any)?.untrusted)) { tainted = true; untrustedCalls.add(tc.id); }
       callbacks?.onToolResult?.({ toolCallId: tc.id, name: t.name, output: res.output, error: res.error, duration: Date.now() - started });
       llmMessages.push({ role: "assistant", content: "", toolCalls: [{ id: tc.id, name: t.name, arguments: input }] });
-      llmMessages.push({ role: "tool", content: `[Resultado de ${t.name}]\n${res.error ? `Error: ${res.error}\nOutput: ${res.output}` : res.output}`, toolCallId: tc.id });
+      // (K4: lo que se leyó de otros, también en el atajo, va envuelto como dato: la pantalla del teléfono la resume el modelo)
+      const salida = untrustedCalls.has(tc.id) ? wrapUntrusted(t.name, res.output) : res.output;
+      llmMessages.push({ role: "tool", content: `[Resultado de ${t.name}]\n${res.error ? `Error: ${res.error}\nOutput: ${res.output}` : salida}`, toolCallId: tc.id });
       const append = (res.metadata as any)?.appendToReply;
       if (append?.text && !res.error) appendBlocks.set(t.name, { text: String(append.text), marker: String(append.marker || "$^") });
       if (!res.error) doneTools.push({ name: t.name, output: res.output, human: (res.metadata as any)?.quickReply });
@@ -817,7 +849,7 @@ ${b.text}`;
             "Llama ahora a la herramienta que corresponde (open: abrir una página, un archivo o una aplicación; bash: un comando de PowerShell para revisar o hacer algo). " +
             "La acción pide su aprobación igual. Si no hay herramienta para esto, dile con honestidad que no lo hiciste." });
           continue;
-        } else if (!loggedThisTurn && !wroteThisTurn && asksToSave(userText) && claimsSaved(response.content)) {
+        } else if (!loggedThisTurn && !wroteThisTurn && (asksToSave(userText) || pidioAntes()) && claimsSaved(response.content)) {
           // Lo mismo con cualquier otra cosa: "solo déjalo para hoy" → "Contexto actualizado" sin llamar a nada (2026-10-07)
           if (!saveRetried && iterations < MAX_TOOL_ITERATIONS) {
             saveRetried = true;

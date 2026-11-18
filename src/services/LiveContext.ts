@@ -53,14 +53,15 @@ const fmtL = (n: number) => `${(Math.round(n * 10) / 10).toString().replace(".",
  * de verdad existen. Va en los turnos que tocan salud o plata (ver QueryEngine). Antes el modelo, sin esto, inventaba:
  * "meta de agua 2-3 L" (la real era otra, por un medicamento) o "saldo 12.650" (no existía) — 2026-10-07.
  */
-export async function buildTodayBrief(memory: MemoryAdapter, userMessage?: string): Promise<string> {
+export async function buildTodayBrief(memory: MemoryAdapter, userMessage?: string, opts: { sinPlata?: boolean } = {}): Promise<string> {
   try {
     // El día de COMIDA (termina al dormir): a las 2 AM sin haber dormido, lo de hoy sigue siendo lo de ayer
     const today = await todayKeyOf(memory as any);
     const safe = async (k: string) => { try { return await memory.get(k); } catch { return null; } };
     const [targets, snap, nut, hyd, fin, sleepLog] = await Promise.all([
       loadTargets(memory as any).catch(() => null), safe("health_snapshot_latest"), safe(`nutrition_log_${today}`),
-      safe(`hydration_log_${today}`), moduloOn(memory, "finanzas").then((on) => (on ? safe("financial_context_latest") : null)), safe("sleep_log"),
+      // (K5: con el teléfono bloqueado y tu voz, sin la plata)
+      safe(`hydration_log_${today}`), opts.sinPlata ? Promise.resolve(null) : moduloOn(memory, "finanzas").then((on) => (on ? safe("financial_context_latest") : null)), safe("sleep_log"),
     ]);
     const chat = rollupFieldsOf(nut, hyd);
     const snapToday = !!snap?.lastUpdated && nutritionDayKey(new Date(snap.lastUpdated), dayCtxFrom(snap)) === today;

@@ -130,7 +130,8 @@ export function waterLine(w: WaterToday): string {
   if (w.goalL === null) return `Hoy llevas ${fmtLiters(w.totalL)}${foodPart(w)}.${w.offReason ? ` No te fijo meta de agua: ${w.offReason}.` : ""}`;
   if (w.pace) {
     const txt = paceText(w.pace, w.goalL, w.totalL);
-    return `Hoy llevas ${fmtLiters(w.totalL)}${foodPart(w)}: ${txt}.${w.pace.state === "cumplida" ? " ¡Bien!" : ""}`;
+    // («de agua»: en la llamada, después de cambiar de tema, «Hoy llevas 0,25 L» solo no decía de qué; banco «voz-cambia-tema»)
+    return `Hoy llevas ${fmtLiters(w.totalL)} de agua${foodPart(w)}: ${txt}.${w.pace.state === "cumplida" ? " ¡Bien!" : ""}`;
   }
   const left = round2(w.goalL - w.totalL);
   return `Hoy llevas ${fmtLiters(w.totalL)} de tu meta de ${fmtLiters(w.goalL)}${foodPart(w)}` +

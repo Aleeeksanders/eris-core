@@ -14,6 +14,8 @@ test("cifras, plata, horas y unidades dichas bien (el modelo las escribe en núm
   expect(paraHablar("Te quedan **$45.196** para la quincena 💸.")).toBe("Te quedan cuarenta y cinco mil ciento noventa y seis pesos para la quincena.");
   expect(paraHablar("La presentación es a las 10:00.")).toBe("La presentación es a las diez de la mañana.");
   expect(paraHablar("Te faltan 2,8 L.")).toBe("Te faltan dos coma ocho litros.");
+  // L1 (2026-11-17): un decimal seguido de una palabra no se parte («cuatro, dos litros»)
+  expect(paraHablar("Agua: 1,2 de 4,2 litros; debes 4,5 horas y 3 noches.")).toBe("Agua: uno coma dos de cuatro coma dos litros; debes cuatro coma cinco horas y tres noches.");
   expect(paraHablar("Almorzaste 606 kcal y 201 calorías más.")).toBe("Almorzaste seiscientas seis calorías y doscientas una calorías más.");
   expect(paraHablar("31 g de proteína, 1 h de entreno.")).toBe("treinta y un gramos de proteína, una hora de entreno.");
   expect(paraHablar("- Huevo: +7 g · ~$190\n- ½ lata de jurel")).toBe("Huevo: más siete gramos, unos ciento noventa pesos. media lata de jurel.");

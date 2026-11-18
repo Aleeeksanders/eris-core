@@ -17,7 +17,32 @@ import { immediateRoadmap } from "./services/vault/VaultBriefing.js";
 import { afinarVoz, mencionaAntes } from "./services/voz/RutaVoz.js";
 import { CacheVoz, ARRANQUES } from "./services/voz/CacheVoz.js";
 import { paraHablar } from "./services/voz/Hablar.js";
-import { permitidoBloqueado } from "./services/TelefonoParse.js";
+import { nivelBloqueado, HERRAMIENTAS_TU_VOZ, NOTA_TU_VOZ, PIDE_DESBLOQUEO } from "./services/voz/Bloqueado.js";
+import { pideEscanear, respuestaEscaner, abriendoEscaner, preguntaEscaner, tratoDe } from "./services/voz/Escaner.js";
+import { modoDirigido, respuestaModo } from "./services/voz/Dirigido.js";
+import { iniciarVigia, historialResumido, ultimaMedicion } from "./services/hestia/Vigia.js";
+import { conexionesIkaros, esIkaros } from "./services/hestia/Puerta.js";
+import { comandoHestia, textoPausa } from "./services/hestia/Comandos.js";
+import { leerEstado, pausaVigente, pausar, reanudar, guardarLimites, guardarHablar, guardarImportantes, LIMITES_INICIALES, guardarVoz, guardarVozLlamada } from "./services/hestia/Estado.js";
+import { vozDeTurno, nuevoEstadoVoz, decidirFrase, textoNoSegura, resumenVoz } from "./services/voz/VozFrase.js";
+import { Altavoz, type PreguntaAviso } from "./services/hestia/Altavoz.js";
+import { asksToSave } from "./services/ReplyGuards.js";
+import { nombraPC, abreSinDecirCual } from "./services/hestia/Dispositivo.js";
+import { leerTrabajos, actualizarTrabajo, cancelarTrabajos, siguiente, queEs, type Trabajo, type Fuente } from "./services/hestia/Trabajos.js";
+import { avanzar, revisarVigia, fuentesDeBusqueda, type DepsTrabajo } from "./services/hestia/Fondo.js";
+import { puedeFondo } from "./services/hestia/Presupuesto.js";
+import { cpuPorProceso } from "./services/hestia/Equipo.js";
+import { searchVault } from "./services/vault/VaultSearch.js";
+import { temaTelefono, anotarTemaTelefono } from "./tools/TelefonoTool.js";
+import { comandoProtocolo, terminar as terminarProtocolo, vencido as protocoloVencido, protocoloVigente, resumenProtocolos, activar as activarProtocolo, buscarProtocolo, listaProtocolos, borrarPropio, alLlegar as alLlegarProtocolo, PROTOCOLOS_BASE, type DepsProtocolo } from "./services/hestia/Protocolos.js";
+import { armarBienvenida } from "./services/hestia/Presencia.js";
+import { canForge, requestForgeOp, resolveForgeOp, type ForgeOp } from "./services/ForgeBridge.js";
+import { pideEntreno, textoEmpezar, textoSerie, textoSigue, textoFalta, textoTerminar, duracionVoz, hitosDescanso, type PedidoEntreno } from "./services/hestia/Entrenador.js";
+import { eventoDe, registrarLlamada, llamadaEntrante, avisoLlamada, avisoMensaje, avisoCargo, importanteDe, avisosAgenda, comandoLlamada, responderPregunta, textoQuienLlama, type EventoCal } from "./services/hestia/Avisos.js";
+import { procesarSensores, ojoEquipo } from "./services/hestia/Llegada.js";
+import { personalidad, esperaRespuesta } from "./services/hestia/Personalidad.js";
+import { pideConstantes, datosConstantes, armarConstantes, datosCierre } from "./services/hestia/Constantes.js";
+import { medir, procesos } from "./services/hestia/Equipo.js";
 import { PiperProvider } from "./services/tts/PiperProvider.js";
 import { buildSpokenVersion } from "./services/SpokenVersion.js";
 import { ContextCompressor } from "./services/ContextCompressor.js";
@@ -35,7 +60,7 @@ import { sanitizeDump, saveFinanceBackup, listFinanceBackups, pullFinanceBackup 
 import { sanitizeForgeDump, saveForgeBackup, listForgeBackups, pullForgeBackup } from "./services/ForgeBackup.js";
 import { sanitizeInventoryDump, saveInventoryBackup, listInventoryBackups, pullInventoryBackup } from "./services/InventoryBackup.js";
 import { resolveInventoryOp } from "./services/InventoryBridge.js";
-import { resolveTelefonoOp } from "./services/TelefonoBridge.js";
+import { resolveTelefonoOp, requestTelefonoOp, canTelefono, appsDelTelefono } from "./services/TelefonoBridge.js";
 import { TelefonoTool } from "./tools/TelefonoTool.js";
 import { resolveSupplementOp } from "./services/SupplementBridge.js";
 import { saveIntent, sanitizeProjection, PROJECTION_KEY, intentFor } from "./services/TrainingIntent.js";
@@ -90,7 +115,7 @@ import { understandVoice, voiceVocabulary, lexiconIndex } from "./services/stt/V
 import { ProfileManagementTool } from "./tools/ProfileManagementTool.js";
 import { emailService } from "./services/EmailService.js";
 import { CryptoService } from "./services/security/CryptoService.js";
-import { readFile, writeFile } from "fs/promises";
+import { readFile, writeFile, readdir } from "fs/promises";
 import { randomBytes } from "crypto";
 import * as os from "os";
 
@@ -104,7 +129,7 @@ const PORT = Number(process.env.ERIS_PORT) || 3000;
 const MAX_USER_MESSAGE_CHARS = 8000;
 /** Tamaño máximo (caracteres del JSON) de cada mensaje del teléfono (revisión 2026-10-31, S2). */
 /** K3: lo que Hestia dice con el teléfono bloqueado cuando le piden algo personal */
-const BLOQUEADO_PIDE = "Para eso desbloquea el teléfono; apenas lo hagas, sigo.";
+const BLOQUEADO_PIDE = PIDE_DESBLOQUEO;
 const WS_TOPE_DEFAULT = 2_000_000;
 const WS_TOPES: Record<string, number> = {
   // fotos, audio y archivos (la foto llega en base64: hasta ~9 MB de imagen)
@@ -114,7 +139,7 @@ const WS_TOPES: Record<string, number> = {
   // lo que va a la memoria y al contexto del modelo: acotado
   update_health_snapshot: 600_000, sync_toji_context: 400_000, save_profile: 200_000, update_financial_context: 120_000, update_inventory_context: 120_000,
   // Hestia por voz: solo texto (el audio lo reconoce el teléfono)
-  voz_turno: 4_000, voz_inicio: 2_000, voz_cortar: 1_000, voz_colgar: 1_000, voz_desbloqueado: 1_000,
+  voz_turno: 4_000, voz_inicio: 2_000, voz_cortar: 1_000, voz_colgar: 1_000, voz_desbloqueado: 1_000, voz_diag: 2_000,
   update_supplement_context: 40_000, add_journal_entry: 20_000, create_project: 20_000, rename_project: 20_000, update_project: 20_000, tts_request: 20_000,
   save_preference: 12_000, set_tone: 2_000, set_strict_mode: 2_000, set_persona: 2_000, rename_chat: 4_000,
 };
@@ -227,6 +252,14 @@ const IKAROS_ONLY_GROUPS = new Set(["axs", "system", "admin", "telefono"]);
 const activeGlucoServices = new Map<string, GlucoService>();
 // Clientes WebSocket activos por profileId → para push de alertas CGM
 const activeClients = new Map<string, Set<any>>(); // profileId → Set<ServerWebSocket>
+/** Hestia como JARVIS · L1: la memoria de Ikaros (la deja el teléfono al mandar sus sensores; el altavoz lee de ahí el horario de sueño) */
+let memoriaIkaros: any = null;
+// Hestia como JARVIS · L4: cuándo usó alguien el chat o la voz por última vez (lo de fondo espera 90 s), el informe que se está
+// escribiendo de fondo (se suelta si alguien escribe) y cómo despertar la cola al pedir algo nuevo
+let actividadUltima = 0;
+let fondoAbort: AbortController | null = null;
+let despertarFondo: () => void = () => {};
+function marcarActividad() { actividadUltima = Date.now(); try { fondoAbort?.abort(); } catch {} }
 
 function pushToProfile(profileId: string, payload: object) {
   const clients = activeClients.get(profileId);
@@ -446,6 +479,63 @@ async function startServer() {
     ? "🗣️  Piper (voz de respuesta) disponible."
     : "🗣️  Piper (voz de respuesta) no disponible — la respuesta hablada no funcionará hasta levantar los servidores de Piper.");
 
+  // Hestia como JARVIS · C3 (L1): el altavoz de Hestia (habla sin la llamada, solo a Ikaros y según las Interrupciones)
+  const ALTAVOZ = new Altavoz({
+    conexiones: () => conexionesIkaros(activeClients),
+    sintetizar: (t) => piperProvider.synthesize(t, "daniela").catch(() => null),
+    // tu horario de sueño: el del perfil de Ikaros (lo que calcula Sueño 2.0 en el teléfono)
+    sueno: async () => {
+      const snap: any = await memoriaIkaros?.get("health_snapshot_latest").catch(() => null);
+      const si = snap?.sleepInsights;
+      const dormir = typeof si?.usualOnset === "number" ? si.usualOnset : typeof si?.bedtime?.target === "number" ? si.bedtime.target : null;
+      const despertar = typeof si?.usualWakeH === "number" ? si.usualWakeH : typeof si?.bedtime?.wake === "number" ? si.bedtime.wake : null;
+      return dormir != null && despertar != null ? { dormir, despertar } : null;
+    },
+    enReunion: async (w) => {
+      if (!canTelefono(w)) return false;
+      const ahora = Date.now();
+      const r = await requestTelefonoOp(w, { accion: "eventos", desde: ahora - 12 * 3_600_000, hasta: ahora + 60_000 }, 3000).catch(() => null);
+      const evs = (r?.ok && Array.isArray(r.data?.eventos) ? r.data.eventos : []) as Array<{ inicio: number; fin: number; todoElDia: boolean }>;
+      return evs.some((e) => !e.todoElDia && e.inicio <= ahora && e.fin > ahora);
+    },
+    mensaje: (t) => createMessage("assistant", t),
+    log: (t) => console.log(t),
+  });
+
+  /** C6 (L4): ¿puede usar el modelo para algo de fondo ahora? (nadie lo está usando, sin llamada, el equipo bien) */
+  const presupuestoFondo = async () => {
+    const e = await leerEstado();
+    let enCurso = false;
+    for (const set of activeClients.values()) for (const w of set) { const d = w?.data as any; if (d?.abortController || (d?.voz && !d.voz.cerrada && d.voz.sesion?.ocupada)) enCurso = true; }
+    return puedeFondo({ pausada: !!pausaVigente(e), fondoPausado: e.fondoPausado, fondoQuieto: e.fondoQuieto, llamada: !!ALTAVOZ.llamada(), consultaEnCurso: enCurso,
+      msDesdeUltima: Date.now() - actividadUltima, medicion: ultimaMedicion(), limites: e.limites });
+  };
+
+  /**
+   * L5: lo que necesitan los protocolos (el teléfono por ESTA conexión, los datos de Eris por código). `bloqueado`: sin tu voz,
+   * las constantes van sin la plata.
+   */
+  const depsProtocolo = (wsP: any, mem: any, pid: string, o: { trato?: string | null; bloqueado?: boolean; entrenador?: (() => Promise<string>) | null } = {}): DepsProtocolo => ({
+    telefono: wsP && canTelefono(wsP) ? (op, ms) => requestTelefonoOp(wsP, op, ms) : null,
+    apps: appsDelTelefono(wsP),
+    entrenador: o.entrenador ?? null,
+    sueno: async () => { const d = await datosConstantes(mem).catch(() => null); return d?.sueno ? { need: d.sueno.need, debtH: d.sueno.debtH } : null; },
+    cierre: () => datosCierre(mem),
+    agenda: async () => {
+      const toolCtx = { profileId: pid, memory: mem, role: (wsP?.data as any)?.role, wsClient: wsP, glucoService: activeGlucoServices.get(pid) || null, foodService: unifiedFood, axsMode: true, voz: true };
+      const ag = await toolRegistry.get("day_agenda")?.run({}, toolCtx).catch(() => null);
+      return ag && !ag.error ? String((ag.metadata as any)?.quickReply ?? ag.output ?? "") || null : null;
+    },
+    bienvenida: async () => {
+      const b: any = await mem.get("body_profile").catch(() => null);
+      return armarBienvenida({ trato: o.trato ?? null, mujer: b?.sex === "m", ahora: new Date(), agenda: null, remitentes: [], equipo: ojoEquipo(ultimaMedicion(), (await leerEstado()).limites) });
+    },
+    constantes: async () => armarConstantes(await datosConstantes(mem, { trato: o.trato ?? null, sinPlata: o.bloqueado === true })).voz,
+    sups: async () => ((await mem.get("supplements_state").catch(() => null)) as any)?.state ?? null,
+    trabajosPendientes: async () => (await leerTrabajos()).filter((t) => (t.estado === "pendiente" || t.estado === "corriendo") && !t.tipo.startsWith("vigia")).length,
+    alarmaPuesta: () => anotarTemaTelefono(pid, "alarma"),
+  });
+
   const toolRegistry = new ToolRegistry();
 
   // ─── Herramientas estándar ──────────────────────────────────────────
@@ -525,6 +615,8 @@ async function startServer() {
         return new Response("WebSocket upgrade failed", { status: 500 });
       }
 
+      // Hestia como JARVIS · C4 (L1): ¿el teléfono alcanza al PC por la red de la casa? (la app lo pregunta a la IP LAN; sin datos)
+      if (url.pathname === "/api/casa") return Response.json({ eris: "casa" });
       if (url.pathname === "/api/status") {
         // Público (sin login): solo lo mínimo. Antes listaba todas las herramientas y el modelo.
         const ollamaOk = await provider.isAvailable();
@@ -817,6 +909,8 @@ async function startServer() {
           (ws.data as any).canSupplement = Array.isArray(data.caps) && data.caps.includes("supplement_ops");
           // …y Hestia Manos en el teléfono (K0): solo la anuncia Eris si la app aparte está instalada y firmada igual
           (ws.data as any).canTelefono = Array.isArray(data.caps) && data.caps.includes("telefono_ops");
+          // …y Forge en el teléfono (L3: el entrenador en el oído, ForgeBridge)
+          (ws.data as any).canForge = Array.isArray(data.caps) && data.caps.includes("forge_ops");
 
           if (data.type === 'auth_google' || data.type === 'auth_session') {
             // ─── SSO de Google: el SERVIDOR verifica la identidad; el perfil sale de la cuenta, no de lo que diga el cliente ───
@@ -946,7 +1040,12 @@ async function startServer() {
               };
               // El PC (J2): sin esto el modelo escribía comandos de Linux («ps aux», «rm /home/alex/Desktop/…») en un Windows
               const pc = (await getSystemContext('ikaros').catch(() => '')).split('\n').filter((l) => /^- (SO|Shell|Home|Escritorio|Documentos):/.test(l)).join('\n');
-              if (vozPrompt) queryEngines.set(`${profileKey}#voz`, new QueryEngine(provider, filteredRegistry, `${vozPrompt}${pc ? `\n\n### Su PC\n${pc}` : ''}\n\n### Perfil\n${profileText ?? ''}`, {
+              // Cómo le dice: el «Nombre o alias» del perfil (2026-11-17: «que sea lo de ahí»)
+              const tratoVoz = tratoDe(await memory.getProfile().catch(() => null));
+              const notaTrato = tratoVoz
+                ? `\n\n### Cómo le digo\nLe digo «${tratoVoz}» (lo eligió él en su perfil), de vez en cuando, como una asistente de confianza («Listo, ${tratoVoz}.», «Claro, ${tratoVoz}.»): al confirmar algo o al saludar, nunca en cada frase.`
+                : '';
+              if (vozPrompt) queryEngines.set(`${profileKey}#voz`, new QueryEngine(provider, filteredRegistry, `${vozPrompt}${notaTrato}${pc ? `\n\n### Su PC\n${pc}` : ''}\n\n### Perfil\n${profileText ?? ''}`, {
                 router: routerVoz,
                 // Sin herramientas para el turno, de verdad ninguna: el respaldo de salud + Finanzas llevaba el prompt a ~7.200 tokens,
                 // pasaba de 8192 y Ollama recargaba el modelo en cada turno (4 s cada vez; prueba J1)
@@ -1125,6 +1224,78 @@ async function startServer() {
               const r = await runServiceAction(req.service, req.action);
               void audit.record({ event: "admin", profileId, role: "ikaros", detail: `Servicios: ${req.action} ${SERVICE_LABEL[req.service]}${r.ok ? "" : " (no resultó)"}`, ok: r.ok, ip: remoteAddress });
               try { ws.send(JSON.stringify({ ...base, ok: r.ok, message: r.message, restartingServer: !!r.restartingServer, system: r.restartingServer ? undefined : await systemStatus(PORT).catch(() => null) })); } catch {}
+              return;
+            }
+            // ─── Hestia como JARVIS · L0: el panel de control de Hestia (estado del equipo, pausa, límites). Solo Ikaros ──────
+            if (data.type === "admin_hestia_estado" || data.type === "admin_hestia_pausa" || data.type === "admin_hestia_limites" || data.type === "admin_hestia_hablar" || data.type === "admin_hestia_importantes" || data.type === "admin_hestia_trabajo" || data.type === "admin_hestia_protocolo" || data.type === "admin_hestia_voz") {
+              // L6: «En la llamada, solo tu voz» (lo que dice otra voz no se toma)
+              if (data.type === "admin_hestia_voz" && typeof data.soloTuya === "boolean") {
+                await guardarVoz({ soloTuya: data.soloTuya });
+                void audit.record({ event: "admin", profileId, role: "ikaros", detail: `Hestia: solo tu voz en la llamada ${data.soloTuya ? "encendido" : "apagado"} (panel)`, ok: true, ip: remoteAddress });
+              }
+              // L5: activar, terminar o borrar un protocolo desde el panel (lo que pasó vuelve en «respuesta»)
+              let respuestaProtocolo: string | null = null;
+              if (data.type === "admin_hestia_protocolo" && typeof data.accion === "string") {
+                const nombre = String(data.nombre ?? "").slice(0, 40);
+                const trato = tratoDe(await memory.getProfile().catch(() => null));
+                const ctxP = { profileId, trato, por: "panel" as const, deps: depsProtocolo(ws, memory, profileId, { trato }) };
+                const e0 = await leerEstado();
+                if (data.accion === "activar") {
+                  const p = buscarProtocolo(nombre, listaProtocolos(e0));
+                  const min = Number(data.minutos);
+                  respuestaProtocolo = p ? (await activarProtocolo(p, ctxP, Number.isFinite(min) && min > 0 && min <= 600 ? Math.round(min) : null)).texto : "No encontré ese protocolo.";
+                } else if (data.accion === "terminar") respuestaProtocolo = (await terminarProtocolo(ctxP)).texto;
+                else if (data.accion === "borrar") {
+                  const t = await borrarPropio(nombre);
+                  respuestaProtocolo = t ? (PROTOCOLOS_BASE.some((b) => b.titulo === t) ? `Listo: ${t.toLowerCase()} vuelve a ser el de siempre.` : `Listo, borré ${t}.`) : "Ese no se puede borrar.";
+                }
+                void audit.record({ event: "admin", profileId, role: "ikaros", detail: `Hestia: protocolo ${data.accion} ${nombre} (panel)`.slice(0, 120), ok: true, ip: remoteAddress });
+              }
+              // L4: cancelar un trabajo de fondo desde el panel
+              if (data.type === "admin_hestia_trabajo" && typeof data.cancelar === "string") {
+                const xs = await cancelarTrabajos({ id: data.cancelar.slice(0, 40) });
+                if (xs.length) void audit.record({ event: "admin", profileId, role: "ikaros", detail: `Hestia: trabajo cancelado (${queEs(xs[0]).slice(0, 60)})`, ok: true, ip: remoteAddress });
+              }
+              // L2: de quién te avisa cuando te escriben (la lista entera, como queda en el panel)
+              if (data.type === "admin_hestia_importantes" && Array.isArray(data.importantes)) {
+                await guardarImportantes(data.importantes);
+                void audit.record({ event: "admin", profileId, role: "ikaros", detail: "Hestia: contactos importantes (panel)", ok: true, ip: remoteAddress });
+              }
+              if (data.type === "admin_hestia_hablar" && data.hablar && typeof data.hablar === "object") {
+                await guardarHablar(data.hablar);
+                void audit.record({ event: "admin", profileId, role: "ikaros", detail: "Hestia: qué puede decir en voz alta (panel)", ok: true, ip: remoteAddress });
+              }
+              if (data.type === "admin_hestia_pausa") {
+                const min = Number(data.minutos);
+                if (data.accion === "reanudar") await reanudar();
+                else await pausar("la pediste en el panel", "panel", Number.isFinite(min) && min > 0 && min <= 24 * 60 ? min : null);
+                void audit.record({ event: "admin", profileId, role: "ikaros", detail: `Hestia: ${data.accion === "reanudar" ? "reanudada" : `en pausa${Number.isFinite(min) && min > 0 ? ` por ${min} min` : ""}`} desde el panel`, ok: true, ip: remoteAddress });
+              }
+              if (data.type === "admin_hestia_limites" && data.limites && typeof data.limites === "object") {
+                await guardarLimites(data.limites);
+                void audit.record({ event: "admin", profileId, role: "ikaros", detail: "Hestia: límites del equipo cambiados en el panel", ok: true, ip: remoteAddress });
+              }
+              const est = await leerEstado();
+              const m = ultimaMedicion() && Date.now() - Date.parse(ultimaMedicion()!.t) < 90_000 ? ultimaMedicion()! : await medir().catch(() => null);
+              ws.send(JSON.stringify({
+                type: "admin_hestia_estado",
+                estado: { pausa: pausaVigente(est), limites: est.limites, fondoPausado: est.fondoPausado, sinArchivos: est.sinArchivos, iniciales: LIMITES_INICIALES,
+                  hablar: est.hablar, presencia: est.presencia, importantes: est.importantes, fondoQuieto: est.fondoQuieto,
+                  // L6: solo tu voz, y cómo fue la última llamada
+                  voz: { soloTuya: est.voz.soloTuya, ultima: est.voz.ultima ? { t: est.voz.ultima.t, cuenta: est.voz.ultima.cuenta, texto: resumenVoz(est.voz.ultima.cuenta) } : null } },
+                // L5: los protocolos (cada uno con sus pasos dichos) y el que está corriendo
+                protocolos: resumenProtocolos(est),
+                ...(respuestaProtocolo ? { respuesta: respuestaProtocolo } : {}),
+                // L1: lo último que mandó el teléfono y los avisos de las últimas horas (por dónde llegaron)
+                sensores: ALTAVOZ.sensores,
+                avisos: ALTAVOZ.registro.slice(-12),
+                // L4: los trabajos de fondo (sin los datos de la web: solo lo que se muestra)
+                trabajos: (await leerTrabajos()).slice(-15).map(({ datos: _d, resultado, ...t }) => ({ ...t, ...(resultado ? { corto: resultado.corto } : {}) })),
+                fondo: await presupuestoFondo().catch(() => null),
+                medicion: m,
+                procesos: await procesos().catch(() => []),
+                historial: historialResumido(10),
+              }));
               return;
             }
             // Ficha de un proyecto o nota (la misma del chat: «¿en qué está Lander?»)
@@ -1598,8 +1769,73 @@ async function startServer() {
             resolveTelefonoOp(ws, data);
             return;
           }
+          // Hestia como JARVIS · C4 (L1): los sensores del teléfono (audífonos, red de la casa, «no molestar», llamada). Solo Ikaros.
+          if (data.type === "hestia_sensor") {
+            if (!esIkaros(ws)) return;
+            memoriaIkaros = memory;
+            if (data.sensores?.apagado === true) { ALTAVOZ.apagar(); return; }
+            const wsS = ws;
+            void procesarSensores(data.sensores, {
+              altavoz: ALTAVOZ, ws: wsS,
+              perfil: () => memory.getProfile(),
+              sexo: async () => { const b: any = await memory.get("body_profile").catch(() => null); return b?.sex === "h" || b?.sex === "m" ? b.sex : null; },
+              agenda: async () => {
+                const toolCtx = { profileId, memory, role: (wsS.data as any).role, wsClient: wsS, glucoService: activeGlucoServices.get(profileId) || null, foodService: unifiedFood, axsMode: true, voz: true };
+                const ag = await toolRegistry.get("day_agenda")?.run({}, toolCtx).catch(() => null);
+                return ag && !ag.error ? String((ag.metadata as any)?.quickReply ?? ag.output ?? "") : null;
+              },
+              inmediatas: () => VaultIndex.build(new VaultService().getVaultPath()).then(immediateRoadmap),
+              remitentesDesde: async (desde) => {
+                if (!canTelefono(wsS)) return [];
+                const horas = Math.min(12, Math.max(1, Math.ceil((Date.now() - desde) / 3_600_000)));
+                const r = await requestTelefonoOp(wsS, { accion: "mensajes", horas }, 4000).catch(() => null);
+                const msgs = (r?.ok && Array.isArray(r.data?.mensajes) ? r.data.mensajes : []) as Array<{ de: string; chat: string; grupo: boolean; hora: number }>;
+                return msgs.filter((m) => typeof m.hora === "number" && m.hora >= desde)
+                  .map((m) => String(m.grupo ? `el grupo ${m.chat}` : m.de).replace(/\s+/g, " ").trim().slice(0, 30)).filter(Boolean);
+              },
+              equipo: async () => ojoEquipo(ultimaMedicion(), (await leerEstado()).limites),
+              saludoDia: { get: () => memory.get("voz_saludo_dia"), set: (d) => memory.set("voz_saludo_dia", d) },
+              // L5: al llegar, lo de fondo que dejaste quieto sigue, y los pasos de tu protocolo «casa» (si lo cambiaste)
+              alLlegar: () => alLlegarProtocolo({ profileId, por: "panel", deps: depsProtocolo(wsS, memory, profileId) }),
+            }).then((r) => { if (r?.eventos.length) console.log(`[Hestia] ${profileId}: ${r.eventos.join(", ")} → ${JSON.stringify(r.vias)}`); })
+              .catch((e) => console.warn("[Hestia] sensores:", e));
+            return;
+          }
+          // Hestia como JARVIS · L2: lo que pasa en el teléfono (Hestia Manos lo ve): una llamada que entra, un mensaje (solo de
+          // quién, nunca el texto) o un cargo del banco fuera de lo común (Finanzas). Solo Ikaros; es entrada externa (eventoDe).
+          if (data.type === "hestia_evento") {
+            if (!esIkaros(ws)) return;
+            memoriaIkaros = memory;
+            const ev = eventoDe(data.evento);
+            if (!ev) return;
+            void (async () => {
+              const trato = tratoDe(await memory.getProfile().catch(() => null));
+              if (ev.tipo === "llamada") {
+                registrarLlamada(ev);
+                if (ev.estado !== "sonando") return;
+                const via = await ALTAVOZ.avisar(avisoLlamada(ev, { trato }));
+                console.log(`[Hestia] ${profileId}: llamada entrante (${ev.app}) → ${via}`);
+                return;
+              }
+              if (ev.tipo === "mensaje") {
+                const imp = importanteDe(ev, (await leerEstado()).importantes);
+                if (imp) await ALTAVOZ.avisar(avisoMensaje(ev, imp, { trato }));
+                return;
+              }
+              // el cargo: la plata en voz alta solo con el teléfono desbloqueado (o en la llamada abierta desbloqueada o con tu voz)
+              const ll = ALTAVOZ.llamada();
+              const via = await ALTAVOZ.avisar(avisoCargo(ev, { trato, bloqueado: ALTAVOZ.sensores?.bloqueado !== false, bloqueadoLlamada: ll ? !!ll.bloqueado && !ll.tuVoz : undefined }));
+              console.log(`[Hestia] ${profileId}: cargo fuera de lo común → ${via}`);
+            })().catch((e) => console.warn("[Hestia] evento:", e));
+            return;
+          }
           if (data.type === "telefono_apps") {
             (ws.data as any).telefonoApps = Array.isArray(data.apps) ? data.apps.map((a: unknown) => String(a).slice(0, 60)).slice(0, 300) : [];
+            return;
+          }
+          // Hestia como JARVIS · L3: lo que hizo Forge en el teléfono (una serie anotada, el descanso…)
+          if (data.type === "forge_op_result") {
+            resolveForgeOp(ws, data);
             return;
           }
           if (data.type === "inventory_op_result") {
@@ -2292,6 +2528,8 @@ async function startServer() {
             ctxUso.tipo = "chat";
             const llamadasAntes = ctxUso.llamadas;
             if (userText.length > MAX_USER_MESSAGE_CHARS) userText = userText.slice(0, MAX_USER_MESSAGE_CHARS);
+            marcarActividad(); // L4: alguien usa el chat → lo de fondo suelta el modelo
+            if ((ws.data as any).role === "ikaros") memoriaIkaros = memory;
             const currentSessionId = (ws.data as any).sessionId;
             const history = sessions.get(currentSessionId) || [];
 
@@ -2342,7 +2580,30 @@ async function startServer() {
               ? llamadaReciente(await memory.get(CLAVE_LLAMADAS).catch(() => null), new Date())?.resumen ?? null : null;
             const resumenTurno = llamadaPrevia
               ? [ctx.summary, `La última llamada de voz con él (por si la menciona):\n${llamadaPrevia}`].filter(Boolean).join("\n\n") : ctx.summary;
-            try {
+            // Hestia como JARVIS · L0 (solo Hestia: Ikaros en Modo AXS): «estado de los sistemas», «pausa», «reanuda» por código,
+            // y en pausa no se usa el modelo (Eris sigue igual para todos)
+            if ((ws.data as any).role === "ikaros" && !erisMode) {
+              const trato = tratoDe(await memory.getProfile().catch(() => null));
+              // L5: los protocolos («protocolo foco», «crea un protocolo…», «termina el gimnasio»), por código
+              const prot = await comandoProtocolo(userText, { profileId, trato, por: "chat", deps: depsProtocolo(ws, memory, profileId, { trato }) })
+                .catch((e) => { console.warn("[Hestia] protocolo:", e); return null; });
+              const cmd = prot?.texto ?? await comandoHestia(userText, { trato, por: "chat", procesos: cpuPorProceso, alAgregar: () => despertarFondo() }).catch(() => null);
+              const p = cmd ? null : pausaVigente(await leerEstado());
+              // L1: la personalidad («¿estás ahí?», «gracias») y «mis constantes», por código (también en pausa: no usan el modelo)
+              const ultimaSuya = [...recentHistory].reverse().find((m: any) => m?.role === "assistant")?.content;
+              const pers = cmd ? null : esperaRespuesta(ultimaSuya) ? null : personalidad(userText, { trato });
+              const consts = cmd || pers || !pideConstantes(userText) ? null : armarConstantes(await datosConstantes(memory, { trato }).catch(() => null) ?? { trato, sueno: null, musculos: null, agua: null, proteina: null, plata: null, entrenosSemana: null }).detalle;
+              // («Abre la aplicación» sin decir cuál, desde el teléfono: se pregunta; 2026-11-17)
+              const cual = cmd || pers || consts || data.axs !== true || !abreSinDecirCual(userText) || temaTelefono(profileId) ? null : "¿Cuál aplicación te abro?";
+              const directa = cmd ?? pers?.texto ?? consts ?? cual ?? (p ? textoPausa(p, trato) : null);
+              if (directa) {
+                // (lo que trae títulos del calendario o una canción lo escribieron otros: en el historial va como dato)
+                const msgD = prot ? { ...createMessage("assistant", directa), trace: { tools: ["protocolo"], ...(prot.externo ? { externo: true } : {}) } } : createMessage("assistant", directa);
+                queryResult = { message: msgD, quick: true, modeUsed: requestedMode, modelUsed: "código", stopped: false } as any;
+                (ws.data as any).abortController = null;
+              }
+            }
+            if (!queryResult) try {
               queryResult = await engine.query(
                 userText,
                 recentHistory,
@@ -2387,6 +2648,8 @@ async function startServer() {
                   // La app manda si está en Modo AXS Executive: fuera de él, Eris no usa las herramientas de AXS
                   // (bóveda, briefing, reportes). Sin el dato (web, clientes viejos) todo sigue como antes.
                   axsMode: typeof data.axs === "boolean" ? data.axs : undefined,
+                  // Hestia desde el teléfono: sin nombrar el PC, todo es en el teléfono (su pedido, 2026-11-17)
+                  sinPC: (ws.data as any).role === "ikaros" && data.axs === true && !nombraPC(userText, [...recentHistory].reverse().find((m: any) => m?.role === "assistant")),
                 },
                 undefined,
                 ac.signal,
@@ -2497,6 +2760,14 @@ async function startServer() {
           // ─── Hestia por voz (J1, 2026-11-16): una llamada en tiempo real ───
           // El teléfono reconoce la voz (en el aparato) y manda el texto de cada turno; acá el motor de voz responde por tokens, se
           // corta en trozos y Piper los dice uno tras otro (VozSesion). Solo Hestia: rol ikaros en Modo AXS Executive.
+          // 2026-11-17: lo que pasa con el reconocimiento de voz del teléfono (en su Pixel la llamada no oía nada y daba «client»):
+          // al registro, para verlo sin el teléfono conectado. Solo Ikaros, corto.
+          if (data.type === "voz_diag") {
+            if ((ws.data as any).role !== "ikaros") return;
+            const { type: _t, ...d } = data as Record<string, unknown>;
+            console.log(`[Voz] diag ${profileId}: ${JSON.stringify(d).slice(0, 400)}`);
+            return;
+          }
           if (data.type === "voz_inicio" || data.type === "voz_turno" || data.type === "voz_cortar" || data.type === "voz_colgar" || data.type === "voz_desbloqueado") {
             const enviar = (m: Record<string, unknown>) => { try { ws.send(JSON.stringify(m)); } catch {} };
             type Pendiente = { id: string; clase: ClaseAprobacion; tool: string; dudas: number };
@@ -2530,6 +2801,7 @@ async function startServer() {
             }
             if (data.type === "voz_inicio") {
               if ((ws.data as any).role !== "ikaros" || data.axs !== true) { enviar({ type: "voz_error", mensaje: "La llamada de voz es solo con Hestia, en el Modo AXS Executive." }); return; }
+              memoriaIkaros = memory; // (L2: la agenda en voz también sirve en la llamada)
               const engine = queryEngines.get(`${profileId}:${pin || ''}#voz`);
               if (!engine) { enviar({ type: "voz_error", mensaje: "Tu sesión cambió. Reconecta y vuelve a llamar." }); return; }
               voz?.sesion.cortar();
@@ -2541,17 +2813,133 @@ async function startServer() {
                 // K3: abierta con el botón del asistente sobre la pantalla de bloqueo: solo lo seguro hasta que desbloquees (lo pedido
                 // queda en «pendiente» y sigue solo al desbloquear)
                 bloqueado: data.bloqueado === true, pendiente: null as string | null,
+                // El escáner por voz (services/voz/Escaner.ts): preguntó «¿qué desea escanear?» y espera la respuesta
+                escanerPregunta: false,
+                // cómo le dice: el «Nombre o alias» del perfil
+                trato: tratoDe(await memory.getProfile().catch(() => null)),
+                // K5: abierta diciendo «Hestia» y Hestia Manos reconoció TU voz (solo cuenta bloqueado; vale para esta llamada)
+                // L6: desde que la app manda cómo sonó cada frase, `tuVoz` es el de la ÚLTIMA frase (VozFrase.decidirFrase) y K5
+                // queda en `tuVozInicio` (vale cuando una frase no se pudo revisar)
+                tuVoz: data.bloqueado === true && data.tuVoz === true,
+                tuVozInicio: data.bloqueado === true && data.tuVoz === true,
+                vozEstado: nuevoEstadoVoz(data.bloqueado === true && data.tuVoz === true, Date.now()),
+                /** L6: esta frase se revisó y no sonó como tú (bloqueado: «no estoy segura de que seas tú») */
+                vozNoSegura: false,
                 cerrar: async () => {} };
               llamada.anterior = llamadaReciente(await memory.get(CLAVE_LLAMADAS).catch(() => null), new Date())?.resumen ?? null;
               llamada.cerrar = async () => {
                 if (llamada.cerrada) return;
                 llamada.cerrada = true;
+                (llamada as any).limpiarEntreno?.(); // L3: el descanso contado no sigue hablando después de colgar
                 const fin = new Date();
+                await guardarVozLlamada(llamada.vozEstado.cuenta, fin).catch(() => {}); // L6: para el panel
                 const resumen = resumenLlamada({ inicio: llamada.inicio, fin, history: llamada.history, eventos: llamada.eventos });
                 if (!resumen) return;
                 const previas = await memory.get(CLAVE_LLAMADAS).catch(() => null);
                 await memory.set(CLAVE_LLAMADAS, guardarLlamada(previas, { at: llamada.inicio.toISOString(), fin: fin.toISOString(), resumen }));
                 console.log(`[Voz] ${profileId}: llamada guardada (${llamada.history.filter((m: any) => m.role === "user").length} turnos)`);
+              };
+              // ─── L3: el entrenador en el oído (Forge en el teléfono, por código; vale con el teléfono bloqueado: solo anota tus series) ───
+              const entreno = { activo: false, fin: null as number | null, timers: [] as Array<ReturnType<typeof setTimeout>>, records: [] as string[], pregunta: null as null | "borrar" };
+              const limpiarDescanso = () => { for (const x of entreno.timers) clearTimeout(x); entreno.timers = []; entreno.fin = null; };
+              (llamada as any).limpiarEntreno = limpiarDescanso;
+              /** Lo dice en la llamada como un turno suyo (si está hablando de otra cosa, no se pisa: false) */
+              const decirEnLlamada = (t: string): boolean => {
+                if (llamada.cerrada || (ws.data as any).voz !== llamada || llamada.sesion.ocupada) return false;
+                llamada.history.push(createMessage("assistant", t));
+                void llamada.sesion.turno("", Date.now(), { respuesta: t });
+                return true;
+              };
+              /** El descanso contado: «Un minuto», «Treinta segundos» y, al final, «Vamos. Press de banca: serie 3 de 4…» */
+              const programarDescanso = (secs: number) => {
+                limpiarDescanso();
+                if (!secs || secs <= 0) return;
+                const inicio = Date.now();
+                entreno.fin = inicio + secs * 1000;
+                for (const h of hitosDescanso(secs)) entreno.timers.push(setTimeout(() => { decirEnLlamada(h.texto); }, h.en * 1000));
+                const alFinal = async (intento: number) => {
+                  if (llamada.cerrada) return;
+                  const r = await requestForgeOp(ws, { accion: "sesion" }).catch(() => null);
+                  entreno.fin = null;
+                  if (!r?.ok || r.data?.listo || !r.data?.sigue) return;
+                  // (si ya anotó otra serie mientras tanto, él va adelante: nada)
+                  if (r.data?.ultima?.at && r.data.ultima.at > inicio + 5000) return;
+                  if (!decirEnLlamada(`Vamos. ${textoSigue(r.data.sigue)}`) && intento < 3) entreno.timers.push(setTimeout(() => void alFinal(intento + 1), 2500));
+                };
+                entreno.timers.push(setTimeout(() => void alFinal(0), secs * 1000));
+              };
+              const atenderEntreno = async (pe: PedidoEntreno): Promise<{ content: string; quick: boolean }> => {
+                const q = (content: string) => ({ content, quick: true });
+                const op = async (o: ForgeOp) => (await requestForgeOp(ws, o).catch(() => null)) ?? { ok: false, msg: "Forge no respondió." } as any;
+                const fallo = (r: any) => q(r?.code === "sin_forge" ? "Todavía no tienes Forge en este teléfono." : r?.code === "timeout" ? "Forge no respondió a tiempo: anótala en la app." : r?.msg ?? "No pude con Forge: anótala en la app.");
+                llamada.eventos.push({ tipo: "herramienta", nombre: `forge_${pe.tipo}` });
+                const t = llamada.trato;
+                switch (pe.tipo) {
+                  case "empezar": { const r = await op({ accion: "sesion" }); if (!r.ok) return fallo(r); entreno.activo = true; return q(textoEmpezar(r.data, t)); }
+                  case "serie": {
+                    const r = await op({ accion: "serie", reps: pe.reps, kg: pe.kg, rir: pe.rir, neg: pe.neg, ejercicio: pe.ejercicio });
+                    if (!r.ok) return fallo(r);
+                    entreno.activo = true;
+                    if (r.data?.record) entreno.records.push(String(r.data.record));
+                    programarDescanso(r.data?.listo ? 0 : Number(r.data?.descanso?.secs) || 0);
+                    return q(textoSerie(r.data, t));
+                  }
+                  case "sigue": {
+                    const r = await op({ accion: "sesion" }); if (!r.ok) return fallo(r);
+                    const d = r.data;
+                    const sig = textoSigue(d.sigue);
+                    return q(d.listo ? "Ya hiciste todo el plan de hoy." : d.descanso && d.descanso.quedan >= 5 ? `Te quedan ${duracionVoz(d.descanso.quedan)} de descanso; después, ${sig.charAt(0).toLowerCase()}${sig.slice(1)}` : sig);
+                  }
+                  case "cuanto_falta": { const r = await op({ accion: "sesion" }); if (!r.ok) return fallo(r); return q(textoFalta(r.data)); }
+                  case "descanso_cortar": {
+                    await op({ accion: "descanso", que: "cortar" });
+                    limpiarDescanso();
+                    const s = await op({ accion: "sesion" });
+                    return q(s.ok && s.data?.sigue && !s.data?.listo ? `Vamos. ${textoSigue(s.data.sigue)}` : "Vamos.");
+                  }
+                  case "descanso_mas": case "descanso_menos": {
+                    const r = await op({ accion: "descanso", que: pe.tipo === "descanso_mas" ? "mas" : "menos", segundos: pe.segundos });
+                    if (!r.ok) return q(r.code === "sin_descanso" ? "No hay un descanso corriendo." : r.msg ?? "No pude.");
+                    programarDescanso(Number(r.data?.quedan) || 0);
+                    return q(`Listo: te quedan ${duracionVoz(Number(r.data?.quedan) || 0)}.`);
+                  }
+                  case "descanso_cuanto": {
+                    const r = await op({ accion: "descanso", que: "estado" });
+                    return q(r.ok && r.data?.descanso ? `Te quedan ${duracionVoz(r.data.descanso.quedan)}.` : "No hay un descanso corriendo.");
+                  }
+                  case "borrar": {
+                    const r = await op({ accion: "sesion" }); if (!r.ok) return fallo(r);
+                    const u = r.data?.ultima;
+                    if (!u) return q("Hoy no hay series anotadas.");
+                    entreno.pregunta = "borrar";
+                    return q(`¿Borro la última serie: ${u.nombre}, ${u.texto}?`);
+                  }
+                  case "terminar": {
+                    const r = await op({ accion: "terminar" });
+                    limpiarDescanso();
+                    if (!r.ok) return fallo(r);
+                    entreno.activo = false;
+                    const texto = textoTerminar(r.data, entreno.records, t);
+                    entreno.records = [];
+                    // L5: con el entreno termina el protocolo gimnasio (el «No molestar» fuera)
+                    if (protocoloVigente(await leerEstado())?.nombre === "gimnasio") {
+                      const fin = await terminarProtocolo({ profileId, por: "voz", deps: depsProtocolo(ws, memory, profileId) }).catch(() => null);
+                      if (fin) return q(`${texto} ${fin.texto}`);
+                    }
+                    return q(texto);
+                  }
+                }
+                return q("No entendí.");
+              };
+              /** L2: contestar o rechazar la llamada que suena (los botones de su notificación, en Hestia Manos). Contestar cuelga la
+               *  llamada con Hestia (el teléfono necesita el micrófono). */
+              const atenderLlamada = async (accion: "contestar" | "rechazar", decir: string) => {
+                const r = canTelefono(ws) ? await requestTelefonoOp(ws, { accion }, 5000).catch(() => null) : null;
+                llamada.eventos.push({ tipo: "herramienta", nombre: accion === "contestar" ? "contestar_llamada" : "rechazar_llamada" });
+                if (!r?.ok) return { content: r?.msg ? `No pude: ${r.msg}` : "No pude desde acá: hazlo en la pantalla.", quick: true };
+                registrarLlamada({ tipo: "llamada", estado: accion === "contestar" ? "en_curso" : "fin", de: null, conocido: false, app: "", spam: false, final4: null, clave: llamadaEntrante()?.clave ?? "", t: Date.now() });
+                if (accion === "contestar") enviar({ type: "voz_cuelga" });
+                return { content: decir, quick: true };
               };
               llamada.sesion = new VozSesion({
                 enviar,
@@ -2563,22 +2951,134 @@ async function startServer() {
                 generar: async (texto, onToken, signal) => {
                   const ahora = new Date();
                   // La hora y la fecha, por código y al instante (J2)
+                  // (el escáner: si preguntó «¿qué desea escanear?», esto es la respuesta o un cambio de tema, que la descarta)
+                  const esperaba = llamada.escanerPregunta;
+                  llamada.escanerPregunta = false;
+                  // L3: «¿Borro la última serie…?» → lo contesta el código
+                  if (entreno.pregunta === "borrar") {
+                    entreno.pregunta = null;
+                    const sn = respuestaSiNo(texto);
+                    if (sn === "si") {
+                      const r = (await requestForgeOp(ws, { accion: "borrar_ultima" }).catch(() => null)) as any;
+                      llamada.eventos.push({ tipo: "herramienta", nombre: "forge_borrar" });
+                      if (r?.ok) limpiarDescanso();
+                      return { content: r?.ok ? `Borrada: ${r.data?.borrada?.nombre}, ${r.data?.borrada?.texto}.` : r?.msg ?? "No pude borrarla: hazlo en Forge.", quick: true };
+                    }
+                    if (sn === "no") return { content: "Ok, la dejo.", quick: true };
+                  }
+                  // L3: el entrenador («vamos a entrenar», «hice 8 con 62,5», «¿qué sigue?», «ya estoy», «terminé»)
+                  const pe = canForge(ws) ? pideEntreno(texto, { activo: entreno.activo, descansando: !!entreno.fin && entreno.fin > Date.now() }) : null;
+                  if (pe) return await atenderEntreno(pe);
+                  // L2: lo que Hestia preguntó al avisarte en la llamada («Te llama Mamá. ¿Contesto?», «¿Lo reconoces?», «¿Te lo
+                  // leo?»): lo contesta el código. Si dices otra cosa, la pregunta se descarta y sigue lo de siempre.
+                  const pa = (llamada as any).preguntaAviso as PreguntaAviso | null | undefined;
+                  (llamada as any).preguntaAviso = null;
+                  const rp = pa && Date.now() - pa.t < 90_000 ? responderPregunta(texto, pa) : null;
+                  if (rp?.accion === "leer") texto = rp.texto; // («sí» = «lee los mensajes de Pedro», con sus reglas: desbloqueado)
+                  else if (rp) {
+                    if (rp.accion === "contestar" || rp.accion === "rechazar") return await atenderLlamada(rp.accion, rp.decir);
+                    if (rp.accion === "cargo" && pa?.tipo === "cargo") {
+                      enviar({ type: "hestia_cargo_resp", id: pa.id, txId: pa.txId ?? null, era: rp.era });
+                      llamada.eventos.push({ tipo: "herramienta", nombre: rp.era ? "cargo_reconocido" : "cargo_revisar" });
+                    }
+                    return { content: rp.decir, quick: true };
+                  }
+                  // L2: la llamada que está sonando: «contesta», «recházala» (o «cuelga»: con el teléfono sonando es esa), «¿quién
+                  // llama?». Vale bloqueado (contestar se puede en la pantalla de bloqueo igual)
+                  const cl = comandoLlamada(texto);
+                  const entrante = llamadaEntrante();
+                  if (cl && entrante) {
+                    if (cl === "quien") return { content: textoQuienLlama(entrante, llamada.trato), quick: true };
+                    return await atenderLlamada(cl, cl === "contestar" ? "Te la paso." : "Listo, la rechacé.");
+                  }
+                  if (cl === "contestar" || cl === "quien") return { content: "No está sonando ninguna llamada.", quick: true };
+                  // L5: los protocolos («protocolo gimnasio», «crea un protocolo…», «termina el foco»), por código. Bloqueado sin tu voz:
+                  // solo lo seguro (alarma, No molestar, música, el entrenador); crear o borrar, al desbloquear
+                  {
+                    const sinVoz = !!llamada.bloqueado && !llamada.tuVoz;
+                    const rp = await comandoProtocolo(texto, {
+                      profileId, trato: llamada.trato, por: "voz", bloqueado: sinVoz,
+                      deps: depsProtocolo(ws, memory, profileId, { trato: llamada.trato, bloqueado: sinVoz, entrenador: canForge(ws) ? async () => (await atenderEntreno({ tipo: "empezar" } as PedidoEntreno)).content : null }),
+                    }).catch((e) => { console.warn("[Hestia] protocolo:", e); return null; });
+                    if (rp) {
+                      llamada.eventos.push({ tipo: "herramienta", nombre: "protocolo" });
+                      llamada.herramientasTurno.push("protocolo");
+                      if (rp.externo) llamada.externoTurno = true;
+                      // (armado por código para decirse entero: el cierre del día no se corta con «te dejé el detalle en la pantalla»)
+                      return { content: rp.texto, quick: true, detalle: rp.texto };
+                    }
+                  }
+                  // «Abre la aplicación» sin decir cuál ni venir hablando de una: se pregunta (el modelo decía «la abro» sin abrir nada,
+                  // o abría explorer.exe en el PC)
+                  if (abreSinDecirCual(texto) && !temaTelefono(profileId)) return { content: "¿Cuál aplicación te abro?", quick: true };
                   const directa = respuestaDirecta(texto, ahora);
                   if (directa) return { content: directa, quick: true };
+                  // Hestia como JARVIS · L0: «estado de los sistemas», «pausa», «reanuda», por código (también en pausa). Con el
+                  // teléfono bloqueado, solo con tu voz reconocida (es del PC)
+                  if (!llamada.bloqueado || llamada.tuVoz) {
+                    const cmd = await comandoHestia(texto, { trato: llamada.trato, por: "voz", procesos: cpuPorProceso, alAgregar: () => despertarFondo() }).catch(() => null);
+                    if (cmd) return { content: cmd, quick: true };
+                  }
+                  // L1: la personalidad por código («¿estás ahí?» → «Para ti, siempre»; «eso es todo» → se despide y cuelga). Si lo
+                  // último suyo fue una pregunta, «gracias» puede ser la respuesta: eso lo ve el resto.
+                  const ultimaSuya = [...llamada.history].reverse().find((m: any) => m?.role === "assistant")?.content;
+                  const pers = esperaRespuesta(ultimaSuya) ? null : personalidad(texto, { trato: llamada.trato, enLlamada: true });
+                  if (pers) {
+                    if (pers.colgar) { llamada.eventos.push({ tipo: "herramienta", nombre: "colgar" }); enviar({ type: "voz_cuelga" }); }
+                    return { content: pers.texto, quick: true };
+                  }
+                  // L1: «Hestia, mis constantes» (bloqueado: solo con tu voz, y sin la plata)
+                  if ((!llamada.bloqueado || llamada.tuVoz) && pideConstantes(texto)) {
+                    const r = armarConstantes(await datosConstantes(memory, { trato: llamada.trato, sinPlata: llamada.bloqueado }));
+                    return { content: r.voz, quick: true, detalle: r.detalle };
+                  }
+                  // «Hestia, solo cuando te hable» / «escúchame siempre» (Dirigido.ts): la app filtra lo que no la nombra
+                  const modo = modoDirigido(texto);
+                  if (modo !== null) {
+                    enviar({ type: "voz_modo", dirigido: modo });
+                    return { content: respuestaModo(modo, llamada.trato), quick: true };
+                  }
+                  // El escáner por voz (2026-11-17): «escanea el código de barras» → «¿qué desea escanear?» → la app abre la cámara
+                  // que corresponde y cuelga. Bloqueado: primero desbloquear (la cámara de un módulo no se abre sobre el bloqueo).
+                  const pideEsc = esperaba ? null : pideEscanear(texto);
+                  const respEsc = esperaba ? respuestaEscaner(texto) : null;
+                  if (pideEsc || respEsc) {
+                    const que = respEsc ?? pideEsc?.que ?? null;
+                    if (llamada.bloqueado) {
+                      llamada.pendiente = que ? `escanea ${que === "gastos" ? "la boleta" : que === "inventario" ? "para el inventario" : "la comida"}` : texto;
+                      enviar({ type: "voz_desbloquear" });
+                      return { content: BLOQUEADO_PIDE, quick: true };
+                    }
+                    if (!que) { llamada.escanerPregunta = true; return { content: preguntaEscaner(llamada.trato), quick: true }; }
+                    enviar({ type: "voz_escaner", que });
+                    llamada.eventos.push({ tipo: "herramienta", nombre: `escaner_${que}` });
+                    return { content: abriendoEscaner(que), quick: true };
+                  }
                   // K3: con el teléfono bloqueado, solo lo seguro y por código (TelefonoParse.SEGURAS_BLOQUEADO: alarma, temporizador,
                   // linterna, volumen, música, batería). Lo demás espera: se le pide a la app que muestre el desbloqueo, y al
                   // desbloquear (voz_desbloqueado) lo pedido sigue solo.
-                  if (llamada.bloqueado && !permitidoBloqueado(texto)) {
+                  // K5: con TU voz reconocida, además tu día, anotar y preguntas (services/voz/Bloqueado.ts); lo que llega a
+                  // otros o a la plata, igual espera
+                  const nivel = llamada.bloqueado ? nivelBloqueado(texto, llamada.tuVoz) : null;
+                  if (nivel === "desbloquear") {
                     llamada.pendiente = texto;
                     enviar({ type: "voz_desbloquear" });
+                    // L6: con tu voz valdría, pero esta frase no sonó como tú: se dice eso (repetirlo suele bastar)
+                    if (llamada.vozNoSegura && nivelBloqueado(texto, true) !== "desbloquear") return { content: textoNoSegura(llamada.trato), quick: true };
                     return { content: BLOQUEADO_PIDE, quick: true };
                   }
+                  const conTuVoz = llamada.bloqueado && llamada.tuVoz;
+                  // (Hestia en pausa: el panel, la voz o el vigía; L0)
+                  const pausaH = pausaVigente(await leerEstado());
                   const dia = ahora.toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" });
                   const hora = ahora.toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit" });
                   // Plata (J2): la respuesta entera y revisada antes de decirla. Por tokens, la guardia de cifras de dinero quitaba
                   // lo inventado cuando ya se había dicho («te sobran $797.000», banco «voz»). Mientras, la muletilla.
                   // (y lo que sigue a una respuesta de plata: «¿y eso alcanza?»)
-                  const plata = PLATA_VOZ.test(texto) || llamada.plata;
+                  // (2026-11-17, su llamada real: «ya actualicé la alarma» se DIJO antes de que la guardia lo corrigiera, y después
+                  // sonó «no se guardó nada». Lo que pide guardar o cambiar algo, o responde a una pregunta suya, también entero)
+                  const ultimaPregunta = esperaRespuesta([...llamada.history].reverse().find((m: any) => m?.role === "assistant")?.content);
+                  const plata = PLATA_VOZ.test(texto) || llamada.plata || asksToSave(texto) || ultimaPregunta;
                   llamada.plata = false;
                   if (plata) llamada.sesion.herramienta();
                   const r = await engine.query(
@@ -2616,15 +3116,27 @@ async function startServer() {
                     // escrita «Ahora: …», el modelo la leía en voz alta al comienzo de cada respuesta (prueba J1)
                     `(Dato interno, no lo repitas: hoy es ${dia} y son las ${hora}, hora de Chile.)` +
                       // (J3: solo si habla de algo anterior: son ~300 tokens que se leen en cada pasada)
-                      (llamada.anterior && !llamada.bloqueado && mencionaAntes(texto) ? `\n(La llamada anterior, por si la menciona; no la repitas si no:\n${llamada.anterior})` : ""),
+                      (llamada.anterior && !llamada.bloqueado && mencionaAntes(texto) ? `\n(La llamada anterior, por si la menciona; no la repitas si no:\n${llamada.anterior})` : "") +
+                      (conTuVoz ? `\n${NOTA_TU_VOZ}` : ""),
                     "flash",
                     {
                       profileId, memory, role: (ws.data as any).role, wsClient: ws,
                       llm: { provider, model: THINKING_MODES.flash.model },
                       glucoService: activeGlucoServices.get(profileId) || null,
                       foodService: unifiedFood, axsMode: true, voz: true,
+                      // En la llamada, sin nombrar el PC, todo es en el teléfono (su pedido, 2026-11-17)
+                      sinPC: !nombraPC(texto, [...llamada.history].reverse().find((m: any) => m?.role === "assistant")),
                       // (y aunque lo dicho calce, sobre la pantalla de bloqueo nunca el modelo: solo el atajo del teléfono)
-                      ...(llamada.bloqueado ? { soloAtajos: { herramientas: ["telefono"], sinAtajo: BLOQUEADO_PIDE } } : {}),
+                      // K5: con tu voz, el modelo sí, pero solo con estas herramientas, sin las cifras de la plata y el teléfono
+                      // limitado (TelefonoTool: bloqueadoTuVoz)
+                      // Hestia en pausa (L0): solo los atajos del teléfono (alarma, linterna…), sin el modelo
+                      ...(pausaH
+                        ? { soloAtajos: { herramientas: ["telefono"], sinAtajo: textoPausa(pausaH, llamada.trato) } }
+                        : llamada.bloqueado
+                        ? (conTuVoz
+                          ? { soloHerramientas: HERRAMIENTAS_TU_VOZ, sinPlata: true, bloqueadoTuVoz: true }
+                          : { soloAtajos: { herramientas: ["telefono"], sinAtajo: BLOQUEADO_PIDE } })
+                        : {}),
                     },
                     texto,
                     signal,
@@ -2691,8 +3203,24 @@ async function startServer() {
             }
             // voz_turno
             if (!voz) { enviar({ type: "voz_error", mensaje: "La llamada no está iniciada." }); return; }
+            marcarActividad(); // L4
             const texto = String(pedidoBloqueado ?? data.texto ?? "").trim().slice(0, 1000);
             if (!texto) return;
+            // L6: ¿la dijiste tú? Hestia Manos revisó el audio de ESTA frase (la app lo manda en `voz`). Lo que dice otra voz no se
+            // toma («solo tu voz», en el panel) y nunca contesta una aprobación; bloqueado, «tu voz» se revisa en cada frase.
+            // (lo pendiente al desbloquear ya se revisó cuando lo dijiste)
+            const vz = voz as typeof voz & { tuVoz?: boolean; tuVozInicio?: boolean; vozNoSegura?: boolean; vozEstado?: ReturnType<typeof nuevoEstadoVoz> };
+            if (!pedidoBloqueado && vz.vozEstado) {
+              const v = vozDeTurno(data.voz);
+              const d = decidirFrase(v, vz.vozEstado, { soloTuya: (await leerEstado()).voz.soloTuya, tuVozInicio: !!vz.tuVozInicio, ahora: Date.now(), aprobando: !!voz.aprobacion });
+              vz.tuVoz = !!voz.bloqueado && d.tuVoz;
+              vz.vozNoSegura = d.revisada && !d.tuVoz;
+              if (!d.tomar) {
+                console.log(`[Voz] ${profileId}: otra voz (${v?.puntaje ?? "?"}), no la tomo`);
+                enviar({ type: "voz_ignorada", motivo: d.motivo ?? "otra_voz", texto });
+                return;
+              }
+            }
             // ¿Contesta la pregunta de una aprobación? (J2) Lo decide este código; el turno que espera sigue con la respuesta
             if (voz.aprobacion) {
               const a = voz.aprobacion;
@@ -2835,6 +3363,156 @@ async function startServer() {
   🧠 Modelos: ⚡ ${THINKING_MODES.flash.model} | 🧠 ${THINKING_MODES.deep.model}
   🔮 Modo default: ${DEFAULT_CONFIG.defaultMode}
   `);
+
+  // Hestia como JARVIS · L0: el vigía del equipo (cada 60 s, ~0,3 s). Sus avisos van solo a Ikaros (Puerta.ts), nunca a Eris.
+  // L1: pasan por el altavoz (con audífonos, te lo dice; si no, la notificación «Hestia · equipo» de siempre)
+  void iniciarVigia((a) => {
+    console.log(`[Vigía] ${a.nivel}: ${a.texto}`);
+    void ALTAVOZ.avisar({
+      clave: `equipo-${a.clave}-${a.nivel}`, tipo: "equipo", prioridad: a.nivel === "accion" ? "urgente" : a.nivel === "vuelve" ? "info" : "normal",
+      titulo: a.nivel === "vuelve" ? "Hestia · todo bien de nuevo" : a.nivel === "accion" ? "Hestia cuidó el equipo" : "Hestia · ojo con el PC", texto: a.texto,
+    }).catch(() => {
+      const msg = JSON.stringify({ type: "hestia_alerta", nivel: a.nivel, clave: a.clave, texto: a.texto, t: new Date().toISOString() });
+      for (const w of conexionesIkaros(activeClients)) { try { w.send(msg); } catch {} }
+    });
+  });
+
+  // Hestia como JARVIS · L2: la agenda en voz (una reunión en 15 minutos, la hora de tus remedios o suplementos). Cada minuto y
+  // solo si te podría hablar (audífonos puestos o la llamada abierta): si no, no gasta en nada. El calendario se le pide al
+  // teléfono cada 5 minutos (los próximos 45).
+  let calendario: { t: number; eventos: EventoCal[] } | null = null;
+  setInterval(() => {
+    void (async () => {
+      const mem = memoriaIkaros;
+      if (!mem || !ALTAVOZ.escuchando()) return;
+      const ahora = new Date();
+      const w = ALTAVOZ.wsTelefono;
+      if (w && canTelefono(w) && (!calendario || ahora.getTime() - calendario.t > 5 * 60_000)) {
+        const r = await requestTelefonoOp(w, { accion: "eventos", desde: ahora.getTime(), hasta: ahora.getTime() + 45 * 60_000 } as any, 4000).catch(() => null);
+        calendario = { t: ahora.getTime(), eventos: r?.ok && Array.isArray(r.data?.eventos) ? r.data.eventos : calendario?.eventos ?? [] };
+      }
+      const sups: any = await mem.get("supplements_state").catch(() => null);
+      const trato = tratoDe(await mem.getProfile().catch(() => null));
+      for (const a of avisosAgenda({ ahora, eventos: calendario?.eventos ?? [], sups: sups?.state ?? null, trato })) await ALTAVOZ.avisar(a, ahora);
+    })().catch((e) => console.warn("[Hestia] agenda:", e));
+  }, 60_000);
+
+  // ─── Hestia como JARVIS · L5: el protocolo con tiempo que terminó (el foco a los 50 minutos): fuera el «No molestar» (Hestia
+  // Manos ya lo quita sola; esto es por si no) y el aviso. Cada 30 s, sin el modelo. ───
+  setInterval(() => {
+    void (async () => {
+      const v = await protocoloVencido();
+      if (!v) return;
+      const w = ALTAVOZ.wsTelefono ?? conexionesIkaros(activeClients).find((x: any) => canTelefono(x)) ?? null;
+      const r = await terminarProtocolo({ profileId: "ikaros", por: "panel", deps: depsProtocolo(w, memoriaIkaros, "ikaros") }, null, "vencio");
+      console.log(`[Hestia] protocolo ${v.nombre}: terminó (${r.texto})`);
+      if (v.aviso) await ALTAVOZ.avisar({ clave: `protocolo-${v.nombre}-${v.desde}`, tipo: "protocolo", prioridad: v.nombre === "foco" ? "normal" : "info", repetirMin: 24 * 60,
+        titulo: v.nombre === "foco" ? "Terminó el foco" : `Terminó: ${v.titulo}`, texto: r.texto }).catch(() => null);
+    })().catch((e) => console.warn("[Hestia] protocolos:", e));
+  }, 30_000);
+
+  // ─── Hestia como JARVIS · L4: los trabajos de fondo (uno a la vez, cuando el PC está libre: Presupuesto.ts) ───
+  const depsFondo: DepsTrabajo = {
+    web: async (q) => {
+      const r = await toolRegistry.get("web_search")?.run({ query: q, maxResults: 6 }, {} as any).catch(() => null);
+      return fuentesDeBusqueda(String(r?.output ?? ""));
+    },
+    boveda: async (q, n) => {
+      const idx = await VaultIndex.build(new VaultService().getVaultPath());
+      return searchVault(idx, q, n).map((h) => `${h.note.path.split("/").pop()?.replace(/\.md$/, "")}: ${String(h.snippet).replace(/\s+/g, " ").slice(0, 300)}`);
+    },
+    modelo: async (sistema, usuario, signal) => (await provider.generate(
+      [{ role: "system", content: sistema }, { role: "user", content: usuario }], undefined,
+      { temperature: 0.3, maxTokens: 900, modelOverride: THINKING_MODES.flash.model, enableThinking: false, signal },
+    )).content || "",
+    puede: () => presupuestoFondo(),
+  };
+  let fondoCorriendo = false;
+  /** Entrega lo terminado en SU teléfono: el chat «Trabajos de Hestia» (con las fuentes) y el aviso. Sin su memoria abierta, espera. */
+  const entregarTrabajo = async (t: Trabajo): Promise<boolean> => {
+    const mem = memoriaIkaros;
+    if (!mem || !t.resultado) return false;
+    const r = t.resultado;
+    const titulo = t.tipo === "comparar" ? `Comparación: ${t.tema} con ${t.b}` : t.tipo === "resumen_boveda" ? `Resumen de la bóveda: ${t.tema}` : `Investigación: ${t.tema}`;
+    const cuerpo = `**${titulo}**\n\n${r.texto}` + (r.fuentes.length ? `\n\nFuentes:\n${r.fuentes.map((f, i) => `${i + 1}. [${f.titulo}](${f.url})`).join("\n")}` : "") +
+      (t.tipo === "resumen_boveda" ? "" : "\n\n_Si quieres dejarlo en la bóveda, dime «guárdalo en la bóveda»._");
+    const id = "hestia_trabajos";
+    let previos: any[] = [];
+    try { previos = mem.getConversation(id) ?? []; } catch {}
+    // (lo de la web lo escribieron otros: en el historial va como dato, nunca como órdenes)
+    const msg = { ...createMessage("assistant", cuerpo), trace: { tools: [t.tipo === "resumen_boveda" ? "knowledge_search" : "web_search"], ...(t.tipo === "resumen_boveda" ? {} : { externo: true }) } };
+    await mem.saveConversation(id, [...previos, msg].slice(-40), "hestia");
+    await mem.renameConversation(id, "Trabajos de Hestia").catch(() => {});
+    for (const w of conexionesIkaros(activeClients)) { try { w.send(JSON.stringify({ type: "conversations_updated", conversations: convList(mem, w), projects: mem.listProjects() })); } catch {} }
+    await ALTAVOZ.avisar({ clave: `trabajo-${t.id}`, tipo: "trabajo", prioridad: "info", titulo: "Hestia terminó", repetirMin: 24 * 60,
+      texto: `${t.tipo === "resumen_boveda" ? `Terminé el resumen de la bóveda sobre ${t.tema}` : `Terminé de ${queEs(t)}`}. ${r.corto} Te lo dejé en el chat «Trabajos de Hestia».` }).catch(() => null);
+    await actualizarTrabajo(t.id, { entregado: true });
+    console.log(`[Hestia] trabajo entregado: ${queEs(t).slice(0, 80)}`);
+    return true;
+  };
+  const correrFondo = async () => {
+    if (fondoCorriendo) return;
+    fondoCorriendo = true;
+    try {
+      // lo terminado que no alcanzó a llegar (el servidor se reinició, o él no se había conectado)
+      for (const t of (await leerTrabajos()).filter((x) => x.estado === "listo" && x.resultado && !x.entregado && !x.tipo.startsWith("vigia"))) await entregarTrabajo(t);
+      const t0 = siguiente(await leerTrabajos());
+      if (!t0) return;
+      let t: Trabajo = { ...t0, estado: "corriendo" };
+      await actualizarTrabajo(t.id, { estado: "corriendo" });
+      for (let i = 0; i < 8; i++) {
+        if ((await leerTrabajos()).find((x) => x.id === t.id)?.estado === "cancelado") return;
+        fondoAbort = new AbortController();
+        let a;
+        try { a = await avanzar(t, depsFondo, fondoAbort.signal); } catch (e) {
+          // alguien usó el chat a mitad del informe: vuelve a la cola sin contar el intento (lo hecho queda)
+          const suelto = fondoAbort.signal.aborted;
+          if (!suelto && t.intentos >= 2) { await actualizarTrabajo(t.id, { estado: "fallo", error: String((e as any)?.message ?? e).slice(0, 160) }); return; }
+          await actualizarTrabajo(t.id, { estado: "pendiente", paso: suelto ? "en pausa: alguien usó el chat" : "reintentando", ...(suelto ? {} : { intentos: t.intentos + 1 }) });
+          return;
+        }
+        if ((await leerTrabajos()).find((x) => x.id === t.id)?.estado === "cancelado") return;
+        if (a.tipo === "paso") { t = { ...t, ...a.patch }; await actualizarTrabajo(t.id, a.patch); continue; }
+        if (a.tipo === "espera") { await actualizarTrabajo(t.id, { estado: "pendiente", paso: `esperando: ${a.motivo}` }); return; }
+        if (a.tipo === "fallo") {
+          await actualizarTrabajo(t.id, { estado: "fallo", error: a.error, paso: "no pude" });
+          await ALTAVOZ.avisar({ clave: `trabajo-${t.id}`, tipo: "trabajo", prioridad: "info", titulo: "Hestia no pudo", texto: `No pude ${t.tipo === "resumen_boveda" ? `hacer el resumen de la bóveda sobre ${t.tema}` : queEs(t)}: ${a.error}.`, repetirMin: 24 * 60 }).catch(() => null);
+          return;
+        }
+        t = { ...t, ...a.patch, estado: "listo" };
+        await actualizarTrabajo(t.id, { ...a.patch, estado: "listo" });
+        await entregarTrabajo(t);
+        return;
+      }
+      await actualizarTrabajo(t.id, { estado: "pendiente" });
+    } finally { fondoCorriendo = false; fondoAbort = null; }
+  };
+  despertarFondo = () => { setTimeout(() => void correrFondo().catch((e) => console.warn("[Hestia] fondo:", e)), 1500); };
+  setInterval(() => void correrFondo().catch((e) => console.warn("[Hestia] fondo:", e)), 20_000);
+  // los vigías del PC (sin el modelo): cada 30 s, solo si hay alguno
+  setInterval(() => {
+    void (async () => {
+      const vigias = (await leerTrabajos()).filter((t) => t.estado === "pendiente" && t.tipo.startsWith("vigia"));
+      if (!vigias.length) return;
+      let cpu: Record<string, number> | null = null;
+      const deps = {
+        procesos: async () => (cpu ??= await cpuPorProceso()),
+        servicios: async () => (await systemStatus(PORT).catch(() => null))?.services ?? [],
+        existe: async (carpeta: string, nombre: string) => {
+          const q = nombre.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+          const fs = await readdir(join(os.homedir(), carpeta)).catch(() => [] as string[]);
+          return fs.find((f) => f.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().startsWith(q) && !/\.(crdownload|part|tmp)$/i.test(f)) ?? null;
+        },
+      };
+      for (const t of vigias) {
+        const r = await revisarVigia(t, deps).catch(() => null);
+        if (!r) continue;
+        if (r.tipo === "sigue") { if (r.patch) await actualizarTrabajo(t.id, r.patch); continue; }
+        await actualizarTrabajo(t.id, { estado: r.tipo === "listo" ? "listo" : "fallo", entregado: true, paso: r.texto.slice(0, 120), ...(r.tipo === "vencio" ? { error: "venció" } : {}) });
+        if (r.texto) await ALTAVOZ.avisar({ clave: `trabajo-${t.id}`, tipo: "trabajo", prioridad: r.tipo === "listo" && r.urgente ? "urgente" : "normal", titulo: r.tipo === "listo" ? "Hestia · PC" : "Hestia dejó de vigilar", texto: r.texto, repetirMin: 24 * 60 }).catch(() => null);
+      }
+    })().catch((e) => console.warn("[Hestia] vigías:", e));
+  }, 30_000);
 }
 
 function getContentType(filePath: string): string {

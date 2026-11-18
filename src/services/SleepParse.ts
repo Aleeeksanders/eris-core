@@ -66,7 +66,8 @@ const HORA_DICHA = new RegExp(`${ALA}${HORA}`, "g");
 const DORMIRSE = new RegExp(`\\b(?:me\\s+(?:habia\\s+)?dormi(?:do)?|me\\s+quede\\s+dormid[oa]|me\\s+acoste|me\\s+fui\\s+a\\s+(?:dormir|acostar)|dormi)\\s+(?:recien\\s+)?${ALA}${HORA}`);
 const DESPERTAR = new RegExp(`\\b(?:desperte|me\\s+desperte|me\\s+levante|abri\\s+los\\s+ojos)\\s+${ALA}${HORA}`);
 const RECIEN = /\b(?:recien\s+(?:desperte|me\s+desperte|me\s+levante)|(?:desperte|me\s+desperte|me\s+levante)\s+(?:recien|ahora|hace\s+poco)|acabo\s+de\s+(?:despertar|levantarme))\b/;
-const TRAMO_DICHO = /\b(dormi|he dormido|dormimos|alcance a dormir|pude dormir|me dormi|me quede dormid[oa]|siesta)\b/;
+// (2026-11-17: «volví a dormir de 6:30 a 7:30» no se entendía)
+const TRAMO_DICHO = /\b(dormi|he dormido|dormimos|alcance a dormir|pude dormir|me dormi|me quede dormid[oa]|siesta|(me )?volvi a (dormir|quedar(me)? dormid[oa]|acostar(me)?)|segui durmiendo)\b/;
 const SOLO_HORA = new RegExp(`^(?:${ALA})?${HORA}$`);
 
 /** "ocho" + "y cuarto" + ... → la hora dicha; `amb` si no dijo am ni pm y puede ser de día o de noche. */

@@ -18,7 +18,7 @@ const fold = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCa
 
 // ─── 1. "Lo guardé" sin haber guardado nada ──────────────────────────────────
 
-const SAVE_VERB = /\b(anota\w*|anotes|apunta\w*|registra\w*|registres|ingresa\w*|ingreses|guarda\w*|guardes|actualiza\w*|actualices|deja(lo|la|los|las)?|dejes|cambia\w*|cambies|borra\w*|borres|elimina\w*|elimines|quita\w*|quites|agrega\w*|agregues|anade|anadir|pon(lo|la|le|les)?|recuerda que|toma(lo|la)? como|corrige\w*)\b/;
+const SAVE_VERB = /\b(anota\w*|anotes|apunta\w*|registra\w*|registres|ingresa\w*|ingreses|guarda\w*|guardes|actualiza\w*|actualices|deja(lo|la|los|las)?|dejes|cambia\w*|cambies|borra\w*|borres|elimina\w*|elimines|quita\w*|quites|agrega\w*|agregues|anade|anadir|crea|creame|creala|crealo|crees|crear|pon(lo|la|le|les)?|recuerda que|toma(lo|la)? como|corrige\w*)\b/;
 
 /** ¿El usuario pidió guardar, cambiar o borrar algo? */
 export function asksToSave(userText: unknown): boolean {
@@ -27,7 +27,7 @@ export function asksToSave(userText: unknown): boolean {
   return SAVE_VERB.test(fold(userText));
 }
 
-const SAVED_CLAIM = /\b(actualice|lo actualice|he actualizado|quedo (actualizad|guardad|registrad|anotad|cambiad)\w*|ya (esta|quedo|estan|quedaron) (guardad|registrad|actualizad|anotad|cambiad)\w*|contexto actualizado|perfil actualizado|lo deje|la deje|he dejado|deje (anotad|registrad|guardad)\w*|guarde|lo guarde|he guardado|lo cambie|ya lo cambie|borre|lo borre|lo elimine|he eliminado|he borrado|lo quite|registrado permanentemente|guardado permanentemente)\b/;
+const SAVED_CLAIM = /\b(actualice|lo actualice|he actualizado|quedo (actualizad|guardad|registrad|anotad|cambiad)\w*|ya (esta|quedo|estan|quedaron) (guardad|registrad|actualizad|anotad|cambiad)\w*|contexto actualizado|perfil actualizado|lo deje|la deje|he dejado|deje (anotad|registrad|guardad)\w*|guarde|lo guarde|he guardado|lo cambie|ya lo cambie|borre|lo borre|lo elimine|he eliminado|he borrado|lo quite|registrado permanentemente|guardado permanentemente|(ya )?(esta|quedo|estan|quedaron) (en tu|en la|en el|en mi) (agenda|calendario)|(lo|la) (agende|programe)|ya (agende|programe)|actualice la alarma|cambie la alarma|puse la alarma|(alarma|evento|cita|reunion) (quedo|esta|ya esta) (puest|list|programad|cread|agendad|cambiad|actualizad)\w*|(ya )?(esta|quedo) (guardada |creada )?en (la|tu) boveda|nota (ya )?(esta|quedo) (cread|guardad|list)\w*)\b/;
 const OFFER = /\b(si quieres|quieres que|puedo|podria|te gustaria|dime si|avisame|cuando quieras|prefieres)\b/;
 
 const NEGATED = /\bno (alcance|quedo|quedaron|queda|se (guardo|registro|anoto|cambio)|lo (guarde|registre|anote|actualice|cambie)|pude|puedo|he (guardado|registrado|actualizado|anotado|cambiado)|tengo)\b/;

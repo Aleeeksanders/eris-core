@@ -5,6 +5,7 @@
 // ============================================================
 
 import { assessFood, formatRisks, type ItemRisk } from "../services/FoodSafetyCheck.js";
+import { parseTelefono } from "../services/TelefonoParse.js";
 import { deriveRestrictions } from "../services/DietaryRestrictions.js";
 import { resolveFood, correctFoodName, foodFit, cleanMyFoods, myFoodFor } from "../services/FoodResolve.js";
 import { armarPlato, esCompuesto, rolDe, leerRespuestaPlato, botonesPerfil, botonesCorreccion, AJUSTE_PLATO, TEXTO_PERFIL, type PerfilPlato, type AjustePlato } from "../services/PlatoChat.js";
@@ -313,6 +314,8 @@ export class NutritionTool extends Tool<NutritionInput> {
     if (w) return { ...w };
     const foodService: UnifiedFoodService | null = context?.foodService ?? null;
     if (!foodService) return null;
+    // Una orden del teléfono («pon pausa», «sube el volumen») no es comida: «pausa» se corregía a «pasas» (banco del teléfono, 2026-11-17)
+    if (parseTelefono(String(message ?? ""))) return null;
     // Respuesta a «¿En qué comida de ayer fue?» (botones Desayuno · Almuerzo · Once · Cena): se anota lo que pidió antes
     if (context?.memory && /en qu[eé] comida de (ayer|anteayer)/i.test(String(context?.lastAssistantMessage ?? ""))) {
       const pend: any = await context.memory.get("food_pending_day").catch(() => null);

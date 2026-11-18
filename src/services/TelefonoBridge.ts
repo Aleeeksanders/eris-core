@@ -10,11 +10,21 @@ export interface TelefonoOp {
     // K1
     | "mensajes" | "responder" | "contactos" | "llamar" | "sms" | "whatsapp" | "musica"
     // K2: al teléfono van «eventos» y «crear_evento»; «calendario» y «agendar» son de la herramienta (las resuelve el servidor)
-    | "eventos" | "crear_evento" | "calendario" | "agendar";
+    | "eventos" | "crear_evento" | "calendario" | "agendar"
+    // K4: manejar apps (accesibilidad). «revisar_toque» = qué se tocaría (para la aprobación), sin tocar
+    | "pantalla" | "revisar_toque" | "tocar" | "escribir" | "atras" | "inicio" | "desplazar"
+    // L2 (Hestia como JARVIS): la llamada que está sonando, con los botones de su notificación
+    | "contestar" | "rechazar"
+    // L5: el «No molestar» de Android (por un rato: Hestia Manos lo quita sola al terminar, aunque no alcance al PC)
+    | "no_molestar";
   nombre?: string; paquete?: string;
   hora?: number; minuto?: number; mensaje?: string;
+  /** alarma: dijo «cámbiala» (Android no deja tocar la que ya tenía: se pone otra y se le avisa) */
+  reemplaza?: boolean;
   segundos?: number;
   encender?: boolean;
+  /** no_molestar: por cuántos minutos (sin esto, hasta que se quite) */
+  minutos?: number;
   cambio?: "subir" | "bajar" | "silencio" | "maximo" | "nivel"; nivel?: number;
   destino?: string;
   // K1: a quién (como lo dijo), en qué app, el texto exacto, el número ya resuelto, la conversación
@@ -27,6 +37,10 @@ export interface TelefonoOp {
   desde?: number; hasta?: number;
   titulo?: string; inicio?: number; fin?: number; todoElDia?: boolean; lugar?: string;
   cuando?: string; duracionMin?: number;
+  // K4: el botón (como lo dijo, o el exacto que se aprobó), la app aprobada, el campo (qué decía, o dónde escribir), hacia dónde
+  etiqueta?: string; campo?: string; direccion?: "arriba" | "abajo";
+  /** whatsapp: con la accesibilidad, Hestia toca enviar (ya aprobado con el texto exacto) */
+  enviar?: boolean;
 }
 
 export interface TelefonoResult {

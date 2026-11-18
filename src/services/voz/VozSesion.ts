@@ -10,7 +10,9 @@ import { paraHablar } from "./Hablar.js";
 
 export interface VozDeps {
   /** El motor: genera la respuesta a `texto`, avisando cada token. `content` es la respuesta final completa. */
-  generar: (texto: string, onToken: (t: string) => void, signal: AbortSignal) => Promise<{ content: string; quick?: boolean; stopped?: boolean }>;
+  generar: (texto: string, onToken: (t: string) => void, signal: AbortSignal) => Promise<{ content: string; quick?: boolean; stopped?: boolean;
+    /** L1: armado por código con su propio detalle para la pantalla («mis constantes»): se dice tal cual y el detalle va aparte */
+    detalle?: string | null }>;
   /** Piper: el WAV de un texto ya normalizado */
   sintetizar: (texto: string, signal: AbortSignal) => Promise<Buffer>;
   enviar: (msg: Record<string, unknown>) => void;
@@ -187,12 +189,13 @@ export class VozSesion {
       const entera = quitadas === 0;
       let resto = lineas.join("\n").trim();
       let detalle = false;
-      if (directo?.detalle) {
+      const detallePropio = directo?.detalle ?? (r as { detalle?: string | null }).detalle ?? null;
+      if (detallePropio) {
         // armado por código: se dice tal cual (ya viene corto) y el detalle propio va a la pantalla
         for (const t of cortador.push(resto)) decir(t);
         resto = "";
         detalle = true;
-        this.deps.enviar({ type: "voz_detalle", turno: e.id, texto: directo.detalle });
+        this.deps.enviar({ type: "voz_detalle", turno: e.id, texto: detallePropio });
       }
       if (resto) {
         const palabras = resto.split(/\s+/).length;
@@ -206,7 +209,7 @@ export class VozSesion {
         for (const t of cortador.push(d ? `\n${resto}` : resto)) decir(t);
       }
       for (const t of cortador.flush()) decir(t);
-      if (detalle && !directo?.detalle) this.deps.enviar({ type: "voz_detalle", turno: e.id, texto: r.content });
+      if (detalle && !detallePropio) this.deps.enviar({ type: "voz_detalle", turno: e.id, texto: r.content });
       await e.cadena;
       if (!vigente()) return null;
       this.deps.enviar({ type: "voz_fin", turno: e.id, texto: r.content, detalle });

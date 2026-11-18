@@ -73,10 +73,12 @@ const UNIDAD_DICHA: Array<[RegExp, string, string]> = [
   [/^mg$/i, "miligramo", "miligramos"], [/^ml$|^cc$/i, "mililitro", "mililitros"], [/^l$|^lt$|^lts$/i, "litro", "litros"],
   [/^km$/i, "kilómetro", "kilómetros"], [/^m$/i, "metro", "metros"], [/^min$/i, "minuto", "minutos"], [/^h$|^hrs?$/i, "hora", "horas"],
   [/^%$/, "por ciento", "por ciento"], [/^°c$|^º c$|^°$/i, "grado", "grados"], [/^bpm$|^lpm$/i, "latido por minuto", "latidos por minuto"],
+  // (el estado de los sistemas, L0: «2,7 GB» se decía «dos, siete GB»)
+  [/^gb$/i, "giga", "gigas"], [/^mb$/i, "mega", "megas"], [/^w$/i, "watt", "watts"],
 ];
 /** Siglas y abreviaturas que Piper lee mal */
 const SIGLAS: Array<[RegExp, string]> = [
-  [/\bAXS\b/g, "a equis ese"], [/\bPC\b/g, "pe ce"], [/\bOK\b/gi, "okey"], [/\betc\.?/gi, "etcétera"], [/\baprox\.?/gi, "aproximadamente"],
+  [/\bAXS\b/g, "a equis ese"], [/\bPC\b/g, "pe ce"], [/\bCPU\b/g, "ce pe u"], [/\bRAM\b/g, "ram"], [/\bOK\b/gi, "okey"], [/\betc\.?/gi, "etcétera"], [/\baprox\.?/gi, "aproximadamente"],
   [/\bN[°º]\s?/g, "número "], [/\bUF\b/g, "u efe"], [/\bRIR\b/g, "erre i erre"], [/\bRPE\b/g, "erre pe e"], [/\bIVA\b/g, "iva"], [/\bHbA1c\b/gi, "hemoglobina glicosilada"], [/\bvs\.?\b/gi, "contra"],
 ];
 
@@ -91,6 +93,8 @@ export function paraHablar(texto: string): string {
   t = t.replace(/^\s*(?:[-*•·]|\d+[.)])\s+/gm, ""); // viñetas: cada una queda como su propia frase (ver abajo)
   t = t.replace(/\*\*|__|\*|_(?=\S)|(?<=\S)_/g, "");
   t = t.replace(/\p{Extended_Pictographic}|️|‍/gu, "");
+  // un modelo con letra y número junto («Galaxy S24», «Pixel 9a» no): la letra aparte, si no se leía «Sveinticuatro» (L4)
+  t = t.replace(/\b([A-ZÁÉÍÓÚÑ]{1,3})(\d{1,4})\b/g, "$1 $2");
   // tablas (J2): sin la fila de títulos ni la de guiones; cada fila, «Lunes, 2.100»
   {
     const ls = t.split("\n");
@@ -123,7 +127,7 @@ export function paraHablar(texto: string): string {
   t = t.replace(/\b(?:(a\s+)?(?:las|la)\s+)?([01]?\d|2[0-3]):([0-5]\d)(?:\s*(?:hrs?|horas)\b\.?)?/gi, (_, a: string | undefined, h: string, m: string) =>
     `${a ? "a " : ""}${horaEnPalabras(Number(h), Number(m))}`);
   // cifra + unidad: «2,8 L», «606 kcal», «15%», «120 g»
-  t = t.replace(/(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d+))?\s?(kcal|cal|kg|grs?|g|mg|ml|cc|lts?|l|km|min|hrs?|h|bpm|lpm|%|°c|º c|°)(?![a-záéíóúñ])/gi, (_, ent: string, dec: string | undefined, u: string) => {
+  t = t.replace(/(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d+))?\s?(kcal|cal|kg|gb|mb|grs?|g|mg|ml|cc|lts?|l|km|min|hrs?|h|bpm|lpm|%|°c|º c|°|w)(?![a-záéíóúñ])/gi, (_, ent: string, dec: string | undefined, u: string) => {
     const par = UNIDAD_DICHA.find(([re]) => re.test(u));
     const n = aNumero(dec ? `${ent},${dec}` : ent);
     const num = dec ? decimalEnPalabras(`${ent},${dec}`) : numeroEnPalabras(n, true);
@@ -141,10 +145,11 @@ export function paraHablar(texto: string): string {
   });
   // un rango que quede («entre 6-8», «2–3 vasos») → «6 a 8»
   t = t.replace(/(\d)\s?[-–]\s?(?=\d)/g, "$1 a ");
-  // cifra + palabra («201 calorías», «21 días», «1 vez»): concuerda con ella (femenino, «un»/«una»)
-  t = t.replace(/(\d{1,3}(?:\.\d{3})+|\d+)\s+([a-záéíóúñ]+)/gi, (todo, ent: string, w: string) => {
+  // cifra + palabra («201 calorías», «21 días», «1 vez»): concuerda con ella (femenino, «un»/«una»). Nunca desde la mitad de un
+  // decimal: en «4,2 litros» el «2» es la parte decimal (antes salía «cuatro, dos litros»; L1, 2026-11-17)
+  t = t.replace(/(?<![\d.,])(\d{1,3}(?:\.\d{3})+|\d+)\s+([a-záéíóúñ]+)/gi, (todo, ent: string, w: string) => {
     if (/^(de|del|y|o|a|en|con|por|para|que|al)$/i.test(w)) return todo;
-    const fem = /^(calor[ií]as?|horas?|veces|vez|semanas?|personas?|porciones?|tazas?|cucharadas?|series?|repeticiones?|unidades?|latas?|comidas?|botellas?|piezas?|rebanadas?|presas?|marraquetas?|hallullas?|empanadas?|naranjas?|manzanas?|cosas?|tareas?|reuniones?|noches?|cuotas?|lucas?)$/i.test(w);
+    const fem = /^(calor[ií]as?|horas?|veces|vez|semanas?|personas?|porci[oó]n(es)?|tazas?|cucharadas?|series?|repetici[oó]n(es)?|unidad(es)?|latas?|comidas?|botellas?|piezas?|rebanadas?|presas?|marraquetas?|hallullas?|empanadas?|naranjas?|manzanas?|cosas?|tareas?|reuni[oó]n(es)?|noches?|cuotas?|lucas?)$/i.test(w);
     const num = numeroEnPalabras(aNumero(ent), true);
     return `${fem ? femenino(num) : num} ${w}`;
   });

@@ -5,3 +5,14 @@ dist/
 build/
 *.log
 .DS_Store
+
+# Modelos y programas de la voz (pesan cientos de MB; se bajan aparte, ver el runbook «Levantar los Servicios de Eris»)
+whisper/models/
+whisper/ffmpeg/
+whisper/bin/
+whisper/*.zip
+piper/voices/
+# La base de envasados aprende lo que escaneas: nunca va al repositorio
+src/data/packaged_cl.json
+# Los planes de las presentaciones (contenido del pitch)
+scripts/presentaciones/planes/
